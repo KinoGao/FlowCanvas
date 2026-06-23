@@ -1,0 +1,12 @@
+.next/
+out/
+node_modules/
+.npm-cache/
+.env*
+!.env.example
+data/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea
+.claude/settings.local.json

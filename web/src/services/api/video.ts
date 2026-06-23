@@ -1,0 +1,603 @@
+import axios from "axios";
+
+import { dataUrlToFile } from "@/lib/image-utils";
+import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { imageToDataUrl } from "@/services/image-storage";
+import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
+import type { ReferenceImage } from "@/types/image";
+import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+
+type VideoResponse = { id: string; status?: string; error?: { message?: string } };
+type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
+type SeedanceTask = {
+    id: string;
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
+    error?: { code?: string; message?: string } | null;
+    content?: { video_url?: string; last_frame_url?: string } | null;
+};
+type AgnesTask = {
+    id?: string;
+    task_id?: string;
+    video_id?: string;
+    object?: string;
+    status?: "queued" | "in_progress" | "completed" | "failed" | string;
+    progress?: number;
+    seconds?: string | number;
+    size?: string;
+    remixed_from_video_id?: string | null;
+    video_url?: string | null;
+    url?: string | null;
+    error?: { message?: string; code?: string | number } | null;
+    message?: string;
+};
+type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
+type RequestOptions = { signal?: AbortSignal };
+
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
+export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
+
+function aiApiUrl(config: AiConfig, path: string) {
+    return buildApiUrl(config.baseUrl, path, config.useProxy);
+}
+
+function aiHeaders(config: AiConfig, contentType?: string) {
+    return {
+        Authorization: `Bearer ${config.apiKey}`,
+        ...(contentType ? { "Content-Type": contentType } : {}),
+    };
+}
+
+export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
+    const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
+    const delayMs = task.provider === "seedance" ? 5000 : task.provider === "agnes" ? 5000 : 2500;
+    // 视频生成可能耗时较长（特别是 Agnes 高峰期排队），轮询总时长拉到 30 分钟
+    // 120 * 5s = 10 分钟 → 360 * 5s = 30 分钟
+    const maxAttempts = 360;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const state = await pollVideoGenerationTask(config, task, options);
+        if (state.status === "completed") return state.result;
+        if (state.status === "failed") throw new Error(state.error);
+        if (attempt === maxAttempts - 1) throw new Error(`${task.provider === "seedance" ? "Seedance " : task.provider === "agnes" ? "Agnes " : ""}视频生成超过 30 分钟仍未完成，任务可能仍在后端排队，请稍后重试`);
+        await delay(delayMs, options?.signal);
+    }
+    throw new Error("视频生成超时，请稍后重试");
+}
+
+export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const selectedModel = (config.model || config.videoModel).trim();
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
+    assertVideoConfig(requestConfig, requestConfig.model);
+    if (isSeedanceVideoConfig(requestConfig)) {
+        return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    }
+    if (isAgnesVideoConfig(requestConfig)) {
+        if (videoReferences.length || audioReferences.length) {
+            throw new Error("Agnes 视频接口暂不支持参考视频或参考音频，请移除相关素材");
+        }
+        return createAgnesVideoTask(requestConfig, selectedModel, prompt, references, options);
+    }
+    if (videoReferences.length || audioReferences.length) {
+        throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考素材");
+    }
+    return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
+}
+
+export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    const requestConfig = resolveModelRequestConfig(config, task.model);
+    assertVideoConfig(requestConfig, requestConfig.model);
+    if (task.provider === "seedance") return pollSeedanceTask(requestConfig, task, options);
+    if (task.provider === "agnes") return pollAgnesVideoTask(requestConfig, task, options);
+    return pollOpenAIVideoTask(requestConfig, task, options);
+}
+
+export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
+    if (result.blob) return uploadMediaFile(result.blob, "video");
+    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+    throw new Error("视频接口没有返回可播放的视频");
+}
+
+async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const body = new FormData();
+    body.append("model", modelOptionName(model));
+    body.append("prompt", prompt);
+    body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
+    if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
+    body.append("resolution_name", normalizeVideoResolution(config.vquality));
+    body.append("preset", "normal");
+    const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+    files.forEach((file) => body.append("input_reference[]", file));
+    try {
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
+        if (!created.id) throw new Error("视频接口没有返回任务 ID");
+        return { id: created.id, provider: "openai", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "视频任务创建失败"));
+    }
+}
+
+async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        if (video.status === "completed") {
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+            await assertVideoBlob(content.data);
+            return { status: "completed", result: { blob: content.data } };
+        }
+        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: video.error?.message || "视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "视频任务查询失败"));
+    }
+}
+
+async function createSeedanceTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    if (audioReferences.length && !references.length && !videoReferences.length) {
+        throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
+    }
+    assertSeedanceVideoReferences(videoReferences);
+    assertSeedanceAudioReferences(audioReferences);
+    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
+    if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
+    const payload = {
+        model: modelOptionName(model),
+        content,
+        ratio: normalizeSeedanceRatio(config.size),
+        resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)),
+        duration: normalizeSeedanceDuration(config.videoSeconds),
+        generate_audio: boolConfig(config.videoGenerateAudio, true),
+        watermark: boolConfig(config.videoWatermark, false),
+    };
+
+    try {
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
+        return { id: created.id, provider: "seedance", model };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Seedance 任务创建失败"));
+    }
+}
+
+async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal })).data);
+        if (state.status === "succeeded") {
+            const url = state.content?.video_url;
+            if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
+            return { status: "completed", result: await videoResultFromUrl(rewriteThroughProxy(url, config.useProxy), options) };
+        }
+        if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
+        return { status: "pending" };
+    } catch (error) {
+        throw new Error(readAxiosError(error, "Seedance 任务查询失败"));
+    }
+}
+
+function assertSeedanceVideoReferences(videoReferences: ReferenceVideo[]) {
+    const error = seedanceVideoReferenceError(videoReferences);
+    if (error) throw new Error(error);
+    let total = 0;
+    for (const video of videoReferences) {
+        if (!video.durationMs) continue;
+        if (video.durationMs < 2000 || video.durationMs > 15000) throw new Error("Seedance 参考视频单个时长需要在 2-15 秒之间");
+        total += video.durationMs;
+    }
+    if (total > 15000) throw new Error("Seedance 参考视频总时长不能超过 15 秒");
+}
+
+function assertSeedanceAudioReferences(audioReferences: ReferenceAudio[]) {
+    let total = 0;
+    for (const audio of audioReferences) {
+        if (!audio.durationMs) continue;
+        if (audio.durationMs < 2000 || audio.durationMs > 15000) throw new Error("Seedance 参考音频单个时长需要在 2-15 秒之间");
+        total += audio.durationMs;
+    }
+    if (total > 15000) throw new Error("Seedance 参考音频总时长不能超过 15 秒");
+}
+
+function seedanceApiUrl(config: AiConfig, taskId?: string) {
+    return buildApiUrl(config.baseUrl, `/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`, config.useProxy);
+}
+
+// ===== Agnes 视频 V2.0 实现 =====
+// 官方文档：POST /v1/videos 使用 application/json，图片参考只接受公网 URL；
+// 轮询 GET /agnesapi?video_id=...&model_name=...，视频下载 URL 在响应根字段 `remixed_from_video_id`。
+function agnesVideoCreateUrl(config: AiConfig) {
+    return buildApiUrl(config.baseUrl, "/videos", config.useProxy);
+}
+
+function agnesVideoPollUrl(config: AiConfig, task: VideoGenerationTask) {
+    const params = new URLSearchParams();
+    params.set("video_id", task.id);
+    if (task.model) params.set("model_name", task.model);
+    // 轮询端点是 /agnesapi（不在 /v1 命名空间下），而创建端点 /v1/videos 在 /v1 下。
+    // 这里不能走 buildApiUrl，否则 baseUrl 不带 /v1 时会被自动补成 /v1/agnesapi。
+    return rewriteThroughProxy(`${agnesPollBaseUrl(config.baseUrl)}/agnesapi?${params.toString()}`, config.useProxy);
+}
+
+function agnesPollBaseUrl(baseUrl: string) {
+    const normalized = baseUrl.trim().replace(/\/+$/, "");
+    try {
+        const url = new URL(normalized);
+        const path = url.pathname.replace(/\/+$/, "").replace(/\/v1$/i, "");
+        url.pathname = path || "/";
+        url.search = "";
+        url.hash = "";
+        return url.toString().replace(/\/+$/, "");
+    } catch {
+        return normalized.replace(/\/v1$/i, "");
+    }
+}
+
+// Agnes 要求 num_frames 满足 8n + 1 规则且 ≤ 441（参见官方文档）。
+function agnesFrameCountForSeconds(seconds: number, frameRate = 24) {
+    const fps = Math.max(1, Math.min(60, Math.floor(frameRate)));
+    const target = Math.max(1, Math.floor(seconds * fps));
+    const safe = Math.min(441, target);
+    const n = Math.max(1, Math.floor((safe - 1) / 8));
+    return n * 8 + 1;
+}
+
+function agnesVideoSize(value: string, resolution: string) {
+    const text = String(value || "").trim();
+    if (!text || text === "auto" || text === "adaptive") return { width: 1152, height: 768 };
+    const dimensions = parseVideoDimensions(text);
+    if (dimensions) return agnesResolutionForSize(dimensions, resolution);
+    const ratio = parseVideoRatio(text);
+    return ratio ? agnesResolutionForSize(ratio, resolution) : { width: 1152, height: 768 };
+}
+
+function agnesResolutionForSize(size: { width: number; height: number }, defaultResolution: string) {
+    let baseHeight = 720;
+    if (defaultResolution === "480p") baseHeight = 480;
+    else if (defaultResolution === "1080p") baseHeight = 1080;
+    const ratio = size.height === 0 ? 16 / 9 : size.width / size.height;
+    let width: number;
+    let height: number;
+    if (size.width >= size.height) {
+        height = baseHeight;
+        width = Math.round((baseHeight * ratio) / 16) * 16;
+    } else {
+        width = baseHeight;
+        height = Math.round((baseHeight / ratio) / 16) * 16;
+    }
+    const longSide = Math.max(size.width, size.height);
+    if (longSide >= 1900) {
+        height = Math.max(height, 1080);
+        width = Math.round((height * ratio) / 16) * 16;
+    }
+    return { width, height };
+}
+
+function parseVideoDimensions(value: string) {
+    const match = value.match(/^(\d+)\s*x\s*(\d+)$/i);
+    if (!match) return null;
+    return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+function parseVideoRatio(value: string) {
+    const match = value.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function agnesReferenceImageUrl(image: ReferenceImage) {
+    const directUrl = image.url || image.dataUrl;
+    if (isPublicMediaUrl(directUrl)) return directUrl;
+    return "";
+}
+
+async function createAgnesVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    // Agnes 官方文档要求 image 是公网可访问 URL；本地 blob/data URL 先上传临时图床，不再直传 base64。
+    const initialUrls = references.map((image) => agnesReferenceImageUrl(image));
+    if (references.length && initialUrls.some((url) => !url)) {
+        return agnesRetryWithPublicHost(config, model, prompt, references, "本地参考图需要先转成公网 URL，已跳过 base64 直传", options);
+    }
+    try {
+        return await sendAgnesCreateRequest(config, model, prompt, initialUrls, options);
+    } catch (error) {
+        // 非图片错误 或 没有可重试的参考图 → 直接抛出
+        if (!isAgnesImageUrlError(error) || !references.length) {
+            throw new Error(readAxiosError(error, "Agnes 视频任务创建失败"));
+        }
+        const imageError = readAxiosError(error, "Agnes 视频任务创建失败");
+        return agnesRetryWithPublicHost(config, model, prompt, references, imageError, options);
+    }
+}
+
+// 第一次失败后，按 temp.sh → litterbox 顺序尝试上传到公网图床，全部失败抛出聚合错误
+async function agnesRetryWithPublicHost(
+    config: AiConfig,
+    model: string,
+    prompt: string,
+    references: ReferenceImage[],
+    imageError: string,
+    options?: RequestOptions,
+): Promise<VideoGenerationTask> {
+    const errors: string[] = [`[本地图片准备] ${imageError}`];
+
+    for (const [index, source] of (["temp.sh", "litterbox"] as const).entries()) {
+        const methodIndex = index + 1;
+        let publicUrls: string[] = [];
+        try {
+            publicUrls = await uploadReferencesToPublicHost(references, source, options?.signal);
+        } catch (uploadError) {
+            const message = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            errors.push(`[方法${methodIndex}: ${source} 临时图床] 上传失败：${message}`);
+            continue;
+        }
+        try {
+            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, options);
+        } catch (agnesError) {
+            const agnesMessage = readAxiosError(agnesError, "Agnes 视频任务创建失败");
+            errors.push(`[方法${methodIndex}: ${source} 公网 URL] Agnes 返回：${agnesMessage}`);
+            if (!isAgnesImageUrlError(agnesError)) {
+                // 非图片错误（鉴权/余额/参数等），不再重试
+                throw new Error(`无法生成视频。${errors.join(" ")}`);
+            }
+        }
+    }
+
+    throw new Error(
+        `无法生成视频。已依次尝试 temp.sh、litterbox 两个公网 URL 方案，Agnes 都无法消费这些图片 URL，请手动提供公网图片 URL 后重试。详细：${errors.join(" ")}`,
+    );
+}
+
+async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: string, urls: string[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    const seconds = Math.max(1, Math.min(20, Math.floor(Number(config.videoSeconds) || 6)));
+    const { width, height } = agnesVideoSize(config.size, normalizeVideoResolution(config.vquality));
+    const body: Record<string, unknown> = {
+        model: modelOptionName(model),
+        prompt,
+        width,
+        height,
+        num_frames: agnesFrameCountForSeconds(seconds),
+        frame_rate: 24,
+    };
+    if (urls.length === 1) body.image = urls[0];
+    else if (urls.length > 1) body.image = urls;
+
+    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data;
+    if (created.error?.message) throw new Error(created.error.message);
+    const taskId = created.video_id || created.task_id || created.id;
+    if (!taskId) throw new Error("Agnes 视频接口没有返回任务 ID");
+    return { id: taskId, provider: "agnes", model: modelOptionName(model) };
+}
+
+async function uploadReferencesToPublicHost(references: ReferenceImage[], source: "temp.sh" | "litterbox", signal?: AbortSignal): Promise<string[]> {
+    return Promise.all(references.map((image) => uploadImageToHost(image, source, signal)));
+}
+
+async function uploadImageToHost(image: ReferenceImage, source: "temp.sh" | "litterbox", signal?: AbortSignal): Promise<string> {
+    const dataUrl = await imageToDataUrl(image);
+    if (!dataUrl) throw new Error("读取本地参考图失败");
+    const blob = await (await fetch(dataUrl)).blob();
+    const form = new FormData();
+    form.append("file", blob, image.name || "reference.png");
+    const { data } = await axios.post<{ url?: string; source?: string; error?: string }>(`/api/upload-public?source=${source}`, form, { signal });
+    if (!data?.url) throw new Error(data?.error || "临时图床未返回公网 URL");
+    return data.url;
+}
+
+// Agnes 的图片格式错误通常返回 400/422/415，且响应文本里包含 image / url / 图片 / invalid 之一；
+// 鉴权/余额等错误走其它状态码或不含这些关键字，避免被误判为图片问题触发无效重试
+const AGNES_IMAGE_ERROR_KEYWORDS = [
+    "image url",
+    "image_url",
+    "imageurl",
+    "图片",
+    "图片url",
+    "图片格式",
+    "图片无效",
+    "图片错误",
+    "图片地址",
+    "invalid image",
+    "invalid url",
+    "incorrect padding",
+    "image format",
+    "image invalid",
+    "image must be",
+];
+
+function isAgnesImageUrlError(error: unknown): boolean {
+    if (!axios.isAxiosError(error)) return false;
+    const status = error.response?.status;
+    if (status && status !== 400 && status !== 422 && status !== 415 && status !== 500) return false;
+    const responseData = error.response?.data;
+    let text = "";
+    if (typeof responseData === "string") text = responseData;
+    else if (responseData && typeof responseData === "object") text = JSON.stringify(responseData);
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    return AGNES_IMAGE_ERROR_KEYWORDS.some((keyword) => lower.includes(keyword.toLowerCase()));
+}
+
+async function pollAgnesVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    try {
+        const taskResp = (await axios.get<AgnesTask>(agnesVideoPollUrl(config, task), { headers: aiHeaders(config), signal: options?.signal })).data;
+        if (taskResp.error?.message) return { status: "failed", error: taskResp.error.message };
+        if (taskResp.status === "completed") {
+            const videoUrl = taskResp.remixed_from_video_id || taskResp.video_url || taskResp.url;
+            if (!videoUrl) return { status: "failed", error: "Agnes 任务完成但没有返回视频 URL" };
+            return { status: "completed", result: await videoResultFromUrl(rewriteThroughProxy(videoUrl, config.useProxy), options) };
+        }
+        if (taskResp.status === "failed") return { status: "failed", error: taskResp.error?.message || "Agnes 视频生成失败" };
+        return { status: "pending" };
+    } catch (error) {
+        // 5xx / 429 是 Agnes 服务端瞬时问题（litellm busy 等），任务可能仍在后端排队；
+        // 当作 pending 让外层循环继续轮询，不浪费已经创建的 task_id
+        if (axios.isAxiosError(error)) {
+            const status = error.response?.status;
+            if (status && status >= 500) {
+                return { status: "pending" };
+            }
+            if (status === 429) {
+                return { status: "pending" };
+            }
+        }
+        throw new Error(readAxiosError(error, "Agnes 任务查询失败"));
+    }
+}
+
+async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+    const content: Array<Record<string, unknown>> = [];
+    const text = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
+    if (text) content.push({ type: "text", text });
+    for (const image of references.slice(0, SEEDANCE_REFERENCE_LIMITS.images)) {
+        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
+    }
+    for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
+        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
+    }
+    for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
+        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
+    }
+    return content;
+}
+
+async function resolveSeedanceImageUrl(config: AiConfig, image: ReferenceImage) {
+    const directUrl = image.url || image.dataUrl;
+    if (isPublicMediaUrl(directUrl) || directUrl.startsWith("asset://")) return directUrl;
+    const dataUrl = await imageToDataUrl(image);
+    if (!dataUrl) throw new Error("参考图读取失败，请换一张图片或重新上传");
+    return dataUrl;
+}
+
+async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
+    if (isPublicMediaUrl(video.url) || video.url.startsWith("asset://")) return video.url;
+    let blob: Blob | null = null;
+    if (video.storageKey) blob = await getMediaBlob(video.storageKey);
+    if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
+    if (!blob) throw new Error("参考视频必须是公网 URL、素材 ID，或本地已保存的视频");
+    return blobToDataUrl(blob);
+}
+
+async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
+    if (isPublicMediaUrl(audio.url) || audio.url.startsWith("asset://")) return audio.url;
+    let blob: Blob | null = null;
+    if (audio.storageKey) blob = await getMediaBlob(audio.storageKey);
+    if (!blob && audio.url?.startsWith("blob:")) blob = await (await fetch(audio.url)).blob();
+    if (!blob) throw new Error("参考音频必须是公网 URL、素材 ID，或本地已保存的音频");
+    return blobToDataUrl(blob);
+}
+
+async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
+    try {
+        const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
+        await assertVideoBlob(response.data);
+        return { blob: response.data };
+    } catch (error) {
+        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        return { url, mimeType: "video/mp4" };
+    }
+}
+
+function assertVideoConfig(config: AiConfig, model: string) {
+    if (!model) throw new Error("请先配置视频模型");
+    if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
+    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持视频生成，请使用 OpenAI 格式渠道");
+}
+
+function normalizeVideoSeconds(value: string) {
+    const seconds = Math.floor(Number(value) || 6);
+    return String(Math.max(1, Math.min(20, seconds)));
+}
+
+function normalizeVideoSize(value: string) {
+    if (value === "auto") return null;
+    const size = value || "1280x720";
+    if (/^\d+x\d+$/.test(size)) return size;
+    return ["9:16", "2:3", "3:4"].includes(size) ? "720x1280" : "1280x720";
+}
+
+function normalizeVideoResolution(value: string) {
+    if (value === "low") return "480p";
+    if (value === "auto" || value === "high" || value === "medium") return "720p";
+    const resolution = value.replace(/p$/i, "") || "720";
+    return `${resolution}p`;
+}
+
+function unwrapVideoResponse(payload: ApiVideoResponse) {
+    return unwrapEnvelope(payload, "接口没有返回视频任务");
+}
+
+function unwrapSeedanceTask(payload: ApiEnvelope<SeedanceTask>) {
+    return unwrapEnvelope(payload, "Seedance 接口没有返回任务");
+}
+
+function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
+    if (!payload) throw new Error(emptyMessage);
+    if (typeof payload === "object" && "code" in payload && typeof payload.code === "number") {
+        if (payload.code !== 0) throw new Error(payload.msg || "请求失败");
+        if (!payload.data) throw new Error(emptyMessage);
+        return payload.data;
+    }
+    return payload as T;
+}
+
+function readAxiosError(error: unknown, fallback: string) {
+    if (axios.isCancel(error)) return "请求已取消";
+    if (axios.isAxiosError<{ error?: { message?: string }; message?: string; msg?: string; code?: number }>(error)) {
+        const responseData = error.response?.data;
+        return responseData?.msg || responseData?.message || responseData?.error?.message || statusMessage(error.response?.status, fallback);
+    }
+    if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
+    return error instanceof Error ? error.message : fallback;
+}
+
+function statusMessage(status: number | undefined, fallback: string) {
+    if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
+    if (status === 429) return "请求被限流或额度不足，请稍后重试";
+    return status ? `${fallback}（${status}）` : fallback;
+}
+
+async function assertVideoBlob(blob: Blob) {
+    const type = blob.type.toLowerCase();
+    if (!type.includes("json") && !type.startsWith("text/") && !type.includes("xml") && !type.includes("html")) return;
+    let payload: { code?: number; msg?: string; error?: { message?: string } };
+    try {
+        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
+    } catch {
+        throw new Error("视频下载地址返回的不是视频文件");
+    }
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
+    if (payload.error?.message) throw new Error(payload.error.message);
+    throw new Error(payload.msg || "视频下载地址返回的不是视频文件");
+}
+
+function isPublicMediaUrl(value: string) {
+    return /^https?:\/\//i.test(value || "");
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
+}
+
+function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("读取本地素材失败"));
+        reader.readAsDataURL(blob);
+    });
+}
