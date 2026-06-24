@@ -66,6 +66,13 @@ export function isSeedanceVideoModel(model: string) {
     return value.includes("seedance") || value.includes("doubao-seedance");
 }
 
+export function isSeedanceNewModel(model: string) {
+    const value = model.toLowerCase();
+    // 1.5+ 支持顶层 ratio/duration/watermark/generate_audio 字段
+    // 1.0 和 lite 只支持 content text 里的 --key value 格式
+    return value.includes("1-5") || value.includes("2-0");
+}
+
 export function isSeedanceFastModel(model: string) {
     const value = model.toLowerCase();
     return isSeedanceVideoModel(value) && value.includes("fast");

@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig, type ImageResponseFormatPolicy, type ModelChannel } from "@/stores/use-config-store";
+import { isJimengImageModel, requestJimengImageGeneration } from "@/services/api/jimeng-api";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -627,6 +628,18 @@ function parseGeminiImagePayload(payload: GeminiPayload, useProxy?: boolean) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    // 即梦原生 API
+    const modelName = modelOptionName(config.model || config.imageModel);
+    if (isJimengImageModel(modelName)) {
+        try {
+            return await requestJimengImageGeneration(config.jimeng, modelName, prompt, {
+                signal: options?.signal,
+                num: Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1))),
+            });
+        } catch (error) {
+            throw new Error(error instanceof Error ? error.message : "即梦图片生成失败");
+        }
+    }
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (requestConfig.apiFormat === "gemini") {

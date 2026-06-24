@@ -3,9 +3,10 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceNewModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
+import { isJimengVideoModel, requestJimengVideoGeneration } from "@/services/api/jimeng-api";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -51,6 +52,17 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
+    // 即梦原生 API：内部已封装完整轮询，直接返回结果
+    const modelName = modelOptionName(config.model || config.videoModel);
+    if (isJimengVideoModel(modelName)) {
+        const imageUrls = references.map((r) => r.url || r.dataUrl).filter((u): u is string => Boolean(u && u.startsWith("http")));
+        const result = await requestJimengVideoGeneration(config.jimeng, modelName, prompt, {
+            signal: options?.signal,
+            imageUrls,
+            aspectRatio: normalizeSeedanceRatio(config.size),
+        });
+        return { url: result.url, mimeType: "video/mp4" };
+    }
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     const delayMs = task.provider === "seedance" ? 5000 : task.provider === "agnes" ? 5000 : 2500;
     // 视频生成可能耗时较长（特别是 Agnes 高峰期排队），轮询总时长拉到 30 分钟
@@ -138,26 +150,44 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     if (audioReferences.length && !references.length && !videoReferences.length) {
         throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
     }
+    const modelName = modelOptionName(model);
     assertSeedanceVideoReferences(videoReferences);
     assertSeedanceAudioReferences(audioReferences);
     const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
     if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
-    const payload = {
-        model: modelOptionName(model),
-        content,
-        ratio: normalizeSeedanceRatio(config.size),
-        resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)),
-        duration: normalizeSeedanceDuration(config.videoSeconds),
-        generate_audio: boolConfig(config.videoGenerateAudio, true),
-        watermark: boolConfig(config.videoWatermark, false),
-    };
+    const isNewModel = isSeedanceNewModel(modelName);
+    const payload: Record<string, unknown> = { model: modelName, content };
+    if (isNewModel) {
+        // 1.5+ 支持顶层 ratio/duration/watermark/generate_audio
+        payload.ratio = normalizeSeedanceRatio(config.size);
+        payload.duration = normalizeSeedanceDuration(config.videoSeconds);
+        payload.generate_audio = boolConfig(config.videoGenerateAudio, true);
+        payload.watermark = boolConfig(config.videoWatermark, false);
+    } else {
+        // 1.0/lite 只支持 content text 里的 --key value 格式
+        const textItem = content.find((item: Record<string, unknown>) => item.type === "text");
+        if (textItem && typeof textItem.text === "string") {
+            const flags = [
+                `--resolution ${normalizeSeedanceResolution(config.vquality, modelName)}`,
+                `--duration ${normalizeSeedanceDuration(config.videoSeconds)}`,
+                `--watermark ${boolConfig(config.videoWatermark, false)}`,
+                `--camerafixed false`,
+            ].join("  ");
+            textItem.text = `${textItem.text}  ${flags}`;
+        }
+    }
 
     try {
         const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
-        throw new Error(readAxiosError(error, "Seedance 任务创建失败"));
+        const msg = readAxiosError(error, "Seedance 任务创建失败");
+        // 方舟 r2v 不支持错误：模型是纯文生视频，用户却带了参考图/视频
+        if (msg.includes("task_type") && msg.includes("does not support model")) {
+            throw new Error(`当前模型是纯文生视频模型，不支持参考图/视频输入。请移除参考素材，或切换到支持图生视频的模型（如 Seedance 2.0）\n\n原始错误：${msg}`);
+        }
+        throw new Error(msg);
     }
 }
 

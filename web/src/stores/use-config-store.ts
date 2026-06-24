@@ -19,12 +19,19 @@ export type ModelChannel = {
 
 export type ImageResponseFormatPolicy = "auto" | "b64_json" | "url";
 
+export type JimengConfig = {
+    ak: string;
+    sk: string;
+    enabled: boolean;
+};
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
+    jimeng: JimengConfig;
     model: string;
     imageModel: string;
     videoModel: string;
@@ -82,6 +89,7 @@ export const defaultConfig: AiConfig = {
             models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
+    jimeng: { ak: "", sk: "", enabled: false },
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
@@ -170,7 +178,15 @@ function modelListKey(capability: ModelCapability) {
     return `${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels";
 }
 
+function isJimengNativeModel(model: string) {
+    const value = model.toLowerCase();
+    return value.startsWith("jimeng_") || value.startsWith("jimeng-") || value === "i2i_material_extraction";
+}
+
 function isAiConfigReady(config: AiConfig, model: string) {
+    if (isJimengNativeModel(modelOptionName(model))) {
+        return config.jimeng.enabled && config.jimeng.ak.trim() && config.jimeng.sk.trim();
+    }
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
@@ -235,6 +251,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         canvasImageCount: config.canvasImageCount || "3",
+                        jimeng: { ...defaultConfig.jimeng, ...(config.jimeng || {}) },
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),

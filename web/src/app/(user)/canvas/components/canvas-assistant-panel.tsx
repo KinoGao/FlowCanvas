@@ -672,8 +672,9 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, snapshot, session
 function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; value: string; onChange: (model: string) => void }) {
     const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, "text")].filter(Boolean))), [config, value]);
     const current = value || "";
+    const selectValue = current && options.includes(current) ? current : "";
     return (
-        <Select value={current} onValueChange={onChange}>
+        <Select value={selectValue} onValueChange={onChange}>
             <SelectTrigger
                 hideChevron
                 className="h-7 min-w-0 max-w-[220px] gap-1.5 border-0 bg-transparent px-1 py-0 text-xs font-normal shadow-none hover:bg-transparent hover:opacity-75 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:ring-0 dark:bg-transparent dark:hover:bg-transparent"

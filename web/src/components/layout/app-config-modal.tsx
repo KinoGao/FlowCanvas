@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Sparkles, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -9,7 +9,7 @@ import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ImageResponseFormatPolicy, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { createModelChannel, defaultBaseUrlForApiFormat, encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ImageResponseFormatPolicy, type JimengConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -357,6 +357,11 @@ export function AppConfigModal() {
                         ),
                     },
                     {
+                        key: "jimeng",
+                        label: "即梦",
+                        children: <JimengTabContent config={config} updateConfig={updateConfig} />,
+                    },
+                    {
                         key: "preferences",
                         label: "生成偏好",
                         children: (
@@ -569,4 +574,101 @@ function formatBytes(bytes: number) {
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+// ===== 即梦配置 Tab =====
+
+import { getJimengImageCapabilities, getJimengVideoCapabilities, JIMENG_IMAGE_REQ_KEYS, JIMENG_VIDEO_REQ_KEYS } from "@/services/api/jimeng-api";
+
+type JimengTabProps = {
+    config: AiConfig;
+    updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+};
+
+function JimengTabContent({ config, updateConfig: updateAiConfig }: JimengTabProps) {
+    const jimeng = config.jimeng;
+    const configured = jimeng.enabled && jimeng.ak.trim() && jimeng.sk.trim();
+    const imageCapabilities = getJimengImageCapabilities();
+    const videoCapabilities = getJimengVideoCapabilities();
+
+    const updateJimeng = (patch: Partial<JimengConfig>) => {
+        updateAiConfig("jimeng", { ...jimeng, ...patch });
+    };
+
+    const imageOptions = imageCapabilities.map((c) => ({ label: c.label, value: c.reqKey }));
+    const videoOptions = videoCapabilities.map((c) => ({ label: c.label, value: c.reqKey }));
+
+    const enableJimeng = () => {
+        updateJimeng({ enabled: true });
+    };
+
+    const currentImageModel = JIMENG_IMAGE_REQ_KEYS.includes(config.imageModel) ? config.imageModel : undefined;
+    const currentVideoModel = JIMENG_VIDEO_REQ_KEYS.includes(config.videoModel) ? config.videoModel : undefined;
+
+    return (
+        <Form layout="vertical" requiredMark={false}>
+            <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                    <Sparkles className="size-4" />
+                    即梦AI（原生 API）
+                </div>
+                <div className="mt-1 text-xs leading-5 text-stone-500">
+                    通过即梦原生 API（visual.volcengineapi.com）接入图片和视频生成，使用 AK/SK 签名认证，请求经服务端签名转发。与方舟渠道独立，互不影响。
+                </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+                <Form.Item label="Access Key ID" className="mb-0" extra="火山引擎 IAM → 密钥管理">
+                    <Input.Password
+                        value={jimeng.ak}
+                        placeholder="请输入 Access Key ID"
+                        onChange={(e) => updateJimeng({ ak: e.target.value })}
+                    />
+                </Form.Item>
+                <Form.Item label="Secret Access Key" className="mb-0" extra="与 AK 配对的密钥，仅用于服务端签名">
+                    <Input.Password
+                        value={jimeng.sk}
+                        placeholder="请输入 Secret Access Key"
+                        onChange={(e) => updateJimeng({ sk: e.target.value })}
+                    />
+                </Form.Item>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+                <Button type="primary" disabled={!jimeng.ak.trim() || !jimeng.sk.trim()} onClick={enableJimeng}>
+                    {configured ? "更新即梦配置" : "启用即梦"}
+                </Button>
+                {configured && (
+                    <span className="text-xs text-stone-500">
+                        已启用 · {imageOptions.length} 个图片能力 + {videoOptions.length} 个视频能力
+                    </span>
+                )}
+            </div>
+
+            {configured && (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <Form.Item label="默认图片能力" className="mb-0">
+                        <Select
+                            showSearch
+                            allowClear
+                            placeholder="选择即梦图片能力"
+                            value={currentImageModel}
+                            options={imageOptions}
+                            onChange={(value) => { if (value) updateAiConfig("imageModel", value); }}
+                        />
+                    </Form.Item>
+                    <Form.Item label="默认视频能力" className="mb-0">
+                        <Select
+                            showSearch
+                            allowClear
+                            placeholder="选择即梦视频能力"
+                            value={currentVideoModel}
+                            options={videoOptions}
+                            onChange={(value) => { if (value) updateAiConfig("videoModel", value); }}
+                        />
+                    </Form.Item>
+                </div>
+            )}
+        </Form>
+    );
 }
