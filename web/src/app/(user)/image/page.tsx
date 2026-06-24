@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -543,17 +543,16 @@ function ResultImageCard({
 
 function PendingImageCard() {
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div
-                className="absolute inset-0 opacity-60"
-                style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
-                    backgroundSize: "16px 16px",
-                }}
-            />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
+            <div className="absolute inset-0 bg-stone-100 dark:bg-stone-900" />
+            <div className="absolute inset-0 overflow-hidden">
+                <div
+                    className="absolute inset-0"
+                    style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)", animation: "shimmer-sweep 2s ease-in-out infinite" }}
+                />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-stone-400 dark:text-stone-500">
+                生成中
             </div>
         </div>
     );

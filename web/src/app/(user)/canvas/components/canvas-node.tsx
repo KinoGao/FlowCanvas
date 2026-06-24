@@ -354,9 +354,17 @@ const nodeContentRenderers = {
 
 function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">生成中</span>
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }}>
+            <div className="absolute inset-0 overflow-hidden">
+                <div
+                    className="absolute inset-0"
+                    style={{
+                        background: `linear-gradient(90deg, transparent, ${theme.node.activeStroke}18, transparent)`,
+                        animation: "shimmer-sweep 2s ease-in-out infinite",
+                    }}
+                />
+            </div>
+            <span className="relative z-10 text-[10px] tracking-[0.2em]" style={{ color: theme.node.activeStroke }}>生成中</span>
         </div>
     );
 }

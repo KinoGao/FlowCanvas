@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
@@ -568,10 +568,16 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
 
 function PendingVideoCard() {
     return (
-        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
+            <div className="absolute inset-0 bg-stone-100 dark:bg-stone-900" />
+            <div className="absolute inset-0 overflow-hidden">
+                <div
+                    className="absolute inset-0"
+                    style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)", animation: "shimmer-sweep 2s ease-in-out infinite" }}
+                />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-stone-400 dark:text-stone-500">
+                生成中
             </div>
         </div>
     );
