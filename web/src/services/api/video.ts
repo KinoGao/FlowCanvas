@@ -3,10 +3,9 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceNewModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceNewModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceCapabilityError, seedanceGenerationMode, seedanceSupportsGenerateAudio, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
-import { isJimengVideoModel, requestJimengVideoGeneration } from "@/services/api/jimeng-api";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -52,17 +51,6 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
-    // 即梦原生 API：内部已封装完整轮询，直接返回结果
-    const modelName = modelOptionName(config.model || config.videoModel);
-    if (isJimengVideoModel(modelName)) {
-        const imageUrls = references.map((r) => r.url || r.dataUrl).filter((u): u is string => Boolean(u && u.startsWith("http")));
-        const result = await requestJimengVideoGeneration(config.jimeng, modelName, prompt, {
-            signal: options?.signal,
-            imageUrls,
-            aspectRatio: normalizeSeedanceRatio(config.size),
-        });
-        return { url: result.url, mimeType: "video/mp4" };
-    }
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     const delayMs = task.provider === "seedance" ? 5000 : task.provider === "agnes" ? 5000 : 2500;
     // 视频生成可能耗时较长（特别是 Agnes 高峰期排队），轮询总时长拉到 30 分钟
@@ -151,6 +139,8 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
     }
     const modelName = modelOptionName(model);
+    const capabilityError = seedanceCapabilityError(modelName, references, videoReferences, audioReferences);
+    if (capabilityError) throw new Error(capabilityError);
     assertSeedanceVideoReferences(videoReferences);
     assertSeedanceAudioReferences(audioReferences);
     const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
@@ -160,8 +150,9 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
     if (isNewModel) {
         // 1.5+ 支持顶层 ratio/duration/watermark/generate_audio
         payload.ratio = normalizeSeedanceRatio(config.size);
+        payload.resolution = normalizeSeedanceResolution(config.vquality, modelName);
         payload.duration = normalizeSeedanceDuration(config.videoSeconds);
-        payload.generate_audio = boolConfig(config.videoGenerateAudio, true);
+        payload.generate_audio = seedanceSupportsGenerateAudio(modelName) && boolConfig(config.videoGenerateAudio, true);
         payload.watermark = boolConfig(config.videoWatermark, false);
     } else {
         // 1.0/lite 只支持 content text 里的 --key value 格式
@@ -183,9 +174,9 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
         const msg = readAxiosError(error, "Seedance 任务创建失败");
-        // 方舟 r2v 不支持错误：模型是纯文生视频，用户却带了参考图/视频
+        // 方舟把 reference_image 判为 r2v；首帧/首尾帧图生视频应使用 first_frame/last_frame。
         if (msg.includes("task_type") && msg.includes("does not support model")) {
-            throw new Error(`当前模型是纯文生视频模型，不支持参考图/视频输入。请移除参考素材，或切换到支持图生视频的模型（如 Seedance 2.0）\n\n原始错误：${msg}`);
+            throw new Error(`当前 Seedance 请求的参考素材角色与模型能力不匹配。首帧/首尾帧图生视频需要使用 first_frame / last_frame，不应使用 reference_image。\n\n原始错误：${msg}`);
         }
         throw new Error(msg);
     }
@@ -478,8 +469,11 @@ async function buildSeedanceContent(config: AiConfig, prompt: string, references
     const content: Array<Record<string, unknown>> = [];
     const text = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     if (text) content.push({ type: "text", text });
-    for (const image of references.slice(0, SEEDANCE_REFERENCE_LIMITS.images)) {
-        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
+    const mode = seedanceGenerationMode(references, videoReferences, audioReferences);
+    const imageReferences = mode === "i2v_first_tail" ? references.slice(0, 2) : references.slice(0, 1);
+    for (let index = 0; index < imageReferences.length; index += 1) {
+        const role = mode === "i2v_first_tail" && index === 1 ? "last_frame" : "first_frame";
+        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, imageReferences[index]) }, role });
     }
     for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
         content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });

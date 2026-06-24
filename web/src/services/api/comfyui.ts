@@ -1,0 +1,146 @@
+import { nanoid } from "nanoid";
+
+import type { ComfyUiConfig } from "@/stores/use-config-store";
+import type { ComfyWorkflowJson } from "@/services/comfyui-workflows";
+
+export type ComfyPromptResponse = {
+    prompt_id?: string;
+    number?: number;
+    node_errors?: Record<string, unknown>;
+};
+
+export type ComfyHistoryItem = {
+    outputs?: Record<string, { images?: ComfyOutputFile[]; videos?: ComfyOutputFile[]; gifs?: ComfyOutputFile[] }>;
+    status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
+};
+
+export type ComfyOutputFile = {
+    filename: string;
+    subfolder?: string;
+    type?: string;
+};
+
+type ComfyRequestOptions = {
+    method?: "GET" | "POST";
+    body?: unknown;
+    signal?: AbortSignal;
+};
+
+export async function testComfyConnection(config: ComfyUiConfig) {
+    try {
+        return await comfyRequest<Record<string, unknown>>(config, "/system_stats");
+    } catch {
+        return comfyRequest<Record<string, unknown>>(config, "/object_info");
+    }
+}
+
+export async function queueComfyPrompt(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
+    const payload = await comfyRequest<ComfyPromptResponse>(config, "/prompt", {
+        method: "POST",
+        body: {
+            prompt: workflow,
+            client_id: config.clientId.trim() || `flow-canvas-${nanoid(8)}`,
+        },
+        signal,
+    });
+    if (!payload.prompt_id) throw new Error("ComfyUI 没有返回 prompt_id");
+    if (payload.node_errors && Object.keys(payload.node_errors).length) throw new Error("ComfyUI 工作流节点校验失败");
+    return payload;
+}
+
+export async function getComfyHistory(config: ComfyUiConfig, promptId: string, signal?: AbortSignal) {
+    return comfyRequest<Record<string, ComfyHistoryItem>>(config, `/history/${encodeURIComponent(promptId)}`, { signal });
+}
+
+export async function waitForComfyHistory(config: ComfyUiConfig, promptId: string, signal?: AbortSignal) {
+    const timeoutMs = Math.max(10, Number(config.timeoutSeconds) || 300) * 1000;
+    const intervalMs = Math.max(500, Number(config.pollIntervalMs) || 1200);
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        const history = await getComfyHistory(config, promptId, signal);
+        const item = history[promptId];
+        if (item) return item;
+        await sleep(intervalMs, signal);
+    }
+    throw new Error("ComfyUI 任务等待超时");
+}
+
+export function extractComfyOutputImages(history: ComfyHistoryItem) {
+    return Object.values(history.outputs || {}).flatMap((output) => output.images || []);
+}
+
+export function buildComfyViewUrl(config: ComfyUiConfig, file: ComfyOutputFile) {
+    const params = new URLSearchParams({
+        filename: file.filename,
+        type: file.type || "output",
+    });
+    if (file.subfolder) params.set("subfolder", file.subfolder);
+    const path = `/view?${params}`;
+    if (config.proxyMode === "nextjs") {
+        const proxyParams = new URLSearchParams({ baseUrl: normalizeComfyBaseUrl(config.baseUrl), path });
+        return `/api/comfyui-proxy?${proxyParams}`;
+    }
+    return `${normalizeComfyBaseUrl(config.baseUrl)}${path}`;
+}
+
+export async function runComfyWorkflow(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
+    const queued = await queueComfyPrompt(config, workflow, signal);
+    const history = await waitForComfyHistory(config, queued.prompt_id!, signal);
+    return {
+        promptId: queued.prompt_id!,
+        history,
+        images: extractComfyOutputImages(history).map((file) => buildComfyViewUrl(config, file)),
+    };
+}
+
+async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: ComfyRequestOptions = {}): Promise<T> {
+    const method = options.method || "GET";
+    const baseUrl = normalizeComfyBaseUrl(config.baseUrl);
+    const init: RequestInit = {
+        method,
+        signal: options.signal,
+        headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    };
+    const response =
+        config.proxyMode === "nextjs"
+            ? await fetch("/api/comfyui-proxy", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ baseUrl, path, method, body: options.body }),
+                  signal: options.signal,
+              })
+            : await fetch(`${baseUrl}${path}`, init);
+    if (!response.ok) throw new Error(await readComfyError(response));
+    return response.json() as Promise<T>;
+}
+
+export function normalizeComfyBaseUrl(baseUrl: string) {
+    const value = baseUrl.trim().replace(/\/+$/, "");
+    return value || "http://127.0.0.1:8188";
+}
+
+async function readComfyError(response: Response) {
+    const text = await response.text();
+    if (!text) return `ComfyUI 请求失败：HTTP ${response.status}`;
+    try {
+        const payload = JSON.parse(text) as { detail?: string; error?: string };
+        return payload.detail || payload.error || `ComfyUI 请求失败：HTTP ${response.status}`;
+    } catch {
+        return text.slice(0, 300);
+    }
+}
+
+function sleep(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                window.clearTimeout(timer);
+                reject(new DOMException("请求已取消", "AbortError"));
+            },
+            { once: true },
+        );
+    });
+}

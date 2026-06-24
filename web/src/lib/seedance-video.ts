@@ -28,6 +28,18 @@ export const seedanceRatioOptions = [
 ] as const;
 
 export const seedanceDurationOptions = [-1, 4, 5, 6, 8, 10, 12, 15] as const;
+type SeedanceResolution = (typeof seedanceResolutionOptions)[number]["value"];
+type SeedanceMode = "t2v" | "i2v_first" | "i2v_first_tail";
+
+type SeedanceCapabilities = {
+    textToVideo: boolean;
+    imageToVideoFirst: boolean;
+    imageToVideoFirstLast: boolean;
+    inputVideo: boolean;
+    inputAudio: boolean;
+    generateAudio: boolean;
+    resolutions: SeedanceResolution[];
+};
 
 const seedancePixels = {
     "480p": {
@@ -70,12 +82,62 @@ export function isSeedanceNewModel(model: string) {
     const value = model.toLowerCase();
     // 1.5+ 支持顶层 ratio/duration/watermark/generate_audio 字段
     // 1.0 和 lite 只支持 content text 里的 --key value 格式
-    return value.includes("1-5") || value.includes("2-0");
+    return /(?:^|[^0-9])(?:1[.-]5|2[.-]0)(?:[^0-9]|$)/.test(value);
 }
 
 export function isSeedanceFastModel(model: string) {
     const value = model.toLowerCase();
     return isSeedanceVideoModel(value) && value.includes("fast");
+}
+
+function normalizedSeedanceModel(model: string) {
+    return model.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+export function seedanceGenerationMode(images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]): SeedanceMode {
+    if (videos.length || audios.length) return images.length >= 2 ? "i2v_first_tail" : images.length ? "i2v_first" : "t2v";
+    if (images.length >= 2) return "i2v_first_tail";
+    if (images.length === 1) return "i2v_first";
+    return "t2v";
+}
+
+export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilities {
+    const value = normalizedSeedanceModel(model);
+    if (value.includes("1-5") || value.includes("1-5-prd")) {
+        return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: true, inputVideo: false, inputAudio: false, generateAudio: true, resolutions: ["480p", "720p", "1080p"] };
+    }
+    if (value.includes("1-0-pro-fast")) {
+        return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p"] };
+    }
+    if (value.includes("1-0-pro")) {
+        return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: true, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p", "1080p"] };
+    }
+    if (value.includes("lite-t2v")) {
+        return { textToVideo: true, imageToVideoFirst: false, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p"] };
+    }
+    if (value.includes("lite-i2v")) {
+        return { textToVideo: false, imageToVideoFirst: true, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p"] };
+    }
+    if (value.includes("seaweed")) {
+        return { textToVideo: true, imageToVideoFirst: false, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p"] };
+    }
+    return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: true, inputVideo: true, inputAudio: true, generateAudio: true, resolutions: ["480p", "720p", "1080p"] };
+}
+
+export function seedanceCapabilityError(model: string, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]) {
+    const capabilities = seedanceCapabilitiesForModel(model);
+    const mode = seedanceGenerationMode(images, videos, audios);
+    if (images.length > 2) return "Seedance 首帧/首尾帧图生视频最多连接两张参考图，请只保留首帧和尾帧";
+    if (videos.length && !capabilities.inputVideo) return "当前 Seedance 模型不支持参考视频输入，请移除参考视频";
+    if (audios.length && !capabilities.inputAudio) return "当前 Seedance 模型不支持参考音频输入；有声视频请使用支持 generate_audio 的 Seedance 1.5 模型";
+    if (mode === "t2v" && !capabilities.textToVideo) return "当前 Seedance 模型不支持文生视频，请添加一张参考图或切换到 t2v/pro 模型";
+    if (mode === "i2v_first" && !capabilities.imageToVideoFirst) return "当前 Seedance 模型不支持首帧图生视频，请移除参考图或切换到 i2v/pro 模型";
+    if (mode === "i2v_first_tail" && !capabilities.imageToVideoFirstLast) return "当前 Seedance 模型不支持首尾帧图生视频，请只保留一张参考图或切换到 1.5/pro 模型";
+    return "";
+}
+
+export function seedanceSupportsGenerateAudio(model: string) {
+    return seedanceCapabilitiesForModel(model).generateAudio;
 }
 
 export function isArkPlanBaseUrl(baseUrl: string) {
@@ -95,8 +157,9 @@ export function isAgnesVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "
 
 export function normalizeSeedanceResolution(value: string, model = "") {
     const normalized = normalizeResolutionToken(value);
-    if (isSeedanceFastModel(model) && normalized === "1080p") return "720p";
-    return seedanceResolutionOptions.some((item) => item.value === normalized) ? normalized : "720p";
+    const supported = seedanceCapabilitiesForModel(model).resolutions;
+    if (supported.includes(normalized as SeedanceResolution)) return normalized;
+    return supported.includes("720p") ? "720p" : supported[0] || "720p";
 }
 
 export function normalizeResolutionToken(value: string) {

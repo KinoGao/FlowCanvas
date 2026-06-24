@@ -1,8 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video } from "lucide-react";
-import { Button, Segmented } from "antd";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
+import { Button, Input, InputNumber, Segmented, Select, Switch } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -13,6 +13,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "../types";
+import { listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
@@ -26,16 +27,29 @@ type CanvasConfigNodePanelProps = {
 
 export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
+    const comfyui = useConfigStore((state) => state.comfyui);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
+    const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
+    const selectedWorkflow = useMemo(() => workflows.find((workflow) => workflow.id === (node.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId)) || workflows[0], [comfyui.defaultWorkflowId, node.metadata?.comfyWorkflowId, workflows]);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
+    const credits = mode === "comfyui" ? 0 : requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const canGenerate = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const canGenerate = mode === "comfyui" ? Boolean(selectedWorkflow) : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+
+    useEffect(() => {
+        void listComfyWorkflows().then(setWorkflows);
+    }, []);
+
+    useEffect(() => {
+        if (mode === "comfyui" && selectedWorkflow && !node.metadata?.comfyWorkflowId && !comfyui.defaultWorkflowId) {
+            onConfigChange(node.id, { comfyWorkflowId: selectedWorkflow.id });
+        }
+    }, [comfyui.defaultWorkflowId, mode, node.id, node.metadata?.comfyWorkflowId, onConfigChange, selectedWorkflow]);
 
     return (
         <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
@@ -84,6 +98,15 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                                     </span>
                                 ),
                             },
+                            {
+                                value: "comfyui",
+                                label: (
+                                    <span className="inline-flex items-center gap-1">
+                                        <Workflow className="size-3.5" />
+                                        ComfyUI
+                                    </span>
+                                ),
+                            },
                         ]}
                     />
                 </div>
@@ -101,14 +124,20 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </div>
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
-                {mode === "video" ? (
-                    <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
-                ) : mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
-                ) : mode === "audio" ? (
-                    <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
-                ) : null}
+                {mode === "comfyui" ? (
+                    <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} onConfigChange={onConfigChange} />
+                ) : (
+                    <>
+                        <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                        {mode === "video" ? (
+                            <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                        ) : mode === "image" ? (
+                            <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                        ) : mode === "audio" ? (
+                            <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                        ) : null}
+                    </>
+                )}
             </div>
 
             <Button
@@ -128,10 +157,14 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         </>
                     ) : (
                         <>
-                            <span className="inline-flex items-center gap-1">
-                                <CreditSymbol />
-                                {credits.toLocaleString()}
-                            </span>
+                            {mode === "comfyui" ? (
+                                <span>本地工作流</span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1">
+                                    <CreditSymbol />
+                                    {credits.toLocaleString()}
+                                </span>
+                            )}
                             <Play className="size-4" />
                             <span>开始生成</span>
                         </>
@@ -140,6 +173,44 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </Button>
         </div>
     );
+}
+
+function ComfyWorkflowControls({ node, workflows, selectedWorkflow, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
+    const values = node.metadata?.comfyFieldValues || {};
+    const updateValue = (field: ComfyWorkflowField, value: unknown) => {
+        onConfigChange(node.id, { comfyFieldValues: { ...values, [field.id]: value } });
+    };
+
+    return (
+        <div className="grid min-w-0 gap-2">
+            <Select
+                className="canvas-compact-control h-10"
+                popupMatchSelectWidth={false}
+                placeholder="选择 ComfyUI 工作流"
+                value={selectedWorkflow?.id}
+                options={workflows.map((workflow) => ({ label: workflow.title, value: workflow.id }))}
+                onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
+            />
+            {selectedWorkflow?.fields.length ? (
+                <div className="grid max-h-36 gap-1.5 overflow-y-auto pr-1">
+                    {selectedWorkflow.fields.map((field) => (
+                        <div key={field.id} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-[11px]">
+                            <span className="truncate opacity-70">{field.name || field.input}</span>
+                            <ComfyFieldControl field={field} value={values[field.id] ?? field.default} onChange={(value) => updateValue(field, value)} />
+                        </div>
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function ComfyFieldControl({ field, value, onChange }: { field: ComfyWorkflowField; value: unknown; onChange: (value: unknown) => void }) {
+    if (field.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
+    if (field.type === "number") return <InputNumber size="small" className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
+    if (field.type === "slider") return <InputNumber size="small" className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
+    if (field.type === "dropdown") return <Select size="small" value={String(value ?? "")} options={(field.options || []).map((option) => ({ label: option, value: option }))} onChange={onChange} />;
+    return <Input size="small" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
 }
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {

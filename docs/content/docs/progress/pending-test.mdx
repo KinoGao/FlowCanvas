@@ -5,6 +5,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- ComfyUI 接入基础：配置弹窗新增 ComfyUI Tab，可配置本地或远端地址、连接方式、Client ID、任务超时和轮询间隔；新增顶部导航入口 `/comfyui`，可导入 ComfyUI API 格式 workflow JSON，选择节点输入作为暴露参数，编辑字段类型、默认值、范围和下拉选项，并可通过 Next.js 转发试运行 workflow。画布配置节点新增 ComfyUI 模式，可选择 workflow、填写暴露参数并生成输出图片节点。需要确认：本地 `http://127.0.0.1:8188` 和远端 ComfyUI 地址连接测试可用，导入 workflow 后参数保存/刷新仍存在，试运行和画布节点生成都能拿到 ComfyUI 输出图片。
 - 配置与用户偏好：每个模型渠道新增 OpenAI / Gemini 调用格式选择，默认 OpenAI，切换默认格式时同步更新默认 Base URL；渠道 Tab 增加紧凑醒目的提醒，说明模型是否可选需要到“模型”Tab 选择。
 - Gemini 调用格式：支持拉取 Gemini 模型列表，并用于文本问答、在线 Agent 工具调用、基础生图和图生图请求。
 - 音频和视频生成：选择 Gemini 调用格式时先给出不支持提示，仍需使用 OpenAI 兼容渠道。

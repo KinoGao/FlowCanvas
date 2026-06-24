@@ -1,15 +1,16 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Sparkles, Trash2, Wifi } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi, Workflow } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
+import { testComfyConnection } from "@/services/api/comfyui";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, defaultBaseUrlForApiFormat, encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ImageResponseFormatPolicy, type JimengConfig, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { createModelChannel, defaultBaseUrlForApiFormat, encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ImageResponseFormatPolicy, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -68,19 +69,23 @@ export function AppConfigModal() {
     const [activeTab, setActiveTab] = useState("channels");
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [testingWebdav, setTestingWebdav] = useState(false);
+    const [testingComfyUi, setTestingComfyUi] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
+    const comfyui = useConfigStore((state) => state.comfyui);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
+    const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
+    const comfyUiReady = Boolean(comfyui.baseUrl.trim());
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
@@ -175,6 +180,22 @@ export function AppConfigModal() {
             message.error(error instanceof Error ? error.message : "WebDAV 连接测试失败");
         } finally {
             setTestingWebdav(false);
+        }
+    };
+
+    const testComfyUi = async () => {
+        if (!comfyUiReady) {
+            message.error("请先填写 ComfyUI 地址");
+            return;
+        }
+        setTestingComfyUi(true);
+        try {
+            await testComfyConnection(comfyui);
+            message.success("ComfyUI 连接可用");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "ComfyUI 连接测试失败");
+        } finally {
+            setTestingComfyUi(false);
         }
     };
 
@@ -357,11 +378,6 @@ export function AppConfigModal() {
                         ),
                     },
                     {
-                        key: "jimeng",
-                        label: "即梦",
-                        children: <JimengTabContent config={config} updateConfig={updateConfig} />,
-                    },
-                    {
                         key: "preferences",
                         label: "生成偏好",
                         children: (
@@ -470,6 +486,59 @@ export function AppConfigModal() {
                             </Form>
                         ),
                     },
+                    {
+                        key: "comfyui",
+                        label: "ComfyUI",
+                        children: (
+                            <Form layout="vertical" requiredMark={false}>
+                                <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                                <Workflow className="size-4" />
+                                                ComfyUI
+                                            </div>
+                                            <div className="mt-1 text-xs text-stone-500">配置本地或远端 ComfyUI 地址；工作流导入和暴露参数在独立页面管理。</div>
+                                        </div>
+                                        <Button href="/comfyui" icon={<Workflow className="size-4" />}>
+                                            工作流配置
+                                        </Button>
+                                    </div>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <Form.Item label="连接方式" className="mb-4 md:col-span-2">
+                                            <Segmented
+                                                block
+                                                value={comfyui.proxyMode}
+                                                onChange={(value) => updateComfyUiConfig("proxyMode", value as typeof comfyui.proxyMode)}
+                                                options={[
+                                                    { label: "前端直连", value: "direct" },
+                                                    { label: "Next.js 转发", value: "nextjs" },
+                                                ]}
+                                            />
+                                        </Form.Item>
+                                        <Form.Item label="ComfyUI 地址" extra="本地默认是 http://127.0.0.1:8188；远端请填写完整 http/https 地址。" className="mb-4">
+                                            <Input value={comfyui.baseUrl} placeholder="http://127.0.0.1:8188" onChange={(event) => updateComfyUiConfig("baseUrl", event.target.value)} />
+                                        </Form.Item>
+                                        <Form.Item label="Client ID" className="mb-4">
+                                            <Input value={comfyui.clientId} placeholder="flow-canvas" onChange={(event) => updateComfyUiConfig("clientId", event.target.value)} />
+                                        </Form.Item>
+                                        <Form.Item label="任务超时（秒）" className="mb-0">
+                                            <Input type="number" min={10} value={comfyui.timeoutSeconds} onChange={(event) => updateComfyUiConfig("timeoutSeconds", event.target.value)} />
+                                        </Form.Item>
+                                        <Form.Item label="轮询间隔（毫秒）" className="mb-0">
+                                            <Input type="number" min={500} value={comfyui.pollIntervalMs} onChange={(event) => updateComfyUiConfig("pollIntervalMs", event.target.value)} />
+                                        </Form.Item>
+                                    </div>
+                                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                                        <Button icon={<Wifi className="size-4" />} disabled={!comfyUiReady} loading={testingComfyUi} onClick={() => void testComfyUi()}>
+                                            测试连接
+                                        </Button>
+                                        <span className="text-xs text-stone-500">Next.js 转发可避免浏览器 CORS；部署公网时不要把它暴露给不可信用户。</span>
+                                    </div>
+                                </section>
+                            </Form>
+                        ),
+                    },
                 ]}
             />
         </Modal>
@@ -574,101 +643,4 @@ function formatBytes(bytes: number) {
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-}
-
-// ===== 即梦配置 Tab =====
-
-import { getJimengImageCapabilities, getJimengVideoCapabilities, JIMENG_IMAGE_REQ_KEYS, JIMENG_VIDEO_REQ_KEYS } from "@/services/api/jimeng-api";
-
-type JimengTabProps = {
-    config: AiConfig;
-    updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
-};
-
-function JimengTabContent({ config, updateConfig: updateAiConfig }: JimengTabProps) {
-    const jimeng = config.jimeng;
-    const configured = jimeng.enabled && jimeng.ak.trim() && jimeng.sk.trim();
-    const imageCapabilities = getJimengImageCapabilities();
-    const videoCapabilities = getJimengVideoCapabilities();
-
-    const updateJimeng = (patch: Partial<JimengConfig>) => {
-        updateAiConfig("jimeng", { ...jimeng, ...patch });
-    };
-
-    const imageOptions = imageCapabilities.map((c) => ({ label: c.label, value: c.reqKey }));
-    const videoOptions = videoCapabilities.map((c) => ({ label: c.label, value: c.reqKey }));
-
-    const enableJimeng = () => {
-        updateJimeng({ enabled: true });
-    };
-
-    const currentImageModel = JIMENG_IMAGE_REQ_KEYS.includes(config.imageModel) ? config.imageModel : undefined;
-    const currentVideoModel = JIMENG_VIDEO_REQ_KEYS.includes(config.videoModel) ? config.videoModel : undefined;
-
-    return (
-        <Form layout="vertical" requiredMark={false}>
-            <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                    <Sparkles className="size-4" />
-                    即梦AI（原生 API）
-                </div>
-                <div className="mt-1 text-xs leading-5 text-stone-500">
-                    通过即梦原生 API（visual.volcengineapi.com）接入图片和视频生成，使用 AK/SK 签名认证，请求经服务端签名转发。与方舟渠道独立，互不影响。
-                </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-                <Form.Item label="Access Key ID" className="mb-0" extra="火山引擎 IAM → 密钥管理">
-                    <Input.Password
-                        value={jimeng.ak}
-                        placeholder="请输入 Access Key ID"
-                        onChange={(e) => updateJimeng({ ak: e.target.value })}
-                    />
-                </Form.Item>
-                <Form.Item label="Secret Access Key" className="mb-0" extra="与 AK 配对的密钥，仅用于服务端签名">
-                    <Input.Password
-                        value={jimeng.sk}
-                        placeholder="请输入 Secret Access Key"
-                        onChange={(e) => updateJimeng({ sk: e.target.value })}
-                    />
-                </Form.Item>
-            </div>
-
-            <div className="mt-4 flex items-center gap-3">
-                <Button type="primary" disabled={!jimeng.ak.trim() || !jimeng.sk.trim()} onClick={enableJimeng}>
-                    {configured ? "更新即梦配置" : "启用即梦"}
-                </Button>
-                {configured && (
-                    <span className="text-xs text-stone-500">
-                        已启用 · {imageOptions.length} 个图片能力 + {videoOptions.length} 个视频能力
-                    </span>
-                )}
-            </div>
-
-            {configured && (
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <Form.Item label="默认图片能力" className="mb-0">
-                        <Select
-                            showSearch
-                            allowClear
-                            placeholder="选择即梦图片能力"
-                            value={currentImageModel}
-                            options={imageOptions}
-                            onChange={(value) => { if (value) updateAiConfig("imageModel", value); }}
-                        />
-                    </Form.Item>
-                    <Form.Item label="默认视频能力" className="mb-0">
-                        <Select
-                            showSearch
-                            allowClear
-                            placeholder="选择即梦视频能力"
-                            value={currentVideoModel}
-                            options={videoOptions}
-                            onChange={(value) => { if (value) updateAiConfig("videoModel", value); }}
-                        />
-                    </Form.Item>
-                </div>
-            )}
-        </Form>
-    );
 }

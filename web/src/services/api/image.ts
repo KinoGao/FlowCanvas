@@ -1,11 +1,11 @@
 import axios from "axios";
 
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig, type ImageResponseFormatPolicy, type ModelChannel } from "@/stores/use-config-store";
-import { isJimengImageModel, requestJimengImageGeneration } from "@/services/api/jimeng-api";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { isSeedreamImageModel, resolveSeedreamSize, seedreamEditError, seedreamGenerationError, seedreamSupportsOutputFormat } from "@/lib/seedream-image";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -214,6 +214,9 @@ function parseImagePayload(payload: ImageApiResponse, useProxy?: boolean) {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || "请求失败");
     }
+    const itemError = payload.data?.map((item) => item.error).find(Boolean);
+    if (typeof itemError === "string") throw new Error(itemError);
+    if (isRecord(itemError)) throw new Error(stringValue(itemError.message) || stringValue(itemError.msg) || "图片生成失败");
     const images =
         payload.data
             ?.map((item) => resolveImageDataUrl(item, useProxy))
@@ -628,18 +631,6 @@ function parseGeminiImagePayload(payload: GeminiPayload, useProxy?: boolean) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    // 即梦原生 API
-    const modelName = modelOptionName(config.model || config.imageModel);
-    if (isJimengImageModel(modelName)) {
-        try {
-            return await requestJimengImageGeneration(config.jimeng, modelName, prompt, {
-                signal: options?.signal,
-                num: Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1))),
-            });
-        } catch (error) {
-            throw new Error(error instanceof Error ? error.message : "即梦图片生成失败");
-        }
-    }
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     if (requestConfig.apiFormat === "gemini") {
@@ -650,7 +641,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         }
     }
     const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    const seedream = isSeedreamImageModel(requestConfig.model);
+    const seedreamError = seedream ? seedreamGenerationError(requestConfig.model) : "";
+    if (seedreamError) throw new Error(seedreamError);
+    const requestSize = seedream ? resolveSeedreamSize(requestConfig.model, config.quality, config.size) : resolveRequestSize(quality, config.size);
     const useB64Json = shouldUseB64JsonResponse(config, requestConfig.model);
     try {
         const response = await axios.post<ImageApiResponse>(
@@ -659,9 +653,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
-                ...(quality ? { quality } : {}),
+                ...(!seedream && quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...(useB64Json ? { response_format: "b64_json", output_format: IMAGE_OUTPUT_FORMAT } : {}),
+                ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
             },
             {
                 headers: aiHeaders(requestConfig, "application/json"),
@@ -679,6 +673,13 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
+    const seedream = isSeedreamImageModel(requestConfig.model);
+    if (seedream) {
+        if (mask) throw new Error("当前 Seedream/SeedEdit 接入暂不支持蒙版编辑");
+        const seedreamError = seedreamEditError(requestConfig.model, references.length);
+        if (seedreamError) throw new Error(seedreamError);
+        return requestSeedreamImages(requestConfig, requestPrompt, references, n, config.quality, config.size, options);
+    }
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
         try {
@@ -698,7 +699,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         formData.set("response_format", "b64_json");
         formData.set("output_format", IMAGE_OUTPUT_FORMAT);
     }
-    if (quality) {
+    if (!seedream && quality) {
         formData.set("quality", quality);
     }
     if (requestSize) {
@@ -712,6 +713,29 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const images = parseImagePayload(response.data, requestConfig.useProxy);
         return images;
+    } catch (error) {
+        throw new Error(readAxiosError(error, "请求失败"));
+    }
+}
+
+async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, quality: string, size: string, options?: RequestOptions) {
+    try {
+        const requestSize = resolveSeedreamSize(config.model, quality, size);
+        const useB64Json = shouldUseB64JsonResponse(config, config.model);
+        const imageUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const response = await axios.post<ImageApiResponse>(
+            aiApiUrl(config, "/images/generations"),
+            {
+                model: config.model,
+                prompt: withSystemPrompt(config, prompt),
+                image: imageUrls.length === 1 ? imageUrls[0] : imageUrls,
+                n,
+                ...(requestSize ? { size: requestSize } : {}),
+                ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
+            },
+            { headers: aiHeaders(config, "application/json"), signal: options?.signal },
+        );
+        return parseImagePayload(response.data, config.useProxy);
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }

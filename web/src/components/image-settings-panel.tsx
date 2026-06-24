@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { isSeedreamImageModel, seedreamCapabilitiesForModel } from "@/lib/seedream-image";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -43,6 +44,9 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
+    const model = config.model || config.imageModel;
+    const seedream = isSeedreamImageModel(model);
+    const seedreamCapabilities = seedream ? seedreamCapabilitiesForModel(model) : null;
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
@@ -74,7 +78,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {qualityOptions.map((item) => (
-                            <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
+                            <OptionPill key={item.value} selected={quality === item.value} disabled={seedreamQualityDisabled(item.value, seedreamCapabilities)} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
@@ -101,11 +105,14 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {aspectOptions.map((item) => (
+                        {aspectOptions.map((item) => {
+                            const disabled = seedreamSizeDisabled(item.value, seedreamCapabilities);
+                            return (
                             <button
                                 key={item.value}
                                 type="button"
-                                className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
+                                disabled={disabled}
+                                className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
                                 style={{ borderColor: selectedAspect?.value === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
                                 onMouseDown={(event) => event.stopPropagation()}
                                 onClick={() => selectAspect(item.value)}
@@ -113,7 +120,8 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 <AspectIcon type={item.icon} width={item.width} height={item.height} color={theme.node.text} />
                                 <span>{item.label}</span>
                             </button>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
                 <div className="space-y-2.5">
@@ -153,11 +161,12 @@ export function imageSizeLabel(size: string) {
     return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
 }
 
-function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
+function OptionPill({ selected, disabled, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
         <button
             type="button"
-            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80"
+            disabled={disabled}
+            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
             style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClick}
@@ -165,6 +174,21 @@ function OptionPill({ selected, theme, onClick, children }: { selected: boolean;
             {children}
         </button>
     );
+}
+
+function seedreamQualityDisabled(value: string, capabilities: ReturnType<typeof seedreamCapabilitiesForModel> | null) {
+    if (!capabilities || value === "auto") return false;
+    if (value === "high") return !capabilities.resolutions.includes("4K");
+    if (value === "medium") return !capabilities.resolutions.includes("2K");
+    if (value === "low") return !capabilities.resolutions.includes("1K") && !capabilities.resolutions.includes("adaptive");
+    return false;
+}
+
+function seedreamSizeDisabled(value: string, capabilities: ReturnType<typeof seedreamCapabilitiesForModel> | null) {
+    if (!capabilities) return false;
+    if (value.includes("4k")) return !capabilities.resolutions.includes("4K");
+    if (value.includes("2k")) return !capabilities.resolutions.includes("2K");
+    return false;
 }
 
 function DimensionInput({ prefix, value, disabled, theme, alignToStep, onChange }: { prefix: string; value: number; disabled: boolean; theme: CanvasTheme; alignToStep: boolean; onChange: (value: number | null) => void }) {

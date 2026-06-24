@@ -19,19 +19,12 @@ export type ModelChannel = {
 
 export type ImageResponseFormatPolicy = "auto" | "b64_json" | "url";
 
-export type JimengConfig = {
-    ak: string;
-    sk: string;
-    enabled: boolean;
-};
-
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
-    jimeng: JimengConfig;
     model: string;
     imageModel: string;
     videoModel: string;
@@ -68,6 +61,15 @@ export type WebdavSyncConfig = {
     lastSyncedAt: string;
 };
 
+export type ComfyUiConfig = {
+    proxyMode: "direct" | "nextjs";
+    baseUrl: string;
+    clientId: string;
+    defaultWorkflowId: string;
+    timeoutSeconds: string;
+    pollIntervalMs: string;
+};
+
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
@@ -89,7 +91,6 @@ export const defaultConfig: AiConfig = {
             models: ["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"],
         },
     ],
-    jimeng: { ak: "", sk: "", enabled: false },
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
@@ -125,13 +126,24 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     lastSyncedAt: "",
 };
 
+export const defaultComfyUiConfig: ComfyUiConfig = {
+    proxyMode: "nextjs",
+    baseUrl: "http://127.0.0.1:8188",
+    clientId: "flow-canvas",
+    defaultWorkflowId: "",
+    timeoutSeconds: "300",
+    pollIntervalMs: "1200",
+};
+
 type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
+    comfyui: ComfyUiConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
+    updateComfyUiConfig: <K extends keyof ComfyUiConfig>(key: K, value: ComfyUiConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -140,12 +152,12 @@ type ConfigStore = {
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo");
+    return value.includes("seedance") || value.includes("seaweed") || value.includes("video") || value.includes("视频") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo");
 }
 
 function isImageModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
+    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("seededit") || value.includes("gpt-image") || value.includes("image") || value.includes("image2image") || value.includes("i2i") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
 }
 
 function isAudioModelName(model: string) {
@@ -178,15 +190,7 @@ function modelListKey(capability: ModelCapability) {
     return `${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels";
 }
 
-function isJimengNativeModel(model: string) {
-    const value = model.toLowerCase();
-    return value.startsWith("jimeng_") || value.startsWith("jimeng-") || value === "i2i_material_extraction";
-}
-
 function isAiConfigReady(config: AiConfig, model: string) {
-    if (isJimengNativeModel(modelOptionName(model))) {
-        return config.jimeng.enabled && config.jimeng.ak.trim() && config.jimeng.sk.trim();
-    }
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
@@ -196,6 +200,7 @@ export const useConfigStore = create<ConfigStore>()(
         (set, get) => ({
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
+            comfyui: defaultComfyUiConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -212,6 +217,13 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            updateComfyUiConfig: (key, value) =>
+                set((state) => ({
+                    comfyui: {
+                        ...state.comfyui,
+                        [key]: value,
+                    },
+                })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
@@ -219,11 +231,12 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            partialize: (state) => ({ config: state.config, webdav: state.webdav, comfyui: state.comfyui }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
+                const persistedComfyUi = (persistedState.comfyui || {}) as Partial<ComfyUiConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
@@ -231,6 +244,7 @@ export const useConfigStore = create<ConfigStore>()(
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
+                    comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi },
                     config: {
                         ...config,
                         channelMode: "local",
@@ -251,7 +265,6 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         canvasImageCount: config.canvasImageCount || "3",
-                        jimeng: { ...defaultConfig.jimeng, ...(config.jimeng || {}) },
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),

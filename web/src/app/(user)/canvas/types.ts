@@ -18,7 +18,7 @@ export enum CanvasNodeType {
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
-export type CanvasGenerationMode = "text" | "image" | "video" | "audio";
+export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "comfyui";
 export type CanvasImageGenerationType = "generation" | "edit";
 
 export type CanvasNodeMetadata = {
@@ -42,6 +42,8 @@ export type CanvasNodeMetadata = {
     audioFormat?: string;
     audioSpeed?: string;
     audioInstructions?: string;
+    comfyWorkflowId?: string;
+    comfyFieldValues?: Record<string, unknown>;
     references?: string[];
     naturalWidth?: number;
     naturalHeight?: number;

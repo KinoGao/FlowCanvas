@@ -9,6 +9,8 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { runComfyWorkflow } from "@/services/api/comfyui";
+import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -249,6 +251,7 @@ function InfiniteCanvasPage() {
     });
 
     const config = useConfigStore((state) => state.config);
+    const comfyui = useConfigStore((state) => state.comfyui);
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -1935,7 +1938,8 @@ function InfiniteCanvasPage() {
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const isComfyMode = mode === "comfyui";
+            if (!isComfyMode && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
@@ -1964,6 +1968,48 @@ function InfiniteCanvasPage() {
             if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: statusPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
+                if (mode === "comfyui") {
+                    const workflowId = sourceNode?.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId;
+                    const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
+                    if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
+                    const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, effectivePrompt);
+                    const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
+                    const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
+                    if (!result.images.length) throw new Error("ComfyUI 没有返回图片输出");
+
+                    const parentConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+                    const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const parentPosition = sourceNode?.position || { x: 0, y: 0 };
+                    const uploadedImages = await Promise.all(result.images.map((url) => uploadImage(url)));
+                    const imageNodes: CanvasNodeData[] = uploadedImages.map((image, index) => {
+                        const imageSize = fitNodeSize(image.width, image.height, imageConfig.width, imageConfig.height);
+                        return {
+                            id: nanoid(),
+                            type: CanvasNodeType.Image,
+                            title: comfyWorkflow.title || "ComfyUI Image",
+                            position: {
+                                x: parentPosition.x + parentConfig.width + 96 + (index % 2) * (imageConfig.width + 36),
+                                y: parentPosition.y + Math.floor(index / 2) * (imageConfig.height + 36),
+                            },
+                            width: imageSize.width,
+                            height: imageSize.height,
+                            metadata: {
+                                prompt: effectivePrompt,
+                                model: "ComfyUI",
+                                comfyWorkflowId: comfyWorkflow.id,
+                                ...imageMetadata(image),
+                            },
+                        };
+                    });
+                    pendingChildIds = imageNodes.map((node) => node.id);
+                    setNodes((prev) => [
+                        ...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
+                        ...imageNodes,
+                    ]);
+                    setConnections((prev) => [...prev, ...imageNodes.map((node) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: node.id }))]);
+                    return;
+                }
+
                 if (mode === "image") {
                     const count = getGenerationCount(generationConfig.count);
                     const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
@@ -2249,7 +2295,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [comfyui, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3008,6 +3054,23 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };
+}
+
+function buildComfyCanvasFieldValues(workflow: ComfyWorkflow, nodeValues: Record<string, unknown>, prompt: string) {
+    const values = Object.fromEntries(workflow.fields.map((field) => [field.id, nodeValues[field.id] ?? field.default]));
+    const promptText = prompt.trim();
+    if (!promptText) return values;
+    workflow.fields
+        .filter((field) => field.bindPrompt || isComfyPromptField(field))
+        .forEach((field) => {
+            values[field.id] = promptText;
+        });
+    return values;
+}
+
+function isComfyPromptField(field: ComfyWorkflowField) {
+    if (field.type !== "text" && field.type !== "textarea") return false;
+    return /prompt|text|caption|description|positive|negative|提示词|正向|负向/i.test(`${field.input} ${field.name}`);
 }
 
 function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
