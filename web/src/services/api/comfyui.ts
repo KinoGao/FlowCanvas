@@ -69,6 +69,27 @@ export function extractComfyOutputImages(history: ComfyHistoryItem) {
     return Object.values(history.outputs || {}).flatMap((output) => output.images || []);
 }
 
+export type ComfyUploadResult = {
+    name: string;
+    subfolder?: string;
+    type?: string;
+};
+
+export async function uploadComfyFile(config: ComfyUiConfig, blob: Blob, filename: string, signal?: AbortSignal): Promise<ComfyUploadResult> {
+    const formData = new FormData();
+    formData.append("image", blob, filename);
+    let response: Response;
+    if (config.proxyMode === "nextjs") {
+        formData.append("baseUrl", normalizeComfyBaseUrl(config.baseUrl));
+        response = await fetch("/api/comfyui-proxy", { method: "POST", body: formData, signal });
+    } else {
+        const baseUrl = normalizeComfyBaseUrl(config.baseUrl);
+        response = await fetch(`${baseUrl}/upload/image`, { method: "POST", body: formData, signal });
+    }
+    if (!response.ok) throw new Error(await readComfyError(response));
+    return response.json() as Promise<ComfyUploadResult>;
+}
+
 export function buildComfyViewUrl(config: ComfyUiConfig, file: ComfyOutputFile) {
     const params = new URLSearchParams({
         filename: file.filename,

@@ -13,11 +13,13 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "../types";
+import type { NodeGenerationInput } from "./canvas-node-generation";
 import { listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
+    inputs: NodeGenerationInput[];
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onGenerate: (nodeId: string) => void;
@@ -25,7 +27,7 @@ type CanvasConfigNodePanelProps = {
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const comfyui = useConfigStore((state) => state.comfyui);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -43,7 +45,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
 
     useEffect(() => {
         void listComfyWorkflows().then(setWorkflows);
-    }, []);
+    }, [mode]);
 
     useEffect(() => {
         if (mode === "comfyui" && selectedWorkflow && !node.metadata?.comfyWorkflowId && !comfyui.defaultWorkflowId) {
@@ -125,7 +127,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
                 {mode === "comfyui" ? (
-                    <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} onConfigChange={onConfigChange} />
+                    <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} inputs={inputs} onConfigChange={onConfigChange} />
                 ) : (
                     <>
                         <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
@@ -175,7 +177,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     );
 }
 
-function ComfyWorkflowControls({ node, workflows, selectedWorkflow, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
+function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; inputs: NodeGenerationInput[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
     const values = node.metadata?.comfyFieldValues || {};
     const updateValue = (field: ComfyWorkflowField, value: unknown) => {
         onConfigChange(node.id, { comfyFieldValues: { ...values, [field.id]: value } });
@@ -192,25 +194,44 @@ function ComfyWorkflowControls({ node, workflows, selectedWorkflow, onConfigChan
                 onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
             />
             {selectedWorkflow?.fields.length ? (
-                <div className="grid max-h-36 gap-1.5 overflow-y-auto pr-1">
+                <div className="grid max-h-60 gap-2 overflow-y-auto pr-1">
                     {selectedWorkflow.fields.map((field) => (
-                        <div key={field.id} className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-[11px]">
+                        <div key={field.id} className="grid gap-1 text-[11px]">
                             <span className="truncate opacity-70">{field.name || field.input}</span>
-                            <ComfyFieldControl field={field} value={values[field.id] ?? field.default} onChange={(value) => updateValue(field, value)} />
+                            <ComfyFieldControl field={field} value={values[field.id] ?? field.default} inputs={inputs} onChange={(value) => updateValue(field, value)} />
                         </div>
                     ))}
                 </div>
+            ) : selectedWorkflow ? (
+                <div className="text-[11px] opacity-50">该工作流没有暴露参数，请在 ComfyUI 管理页面配置</div>
             ) : null}
         </div>
     );
 }
 
-function ComfyFieldControl({ field, value, onChange }: { field: ComfyWorkflowField; value: unknown; onChange: (value: unknown) => void }) {
+function ComfyFieldControl({ field, value, inputs, onChange }: { field: ComfyWorkflowField; value: unknown; inputs: NodeGenerationInput[]; onChange: (value: unknown) => void }) {
     if (field.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
-    if (field.type === "number") return <InputNumber size="small" className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
-    if (field.type === "slider") return <InputNumber size="small" className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
-    if (field.type === "dropdown") return <Select size="small" value={String(value ?? "")} options={(field.options || []).map((option) => ({ label: option, value: option }))} onChange={onChange} />;
-    return <Input size="small" value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+    if (field.type === "number") return <InputNumber className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
+    if (field.type === "slider") return <InputNumber className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
+    if (field.type === "dropdown") return <Select value={String(value ?? "")} options={(field.options || []).map((option) => ({ label: option, value: option }))} onChange={onChange} />;
+    if (field.type === "textarea") return <Input.TextArea autoSize={{ minRows: 2 }} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+    if (field.type === "image" || field.type === "video" || field.type === "audio") {
+        const fieldType = field.type;
+        const matched = inputs.filter((input) => input.type === fieldType);
+        const currentValue = String(value ?? "");
+        const isNodeRef = currentValue.startsWith("@[node:");
+        return (
+            <Select
+                className="w-full"
+                placeholder={matched.length ? "选择上游节点" : `没有可用的上游${fieldType === "image" ? "图片" : fieldType === "video" ? "视频" : "音频"}节点`}
+                value={isNodeRef ? currentValue : undefined}
+                options={matched.map((input) => ({ label: input.title, value: `@[node:${input.nodeId}]` }))}
+                allowClear
+                onChange={(next) => onChange(next ?? "")}
+            />
+        );
+    }
+    return <Input.TextArea autoSize={{ minRows: 1 }} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
 }
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {

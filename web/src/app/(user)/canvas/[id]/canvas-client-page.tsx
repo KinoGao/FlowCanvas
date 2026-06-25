@@ -9,10 +9,10 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { runComfyWorkflow } from "@/services/api/comfyui";
+import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { DOCS_URL } from "@/constant/env";
-import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -35,7 +35,7 @@ import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/ca
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
-import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
+import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "../components/canvas-node-hover-toolbar";
 import { InfiniteCanvas } from "../components/infinite-canvas";
 import { Minimap } from "../components/canvas-mini-map";
@@ -1973,6 +1973,7 @@ function InfiniteCanvasPage() {
                     const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
                     if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
                     const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, effectivePrompt);
+                    await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
                     const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
                     const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
                     if (!result.images.length) throw new Error("ComfyUI 没有返回图片输出");
@@ -2640,6 +2641,7 @@ function InfiniteCanvasPage() {
                                 <CanvasConfigNodePanel
                                     node={contentNode}
                                     isRunning={runningNodeId === contentNode.id}
+                                    inputs={configInputsById.get(contentNode.id) || []}
                                     inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                     onConfigChange={handleConfigNodeChange}
                                     onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
@@ -3071,6 +3073,46 @@ function buildComfyCanvasFieldValues(workflow: ComfyWorkflow, nodeValues: Record
 function isComfyPromptField(field: ComfyWorkflowField) {
     if (field.type !== "text" && field.type !== "textarea") return false;
     return /prompt|text|caption|description|positive|negative|提示词|正向|负向/i.test(`${field.input} ${field.name}`);
+}
+
+const NODE_REF_PATTERN = /@\[node:([^\]]+)\]/;
+
+async function resolveComfyMediaFields(
+    workflow: ComfyWorkflow,
+    values: Record<string, unknown>,
+    context: NodeGenerationContext,
+    config: ComfyUiConfig,
+    signal?: AbortSignal,
+) {
+    const mediaFields = workflow.fields.filter((field) => field.type === "image" || field.type === "video" || field.type === "audio");
+    for (const field of mediaFields) {
+        const raw = String(values[field.id] ?? "");
+        const match = raw.match(NODE_REF_PATTERN);
+        if (!match) continue;
+        const nodeId = match[1];
+        const media = findMediaByNodeId(field.type, nodeId, context);
+        if (!media) throw new Error(`字段「${field.name || field.input}」引用的上游节点不存在或类型不匹配`);
+        const { blob, filename } = await fetchMediaBlob(media);
+        const uploaded = await uploadComfyFile(config, blob, filename, signal);
+        values[field.id] = uploaded.subfolder ? `${uploaded.subfolder}/${uploaded.name}` : uploaded.name;
+    }
+}
+
+function findMediaByNodeId(type: ComfyWorkflowField["type"], nodeId: string, context: NodeGenerationContext) {
+    if (type === "image") return context.referenceImages.find((img) => img.id === nodeId) || null;
+    if (type === "video") return context.referenceVideos.find((vid) => vid.id === nodeId) || null;
+    if (type === "audio") return context.referenceAudios.find((aud) => aud.id === nodeId) || null;
+    return null;
+}
+
+async function fetchMediaBlob(media: { dataUrl?: string; url?: string; storageKey?: string; name?: string; type?: string }) {
+    const source = media.dataUrl || media.url || media.storageKey;
+    if (!source) throw new Error("无法读取媒体数据");
+    const response = await fetch(source);
+    const blob = await response.blob();
+    const ext = blob.type.split("/")[1]?.split(";")[0] || "bin";
+    const filename = `${media.name || `upload-${Date.now()}`}.${ext}`;
+    return { blob, filename };
 }
 
 function buildAudioGenerationMetadata(config: AiConfig): CanvasNodeMetadata {
