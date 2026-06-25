@@ -7,3 +7,16 @@ services:
     ports:
       - "4000:4000"
     restart: unless-stopped
+  backend:
+    image: infinite-canvas-backend:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "4001:4001"
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTH_CODE=${AUTH_CODE:-}
+      - DB_PATH=/app/data/app.db

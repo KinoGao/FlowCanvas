@@ -5,8 +5,10 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
+import { useBackendSync } from "@/hooks/use-backend-sync";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
+    useBackendSync();
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const updateConfig = useConfigStore((state) => state.updateConfig);

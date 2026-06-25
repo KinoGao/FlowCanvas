@@ -10,3 +10,5 @@ data/
 .DS_Store
 .idea
 .claude/settings.local.json
+backend/target/
+backend/data/

@@ -64,12 +64,15 @@ export function ImageToolSettingsModal({
     const syncPreviewScroll = useCallback(() => {
         const toolbar = previewToolbarRef.current;
         if (!toolbar) return;
-        setPreviewScroll({
-            left: toolbar.scrollLeft,
-            max: Math.max(0, toolbar.scrollWidth - toolbar.clientWidth),
-            viewport: Math.max(1, toolbar.clientWidth),
-            content: Math.max(1, toolbar.scrollWidth),
-        });
+        const left = toolbar.scrollLeft;
+        const max = Math.max(0, toolbar.scrollWidth - toolbar.clientWidth);
+        const viewport = Math.max(1, toolbar.clientWidth);
+        const content = Math.max(1, toolbar.scrollWidth);
+        setPreviewScroll((prev) =>
+            prev.left === left && prev.max === max && prev.viewport === viewport && prev.content === content
+                ? prev
+                : { left, max, viewport, content },
+        );
     }, []);
 
     const setPreviewScrollLeft = useCallback(

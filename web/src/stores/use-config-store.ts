@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { BackendSyncConfig } from "@/services/api/backend";
 import { nanoid } from "nanoid";
 
 export type ApiCallFormat = "openai" | "gemini";
@@ -68,6 +69,13 @@ export type ComfyUiConfig = {
     defaultWorkflowId: string;
     timeoutSeconds: string;
     pollIntervalMs: string;
+};
+
+export const defaultBackendSyncConfig: BackendSyncConfig = {
+    enabled: false,
+    url: "",
+    authCode: "",
+    publicBaseUrl: "",
 };
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
@@ -139,11 +147,13 @@ type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
     comfyui: ComfyUiConfig;
+    backend: BackendSyncConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     updateComfyUiConfig: <K extends keyof ComfyUiConfig>(key: K, value: ComfyUiConfig[K]) => void;
+    updateBackendConfig: <K extends keyof BackendSyncConfig>(key: K, value: BackendSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -201,6 +211,7 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             comfyui: defaultComfyUiConfig,
+            backend: defaultBackendSyncConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -224,6 +235,13 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            updateBackendConfig: (key, value) =>
+                set((state) => ({
+                    backend: {
+                        ...state.backend,
+                        [key]: value,
+                    },
+                })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
@@ -231,12 +249,13 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config, webdav: state.webdav, comfyui: state.comfyui }),
+            partialize: (state) => ({ config: state.config, webdav: state.webdav, comfyui: state.comfyui, backend: state.backend }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const persistedComfyUi = (persistedState.comfyui || {}) as Partial<ComfyUiConfig>;
+                const persistedBackend = (persistedState.backend || {}) as Partial<BackendSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
@@ -245,6 +264,7 @@ export const useConfigStore = create<ConfigStore>()(
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
                     comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi },
+                    backend: { ...defaultBackendSyncConfig, ...persistedBackend },
                     config: {
                         ...config,
                         channelMode: "local",

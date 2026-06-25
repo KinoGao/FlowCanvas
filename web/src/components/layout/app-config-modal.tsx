@@ -1,10 +1,11 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi, Workflow } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Server, Trash2, Wifi, Workflow } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
+import { testBackendConnection } from "@/services/api/backend";
 import { testComfyConnection } from "@/services/api/comfyui";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
@@ -70,15 +71,18 @@ export function AppConfigModal() {
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [testingComfyUi, setTestingComfyUi] = useState(false);
+    const [testingBackend, setTestingBackend] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const comfyui = useConfigStore((state) => state.comfyui);
+    const backend = useConfigStore((state) => state.backend);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
+    const updateBackendConfig = useConfigStore((state) => state.updateBackendConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
@@ -196,6 +200,26 @@ export function AppConfigModal() {
             message.error(error instanceof Error ? error.message : "ComfyUI 连接测试失败");
         } finally {
             setTestingComfyUi(false);
+        }
+    };
+
+    const testBackend = async () => {
+        if (!backend.url.trim()) {
+            message.error("请先填写后端地址");
+            return;
+        }
+        setTestingBackend(true);
+        try {
+            const ok = await testBackendConnection(backend.url);
+            if (ok) {
+                message.success("后端连接可用");
+            } else {
+                message.error("后端健康检查未通过，请检查地址是否正确");
+            }
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "后端连接测试失败");
+        } finally {
+            setTestingBackend(false);
         }
     };
 
@@ -534,6 +558,81 @@ export function AppConfigModal() {
                                             测试连接
                                         </Button>
                                         <span className="text-xs text-stone-500">Next.js 转发可避免浏览器 CORS；部署公网时不要把它暴露给不可信用户。</span>
+                                    </div>
+                                </section>
+                            </Form>
+                        ),
+                    },
+                    {
+                        key: "backend",
+                        label: "后端同步",
+                        children: (
+                            <Form layout="vertical" requiredMark={false}>
+                                <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                                <Server className="size-4" />
+                                                后端配置同步
+                                            </div>
+                                            <div className="mt-1 text-xs text-stone-500">
+                                                将渠道、模型、偏好等配置同步到自建后端，实现跨浏览器共享。配置包含 API Key，请确保后端安全。
+                                            </div>
+                                        </div>
+                                        <div className="text-xs text-stone-500">
+                                            {backend.enabled ? "已启用" : "未启用"}
+                                        </div>
+                                    </div>
+
+                                    <Form.Item label="启用同步" className="mb-4">
+                                        <Segmented
+                                            block
+                                            value={backend.enabled ? "on" : "off"}
+                                            onChange={(value) => updateBackendConfig("enabled", value === "on")}
+                                            options={[
+                                                { label: "关闭", value: "off" },
+                                                { label: "启用", value: "on" },
+                                            ]}
+                                        />
+                                    </Form.Item>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <Form.Item label="后端地址" extra="如 http://127.0.0.1:4001" className="mb-4">
+                                            <Input
+                                                value={backend.url}
+                                                placeholder="http://127.0.0.1:4001"
+                                                onChange={(event) => updateBackendConfig("url", event.target.value)}
+                                            />
+                                        </Form.Item>
+                                        <Form.Item label="认证码" extra="后端启动时生成的 AUTH_CODE" className="mb-4">
+                                            <Input.Password
+                                                value={backend.authCode}
+                                                placeholder="输入后端生成的认证码"
+                                                onChange={(event) => updateBackendConfig("authCode", event.target.value)}
+                                            />
+                                        </Form.Item>
+                                    </div>
+
+                                    <Form.Item label="公网访问地址" extra="用于 Agnes 视频生成时上传参考图。填写后端可被模型厂商访问的公网地址，如 https://your-domain.com。留空则使用临时图床" className="mb-4">
+                                        <Input
+                                            value={backend.publicBaseUrl}
+                                            placeholder="https://your-domain.com"
+                                            onChange={(event) => updateBackendConfig("publicBaseUrl", event.target.value)}
+                                        />
+                                    </Form.Item>
+
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        <Button
+                                            icon={<Wifi className="size-4" />}
+                                            disabled={!backend.url.trim()}
+                                            loading={testingBackend}
+                                            onClick={() => void testBackend()}
+                                        >
+                                            测试连接
+                                        </Button>
+                                        <span className="text-xs text-stone-500">
+                                            启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。
+                                        </span>
                                     </div>
                                 </section>
                             </Form>

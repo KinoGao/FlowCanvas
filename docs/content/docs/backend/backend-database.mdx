@@ -1,0 +1,30 @@
+---
+title: 后端数据库结构
+description: 后端配置同步服务的 SQLite 数据库表结构说明
+---
+
+# 后端数据库结构
+
+后端使用 SQLite 作为存储引擎，由 Spring Data JPA + Hibernate 自动迁移（`ddl-auto: update`）。数据库文件路径由环境变量 `DB_PATH` 指定，默认为 `./data/app.db`。
+
+## config 表
+
+单行存储，固定 `id = 1`。整个 `AiConfig` JSON 作为一个字符串写入 `data` 字段。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | BIGINT (PK) | 固定值 `1`，单行存储 |
+| `data` | TEXT | `AiConfig` JSON 字符串，包含渠道、模型、偏好等全部配置 |
+| `updated_at` | TIMESTAMP | 最后一次写入时间（UTC），前端用于 last-write-wins 比较 |
+
+### 同步策略
+
+1. **启动拉取**：前端应用启动时调用 `GET /api/config`，比较远端 `updatedAt` 与本地 `localStorage` 中的 `infinite-canvas:config_updated_at`，远端更新则覆盖本地
+2. **变更推送**：前端配置变更后 2s debounce 调用 `PUT /api/config`，将完整 `AiConfig` JSON 推送到后端
+3. **冲突处理**：last-write-wins，不进行字段级合并
+
+### 安全说明
+
+- `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境
+- 所有 API 请求需携带 `Authorization: Bearer <AUTH_CODE>` 头（`/api/health` 除外）
+- `AUTH_CODE` 通过环境变量传入，未设置时后端启动会自动生成随机码并打印到控制台

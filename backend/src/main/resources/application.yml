@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:./data/app.db}
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+server:
+  port: ${PORT:4001}
+
+app:
+  auth-code: ${AUTH_CODE:}
+  public-image-dir: ${PUBLIC_IMAGE_DIR:./data/public-images}

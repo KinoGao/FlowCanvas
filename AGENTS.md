@@ -21,12 +21,12 @@
 
 ## 后端规范
 
-- 后端使用 Go + Gin + GORM。
-- `handler/` 只处理 HTTP 入参、调用 service、返回 `OK` / `Fail`。
+- 后端使用 Java + Spring Boot + JPA + SQLite。
+- `controller/` 只处理 HTTP 入参、调用 service、返回 `OK` / `Fail`。
 - `service/` 放业务逻辑、默认值、校验、时间、ID、鉴权等处理。
-- `repository/` 只做数据库访问和 GORM 查询。
-- `model/` 只定义数据结构、枚举和简单模型方法。
-- 列表接口优先沿用 `model.Query`、`Normalize`、分页和标签筛选方式。
+- `repository/` 只做数据库访问和 JPA 查询。
+- `entity/` 只定义数据结构、枚举和简单模型方法。
+- 列表接口优先沿用分页和标签筛选方式。
 - 业务接口保持 `{ code, data, msg }` 的响应结构。
 - 新增数据表时同步更新 `docs/backend-database.md`。
 

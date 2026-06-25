@@ -4,7 +4,8 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceNewModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceCapabilityError, seedanceGenerationMode, seedanceSupportsGenerateAudio, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { buildApiUrl, modelOptionName, resolveModelRequestConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { uploadImageToBackend, buildPublicImageUrl } from "@/services/api/backend";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -331,7 +332,7 @@ async function createAgnesVideoTask(config: AiConfig, model: string, prompt: str
     }
 }
 
-// 第一次失败后，按 temp.sh → litterbox 顺序尝试上传到公网图床，全部失败抛出聚合错误
+// 后端公网地址可用时，优先上传到后端；否则降级到临时图床
 async function agnesRetryWithPublicHost(
     config: AiConfig,
     model: string,
@@ -341,6 +342,17 @@ async function agnesRetryWithPublicHost(
     options?: RequestOptions,
 ): Promise<VideoGenerationTask> {
     const errors: string[] = [`[本地图片准备] ${imageError}`];
+
+    const backend = useConfigStore.getState().backend;
+    if (backend.enabled && backend.url.trim() && backend.authCode.trim() && backend.publicBaseUrl.trim()) {
+        try {
+            const publicUrls = await uploadReferencesToBackend(references, backend.url, backend.authCode, backend.publicBaseUrl, options?.signal);
+            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, options);
+        } catch (backendError) {
+            const message = backendError instanceof Error ? backendError.message : String(backendError);
+            errors.push(`[后端公网地址] 上传失败：${message}`);
+        }
+    }
 
     for (const [index, source] of (["temp.sh", "litterbox"] as const).entries()) {
         const methodIndex = index + 1;
@@ -392,6 +404,16 @@ async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: s
 
 async function uploadReferencesToPublicHost(references: ReferenceImage[], source: "temp.sh" | "litterbox", signal?: AbortSignal): Promise<string[]> {
     return Promise.all(references.map((image) => uploadImageToHost(image, source, signal)));
+}
+
+async function uploadReferencesToBackend(references: ReferenceImage[], backendUrl: string, authCode: string, publicBaseUrl: string, signal?: AbortSignal): Promise<string[]> {
+    return Promise.all(references.map(async (image) => {
+        const dataUrl = await imageToDataUrl(image);
+        if (!dataUrl) throw new Error("读取本地参考图失败");
+        const blob = await (await fetch(dataUrl)).blob();
+        const filename = await uploadImageToBackend(backendUrl, authCode, blob, image.name || "reference.png");
+        return buildPublicImageUrl(publicBaseUrl, filename);
+    }));
 }
 
 async function uploadImageToHost(image: ReferenceImage, source: "temp.sh" | "litterbox", signal?: AbortSignal): Promise<string> {
