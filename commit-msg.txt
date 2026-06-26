@@ -1,9 +1,0 @@
-fix: canvas bug fixes and dual-file workflow sync
-
-- Fix Video/Audio/Text nodes defaulting to image generation mode
-- Fix ComfyUI Select dropdown blocked by canvas pointer handler
-- Fix antd Select popupClassName deprecation warning
-- Fix empty src attribute on homepage prompt showcase images
-- Fix video/audio prompt incorrectly appending upstream text content
-- Add backend workflow dual-file sync (raw JSON + config)
-- Add backend config sync and public image host support

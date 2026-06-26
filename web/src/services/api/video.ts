@@ -393,7 +393,7 @@ async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: s
         frame_rate: 24,
     };
     if (urls.length === 1) body.image = urls[0];
-    else if (urls.length > 1) body.image = urls;
+    else if (urls.length > 1) body.extra_body = { image: urls };
 
     const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data;
     if (created.error?.message) throw new Error(created.error.message);
