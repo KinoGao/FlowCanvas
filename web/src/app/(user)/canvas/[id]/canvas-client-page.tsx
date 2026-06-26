@@ -1953,7 +1953,7 @@ function InfiniteCanvasPage() {
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt, { appendUpstreamText: mode === "image" || mode === "text" }),
+                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
             );
             const effectivePrompt = generationContext.prompt.trim();
             if (runController.signal.aborted) {
@@ -3102,7 +3102,7 @@ async function resolveComfyMediaFields(
     config: ComfyUiConfig,
     signal?: AbortSignal,
 ) {
-    const mediaFields = workflow.fields.filter((field) => field.type === "image" || field.type === "video" || field.type === "audio");
+    const mediaFields = workflow.fields.filter((field): field is ComfyWorkflowField & { type: "image" | "video" | "audio" } => field.type === "image" || field.type === "video" || field.type === "audio");
     for (const field of mediaFields) {
         const raw = String(values[field.id] ?? "");
         const media = findMediaByReference(field.type, raw, context);
@@ -3123,20 +3123,21 @@ function replaceComfyReferences(value: string, context: NodeGenerationContext, t
     });
     getLabeledInputs(context, type).forEach((input) => {
         if (input.type !== "text") return;
-        next = next.replace(new RegExp(escapeRegExp(input.label), "g"), input.text || "");
+        next = replaceStandaloneLabel(next, input.label, input.text || "");
     });
     return next;
 }
 
-function findMediaByReference(type: ComfyWorkflowField["type"], raw: string, context: NodeGenerationContext) {
+function findMediaByReference(type: "image" | "video" | "audio", raw: string, context: NodeGenerationContext) {
     const match = raw.match(NODE_REF_PATTERN);
     if (match) return findMediaByNodeId(type, match[1], context);
-    const reference = getLabeledInputs(context, type).find((input) => raw.trim() === input.label || raw.includes(input.label));
+    const value = raw.trim();
+    const reference = getLabeledInputs(context, type).find((input) => value === input.label || value === `【${input.label}】`);
     if (!reference) return null;
     return findMediaByNodeId(type, reference.nodeId, context);
 }
 
-function findMediaByNodeId(type: ComfyWorkflowField["type"], nodeId: string, context: NodeGenerationContext) {
+function findMediaByNodeId(type: "image" | "video" | "audio", nodeId: string, context: NodeGenerationContext) {
     const input = context.inputs.find((item) => item.nodeId === nodeId && item.type === type);
     if (type === "image") return input?.image || null;
     if (type === "video") return input?.video || null;
@@ -3165,6 +3166,13 @@ function comfyReferenceLabel(type: "text" | "image" | "video" | "audio", index: 
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceStandaloneLabel(value: string, label: string, replacement: string) {
+    const escaped = escapeRegExp(label);
+    return value
+        .replace(new RegExp(`【${escaped}】`, "g"), replacement)
+        .replace(new RegExp(`(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
 }
 
 async function fetchMediaBlob(media: { dataUrl?: string; url?: string; storageKey?: string; name?: string; type?: string }) {

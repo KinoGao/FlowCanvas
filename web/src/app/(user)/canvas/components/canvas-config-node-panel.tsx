@@ -220,11 +220,6 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
     const rawTextValue = String(value ?? "");
     const textValue = normalizeAdjacentMentionLabels(rawTextValue, mentionLabels);
 
-    useEffect(() => {
-        if (field.type !== "text" && field.type !== "textarea") return;
-        if (textValue !== rawTextValue) onChange(textValue);
-    }, [field.type, onChange, rawTextValue, textValue]);
-
     if (field.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
     if (field.type === "number") return <InputNumber className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
     if (field.type === "slider") return <InputNumber className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;

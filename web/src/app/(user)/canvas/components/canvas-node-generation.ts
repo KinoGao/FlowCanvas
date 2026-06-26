@@ -73,11 +73,11 @@ function buildMentionLabelGenerationContext(inputs: NodeGenerationInput[], promp
     labeledInputs
         .sort((a, b) => b.label.length - a.label.length)
         .forEach(({ input, label }) => {
-            if (!nextPrompt.includes(label)) return;
+            if (!hasLabelToken(nextPrompt, label)) return;
             hasLabel = true;
+            nextPrompt = replaceLabelToken(nextPrompt, label, input.type === "text" ? `【${label}】` : label);
             if (input.type === "text") {
                 textBlocks.push(`【${label}】\n${input.text || ""}`);
-                nextPrompt = nextPrompt.replace(new RegExp(escapeRegExp(label), "g"), `【${label}】`);
             } else {
                 selectedInputs.push(input);
             }
@@ -214,6 +214,18 @@ function generationLabel(type: NodeGenerationInput["type"], index: number) {
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceLabelToken(value: string, label: string, replacement: string) {
+    const escaped = escapeRegExp(label);
+    return value
+        .replace(new RegExp(`【${escaped}】`, "g"), replacement)
+        .replace(new RegExp(`(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
+}
+
+function hasLabelToken(value: string, label: string) {
+    const escaped = escapeRegExp(label);
+    return new RegExp(`【${escaped}】|(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "u").test(value);
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
