@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/components/layout/app-providers";
+import { Analytics } from "@vercel/analytics/next";
 import "antd/dist/reset.css";
 import "./globals.css";
 import React from "react";
@@ -34,6 +35,7 @@ export default function RootLayout({
                 <AntdRegistry>
                     <AppProviders>{children}</AppProviders>
                 </AntdRegistry>
+                <Analytics />
             </body>
         </html>
     );

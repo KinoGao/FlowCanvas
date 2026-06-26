@@ -108,18 +108,18 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         {aspectOptions.map((item) => {
                             const disabled = seedreamSizeDisabled(item.value, seedreamCapabilities);
                             return (
-                            <button
-                                key={item.value}
-                                type="button"
-                                disabled={disabled}
-                                className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
-                                style={{ borderColor: selectedAspect?.value === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={() => selectAspect(item.value)}
-                            >
-                                <AspectIcon type={item.icon} width={item.width} height={item.height} color={theme.node.text} />
-                                <span>{item.label}</span>
-                            </button>
+                                <button
+                                    key={item.value}
+                                    type="button"
+                                    disabled={disabled}
+                                    className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
+                                    style={{ borderColor: selectedAspect?.value === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onClick={() => selectAspect(item.value)}
+                                >
+                                    <AspectIcon type={item.icon} width={item.width} height={item.height} color={theme.node.text} />
+                                    <span>{item.label}</span>
+                                </button>
                             );
                         })}
                     </div>

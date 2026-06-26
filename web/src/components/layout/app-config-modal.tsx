@@ -11,7 +11,21 @@ import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, defaultBaseUrlForApiFormat, encodeChannelModel, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ImageResponseFormatPolicy, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import {
+    createModelChannel,
+    defaultBaseUrlForApiFormat,
+    encodeChannelModel,
+    filterModelsByCapability,
+    modelOptionLabel,
+    modelOptionsFromChannels,
+    normalizeModelOptionValue,
+    useConfigStore,
+    type AiConfig,
+    type ApiCallFormat,
+    type ImageResponseFormatPolicy,
+    type ModelCapability,
+    type ModelChannel,
+} from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -417,16 +431,8 @@ export function AppConfigModal() {
                                             onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
                                         />
                                     </Form.Item>
-                                    <Form.Item
-                                        label="生图响应格式"
-                                        extra="自定义模型走 litellm 代理时，b64_json 可能触发 UnsupportedParamsError，可切换为自动/URL 模式。"
-                                        className="mb-4"
-                                    >
-                                        <Select
-                                            value={config.imageResponseFormat || "auto"}
-                                            options={imageResponseFormatOptions.map(({ value, label }) => ({ value, label }))}
-                                            onChange={(value) => updateConfig("imageResponseFormat", value)}
-                                        />
+                                    <Form.Item label="生图响应格式" extra="自定义模型走 litellm 代理时，b64_json 可能触发 UnsupportedParamsError，可切换为自动/URL 模式。" className="mb-4">
+                                        <Select value={config.imageResponseFormat || "auto"} options={imageResponseFormatOptions.map(({ value, label }) => ({ value, label }))} onChange={(value) => updateConfig("imageResponseFormat", value)} />
                                     </Form.Item>
                                     <Form.Item label="默认音频声音" className="mb-4">
                                         <Select value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
@@ -575,13 +581,9 @@ export function AppConfigModal() {
                                                 <Server className="size-4" />
                                                 后端配置同步
                                             </div>
-                                            <div className="mt-1 text-xs text-stone-500">
-                                                将渠道、模型、偏好等配置同步到自建后端，实现跨浏览器共享。配置包含 API Key，请确保后端安全。
-                                            </div>
+                                            <div className="mt-1 text-xs text-stone-500">将渠道、模型、偏好等配置同步到自建后端，实现跨浏览器共享。配置包含 API Key，请确保后端安全。</div>
                                         </div>
-                                        <div className="text-xs text-stone-500">
-                                            {backend.enabled ? "已启用" : "未启用"}
-                                        </div>
+                                        <div className="text-xs text-stone-500">{backend.enabled ? "已启用" : "未启用"}</div>
                                     </div>
 
                                     <Form.Item label="启用同步" className="mb-4">
@@ -598,41 +600,22 @@ export function AppConfigModal() {
 
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <Form.Item label="后端地址" extra="如 http://127.0.0.1:4001" className="mb-4">
-                                            <Input
-                                                value={backend.url}
-                                                placeholder="http://127.0.0.1:4001"
-                                                onChange={(event) => updateBackendConfig("url", event.target.value)}
-                                            />
+                                            <Input value={backend.url} placeholder="http://127.0.0.1:4001" onChange={(event) => updateBackendConfig("url", event.target.value)} />
                                         </Form.Item>
                                         <Form.Item label="认证码" extra="后端启动时生成的 AUTH_CODE" className="mb-4">
-                                            <Input.Password
-                                                value={backend.authCode}
-                                                placeholder="输入后端生成的认证码"
-                                                onChange={(event) => updateBackendConfig("authCode", event.target.value)}
-                                            />
+                                            <Input.Password value={backend.authCode} placeholder="输入后端生成的认证码" onChange={(event) => updateBackendConfig("authCode", event.target.value)} />
                                         </Form.Item>
                                     </div>
 
                                     <Form.Item label="公网访问地址" extra="用于 Agnes 视频生成时上传参考图。填写后端可被模型厂商访问的公网地址，如 https://your-domain.com。留空则使用临时图床" className="mb-4">
-                                        <Input
-                                            value={backend.publicBaseUrl}
-                                            placeholder="https://your-domain.com"
-                                            onChange={(event) => updateBackendConfig("publicBaseUrl", event.target.value)}
-                                        />
+                                        <Input value={backend.publicBaseUrl} placeholder="https://your-domain.com" onChange={(event) => updateBackendConfig("publicBaseUrl", event.target.value)} />
                                     </Form.Item>
 
                                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                                        <Button
-                                            icon={<Wifi className="size-4" />}
-                                            disabled={!backend.url.trim()}
-                                            loading={testingBackend}
-                                            onClick={() => void testBackend()}
-                                        >
+                                        <Button icon={<Wifi className="size-4" />} disabled={!backend.url.trim()} loading={testingBackend} onClick={() => void testBackend()}>
                                             测试连接
                                         </Button>
-                                        <span className="text-xs text-stone-500">
-                                            启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。
-                                        </span>
+                                        <span className="text-xs text-stone-500">启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。</span>
                                     </div>
                                 </section>
                             </Form>

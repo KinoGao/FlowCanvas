@@ -132,11 +132,27 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, o
                     <>
                         <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                         {mode === "video" ? (
-                            <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
+                            />
                         ) : mode === "image" ? (
-                            <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                            <CanvasImageSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                autoAdjustOverflow={false}
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                            />
                         ) : mode === "audio" ? (
-                            <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))}
+                            />
                         ) : null}
                     </>
                 )}
@@ -177,7 +193,19 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, o
     );
 }
 
-function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; inputs: NodeGenerationInput[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
+function ComfyWorkflowControls({
+    node,
+    workflows,
+    selectedWorkflow,
+    inputs,
+    onConfigChange,
+}: {
+    node: CanvasNodeData;
+    workflows: ComfyWorkflow[];
+    selectedWorkflow?: ComfyWorkflow;
+    inputs: NodeGenerationInput[];
+    onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+}) {
     const values = node.metadata?.comfyFieldValues || {};
     const updateValue = (field: ComfyWorkflowField, value: unknown) => {
         onConfigChange(node.id, { comfyFieldValues: { ...values, [field.id]: value } });

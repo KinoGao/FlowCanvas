@@ -11,7 +11,9 @@ type SeedreamCapabilities = {
 };
 
 function normalizedSeedreamModel(model: string) {
-    return modelOptionName(model).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    return modelOptionName(model)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-");
 }
 
 export function isSeedreamImageModel(model: string) {

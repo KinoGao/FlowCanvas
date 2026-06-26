@@ -242,7 +242,10 @@ export default function ComfyUiPage() {
                                                     <button
                                                         key={`${candidate.node}:${candidate.input}`}
                                                         type="button"
-                                                        className={cn("rounded-md border p-3 text-left transition", active ? "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30" : "border-stone-200 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900")}
+                                                        className={cn(
+                                                            "rounded-md border p-3 text-left transition",
+                                                            active ? "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30" : "border-stone-200 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900",
+                                                        )}
                                                         onClick={() => toggleField(candidate)}
                                                     >
                                                         <div className="flex items-start justify-between gap-3">
