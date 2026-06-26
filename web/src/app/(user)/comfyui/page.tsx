@@ -1,10 +1,11 @@
 "use client";
 
 import { App, Button, Empty, Form, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tag, Typography } from "antd";
-import { Check, Play, Save, Trash2, Upload, Workflow } from "lucide-react";
+import { Check, CloudDownload, CloudUpload, Play, Save, Trash2, Upload, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { runComfyWorkflow } from "@/services/api/comfyui";
+import { deleteRemoteWorkflow, fetchRemoteWorkflows, pushRemoteWorkflowConfig, uploadRemoteWorkflow } from "@/services/api/backend";
 import {
     applyComfyWorkflowFields,
     createComfyWorkflow,
@@ -37,9 +38,11 @@ export default function ComfyUiPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const comfyui = useConfigStore((state) => state.comfyui);
     const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
+    const backend = useConfigStore((state) => state.backend);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const [selectedId, setSelectedId] = useState("");
     const [runImages, setRunImages] = useState<string[]>([]);
@@ -51,6 +54,75 @@ export default function ComfyUiPage() {
     useEffect(() => {
         void refreshWorkflows();
     }, []);
+
+    const backendReady = backend.enabled && backend.url.trim() && backend.authCode.trim();
+
+    const syncFromBackend = async () => {
+        if (!backendReady) {
+            message.warning("请先在设置中启用后端同步");
+            return;
+        }
+        setSyncing(true);
+        try {
+            const remoteWorkflows = await fetchRemoteWorkflows(backend.url, backend.authCode);
+            const localWorkflows = await listComfyWorkflows();
+            const localMap = new Map(localWorkflows.map((w) => [w.id, w]));
+            let changed = false;
+            for (const remote of remoteWorkflows) {
+                if (!remote.workflow || typeof remote.workflow !== "object") continue;
+                const local = localMap.get(remote.id);
+                if (!local) {
+                    await saveComfyWorkflow({ ...remote, fields: Array.isArray(remote.fields) ? remote.fields : [] });
+                    changed = true;
+                } else if (JSON.stringify(local.fields) !== JSON.stringify(remote.fields) || local.title !== remote.title) {
+                    const merged = { ...local, fields: remote.fields, title: remote.title };
+                    await saveComfyWorkflow(merged);
+                    changed = true;
+                }
+                localMap.delete(remote.id);
+            }
+            if (changed) {
+                await refreshWorkflows(selectedId);
+                message.success("工作流已从后端同步");
+            } else {
+                message.info("本地与后端工作流已一致");
+            }
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "从后端同步工作流失败");
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const syncToBackend = async () => {
+        if (!backendReady) {
+            message.warning("请先在设置中启用后端同步");
+            return;
+        }
+        setSyncing(true);
+        try {
+            const localWorkflows = await listComfyWorkflows();
+            const remoteWorkflows = await fetchRemoteWorkflows(backend.url, backend.authCode);
+            const remoteIds = new Set(remoteWorkflows.map((w) => w.id));
+            for (const workflow of localWorkflows) {
+                if (remoteIds.has(workflow.id)) {
+                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, workflow.id, { title: workflow.title, fields: workflow.fields });
+                } else {
+                    await uploadRemoteWorkflow(backend.url, backend.authCode, workflow.id, workflow.workflow);
+                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, workflow.id, { title: workflow.title, fields: workflow.fields });
+                }
+                remoteIds.delete(workflow.id);
+            }
+            for (const id of remoteIds) {
+                await deleteRemoteWorkflow(backend.url, backend.authCode, id);
+            }
+            message.success("本地工作流配置已同步到后端");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "推送工作流到后端失败");
+        } finally {
+            setSyncing(false);
+        }
+    };
 
     const refreshWorkflows = async (nextSelectedId = selectedId) => {
         setLoading(true);
@@ -91,6 +163,9 @@ export default function ComfyUiPage() {
             const created = await createComfyWorkflow({ name: file.name, workflow });
             updateComfyUiConfig("defaultWorkflowId", created.id);
             await refreshWorkflows(created.id);
+            if (backendReady) {
+                try { await uploadRemoteWorkflow(backend.url, backend.authCode, created.id, workflow); } catch { /* 静默 */ }
+            }
             message.success("ComfyUI workflow 已导入");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "导入失败");
@@ -110,6 +185,9 @@ export default function ComfyUiPage() {
             const saved = await saveComfyWorkflow(selected);
             updateComfyUiConfig("defaultWorkflowId", saved.id);
             await refreshWorkflows(saved.id);
+            if (backendReady) {
+                try { await pushRemoteWorkflowConfig(backend.url, backend.authCode, saved.id, { title: saved.title, fields: saved.fields }); } catch { /* 静默 */ }
+            }
             message.success("工作流配置已保存");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存失败");
@@ -128,6 +206,9 @@ export default function ComfyUiPage() {
             cancelText: "取消",
             onOk: async () => {
                 await deleteComfyWorkflow(selected.id);
+                if (backendReady) {
+                    try { await deleteRemoteWorkflow(backend.url, backend.authCode, selected.id); } catch { /* 静默 */ }
+                }
                 if (comfyui.defaultWorkflowId === selected.id) updateComfyUiConfig("defaultWorkflowId", "");
                 await refreshWorkflows("");
                 message.success("工作流已删除");
@@ -173,6 +254,12 @@ export default function ComfyUiPage() {
                             <Button type="primary" icon={<Save className="size-4" />} disabled={!selected} loading={saving} onClick={() => void saveSelected()}>
                                 保存配置
                             </Button>
+                            <Button icon={<CloudDownload className="size-4" />} loading={syncing} onClick={() => void syncFromBackend()} disabled={!backendReady}>
+                                从后端拉取
+                            </Button>
+                            <Button icon={<CloudUpload className="size-4" />} loading={syncing} onClick={() => void syncToBackend()} disabled={!backendReady}>
+                                推送到后端
+                            </Button>
                         </div>
                     </div>
 
@@ -185,9 +272,9 @@ export default function ComfyUiPage() {
                                 </div>
                             ) : workflows.length ? (
                                 <div className="space-y-2">
-                                    {workflows.map((workflow) => (
+                                    {workflows.map((workflow, index) => (
                                         <button
-                                            key={workflow.id}
+                                            key={workflow.id || workflow.name || index}
                                             type="button"
                                             className={cn(
                                                 "w-full rounded-md border px-3 py-2 text-left transition",
@@ -196,7 +283,7 @@ export default function ComfyUiPage() {
                                             onClick={() => setSelectedId(workflow.id)}
                                         >
                                             <div className="line-clamp-1 text-sm font-medium">{workflow.title}</div>
-                                            <div className="mt-1 text-xs text-stone-500">{workflow.fields.length} 个暴露参数</div>
+                                            <div className="mt-1 text-xs text-stone-500">{(workflow.fields || []).length} 个暴露参数</div>
                                         </button>
                                     ))}
                                 </div>

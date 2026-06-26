@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
@@ -12,7 +12,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
-import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
@@ -40,19 +40,24 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const mentionLabels = useMemo(() => Array.from(new Set(mentionReferences.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length), [mentionReferences]);
     const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? config.count : 1 });
 
     useEffect(() => {
-        setPrompt(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    }, [isEditingExistingContent, node.id]);
+        const rawPrompt = isEditingExistingContent ? "" : node.metadata?.prompt || "";
+        const nextPrompt = normalizePromptReferences(rawPrompt, mentionReferences, mentionLabels);
+        setPrompt(nextPrompt);
+        if (!isEditingExistingContent && nextPrompt !== rawPrompt) onPromptChange(node.id, nextPrompt);
+    }, [isEditingExistingContent, mentionLabels, mentionReferences, node.id, node.metadata?.prompt, onPromptChange]);
 
     const updatePrompt = (value: string) => {
-        setPrompt(value);
-        if (!isEditingExistingContent) onPromptChange(node.id, value);
+        const nextPrompt = normalizePromptReferences(value, mentionReferences, mentionLabels);
+        setPrompt(nextPrompt);
+        if (!isEditingExistingContent) onPromptChange(node.id, nextPrompt);
     };
 
     const submit = () => {
-        const text = prompt.trim();
+        const text = normalizePromptReferences(prompt, mentionReferences, mentionLabels).trim();
         if (!text || isRunning) return;
         onGenerate(node.id, mode, text);
         setPrompt("");
@@ -178,4 +183,21 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
+}
+
+function normalizePromptReferences(value: string, references: CanvasResourceReference[], labels: string[]) {
+    let next = normalizeAdjacentMentionLabels(value, labels);
+    references
+        .filter((reference) => reference.active && reference.kind === "text" && reference.text?.trim())
+        .forEach((reference) => {
+            const text = reference.text?.trim();
+            if (!text) return;
+            const label = `【${reference.label}】`;
+            const textIndex = next.lastIndexOf(text);
+            if (textIndex < 0) return;
+            const prefix = next.slice(0, textIndex);
+            if (!prefix.includes(label) || next.slice(textIndex).trim() !== text) return;
+            next = prefix.trimEnd();
+        });
+    return next;
 }

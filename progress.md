@@ -12,3 +12,12 @@
 - Added ComfyUI pending-test notes to docs.
 - Ran `git diff --check`; it passed with only existing Windows line-ending warnings.
 - Added ComfyUI as a canvas config node mode with workflow selection, exposed field controls, and image-output node creation.
+- Updated ComfyUI config-node exposed text fields to use the canvas resource mention textarea, so upstream text/images/videos/audio can be inserted with `@` where appropriate.
+- Added ComfyUI execution-side resolution for text references and media references before applying workflow field values.
+- Fixed config-node generation status updates so raw prompt/reference text stays in the input box; upstream text is expanded only for the outgoing generation request and generated result metadata.
+- Improved ComfyUI config node editing: exposed field area now stretches with node height, text fields can be vertically resized, and the node resize corner is visible on hover.
+- Added delayed inline connection deletion: hovering a canvas connection for 1s shows an X button at the curve midpoint to remove that connection.
+- Fixed ordinary generation prompt panels so a single @ reference insertion collapses adjacent duplicate mention labels, and existing duplicated labels like `文本1 文本1` are cleaned when the prompt panel reloads.
+- Extended prompt mention cleanup to generated display labels such as `【文本1】`, then verified in the in-app browser that the selected video node prompt now contains only one `文本1` reference.
+- Fixed generated result nodes to keep editable `metadata.prompt` as the raw reference prompt while storing the expanded model request in `metadata.requestPrompt`; browser verification showed the selected video node textarea value is only `【文本1】` and no longer contains the expanded upstream script.
+- Fixed ComfyUI media field dropdown labels to use upstream resource labels like `图片1` instead of the source node prompt/title, and verified in the browser that the first image field can select and display `图片1`.

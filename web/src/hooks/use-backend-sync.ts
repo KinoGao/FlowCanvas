@@ -26,8 +26,10 @@ export function useBackendSync() {
                 const localUpdatedAtStr = localStorage.getItem("infinite-canvas:config_updated_at");
                 const localUpdatedAt = localUpdatedAtStr ? Number(localUpdatedAtStr) : 0;
 
-                // 首次同步：本地为 source of truth，直接推送而非拉取
-                if (!localUpdatedAt) {
+                const remote = await fetchRemoteConfig(backend.url, backend.authCode);
+
+                // 远端为空：本地推送到远端
+                if (!remote || !remote.data) {
                     try {
                         await pushRemoteConfig(backend.url, backend.authCode, JSON.stringify(configRef.current));
                         localStorage.setItem("infinite-canvas:config_updated_at", String(Date.now()));
@@ -37,17 +39,16 @@ export function useBackendSync() {
                     return;
                 }
 
-                const remote = await fetchRemoteConfig(backend.url, backend.authCode);
-                if (!remote || !remote.data) return;
-                const remoteConfig = JSON.parse(remote.data);
+                // 远端有配置：比较时间戳，远端更新则拉取
                 const remoteUpdatedAt = new Date(remote.updatedAt).getTime();
-                if (remoteUpdatedAt > localUpdatedAt) {
+                if (!localUpdatedAt || remoteUpdatedAt > localUpdatedAt) {
+                    const remoteConfig = JSON.parse(remote.data);
                     const fullConfig = { ...configRef.current, ...remoteConfig };
                     (Object.keys(fullConfig) as Array<keyof typeof config>).forEach((key) => {
                         updateConfig(key, fullConfig[key]);
                     });
                     localStorage.setItem("infinite-canvas:config_updated_at", String(remoteUpdatedAt));
-                    message.success("已从后端同步最新配置");
+                    if (localUpdatedAt) message.success("已从后端同步最新配置");
                 }
             } catch {
                 // 静默失败，不打断用户

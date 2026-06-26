@@ -1,3 +1,5 @@
+import type { ComfyWorkflow, ComfyWorkflowField, ComfyWorkflowJson } from "@/services/comfyui-workflows";
+
 export type BackendSyncConfig = {
     enabled: boolean;
     url: string;
@@ -75,4 +77,52 @@ export async function uploadImageToBackend(url: string, authCode: string, blob: 
 export function buildPublicImageUrl(publicBaseUrl: string, filename: string): string {
     const base = normalizeUrl(publicBaseUrl);
     return `${base}/api/public-image/${filename}`;
+}
+
+export async function fetchRemoteWorkflows(url: string, authCode: string): Promise<ComfyWorkflow[]> {
+    const base = normalizeUrl(url);
+    if (!base || !authCode.trim()) return [];
+    const resp = await fetch(`${base}/api/workflows`, { headers: backendHeaders(authCode) });
+    if (!resp.ok) throw new Error(`拉取工作流列表失败：${resp.status}`);
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.msg || "拉取工作流列表失败");
+    return (body.data || []) as ComfyWorkflow[];
+}
+
+export async function uploadRemoteWorkflow(url: string, authCode: string, name: string, workflow: ComfyWorkflowJson): Promise<ComfyWorkflow> {
+    const base = normalizeUrl(url);
+    const resp = await fetch(`${base}/api/workflows/upload`, {
+        method: "POST",
+        headers: backendHeaders(authCode),
+        body: JSON.stringify({ name, workflow }),
+    });
+    if (!resp.ok) throw new Error(`上传工作流失败：${resp.status}`);
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.msg || "上传工作流失败");
+    return body.data as ComfyWorkflow;
+}
+
+export async function pushRemoteWorkflowConfig(url: string, authCode: string, id: string, config: { title: string; fields: ComfyWorkflowField[] }): Promise<void> {
+    const base = normalizeUrl(url);
+    if (!base || !authCode.trim()) return;
+    const resp = await fetch(`${base}/api/workflows/${encodeURIComponent(id)}/config`, {
+        method: "PUT",
+        headers: backendHeaders(authCode),
+        body: JSON.stringify(config),
+    });
+    if (!resp.ok) throw new Error(`保存工作流配置失败：${resp.status}`);
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.msg || "保存工作流配置失败");
+}
+
+export async function deleteRemoteWorkflow(url: string, authCode: string, id: string): Promise<void> {
+    const base = normalizeUrl(url);
+    if (!base || !authCode.trim()) return;
+    const resp = await fetch(`${base}/api/workflows/${id}`, {
+        method: "DELETE",
+        headers: backendHeaders(authCode),
+    });
+    if (!resp.ok) throw new Error(`删除远程工作流失败：${resp.status}`);
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.msg || "删除远程工作流失败");
 }

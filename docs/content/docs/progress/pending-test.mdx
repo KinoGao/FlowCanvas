@@ -5,6 +5,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 画布普通生成面板引用去重：在普通生成面板输入 `@` 并选择同一个上游文本节点一次时，只应保留一个 `文本1` 标签；已有的相邻重复标签应在面板重新打开后自动折叠为一个。
 - ComfyUI 接入基础：配置弹窗新增 ComfyUI Tab，可配置本地或远端地址、连接方式、Client ID、任务超时和轮询间隔；新增顶部导航入口 `/comfyui`，可导入 ComfyUI API 格式 workflow JSON，选择节点输入作为暴露参数，编辑字段类型、默认值、范围和下拉选项，并可通过 Next.js 转发试运行 workflow。画布配置节点新增 ComfyUI 模式，可选择 workflow、填写暴露参数并生成输出图片节点。需要确认：本地 `http://127.0.0.1:8188` 和远端 ComfyUI 地址连接测试可用，导入 workflow 后参数保存/刷新仍存在，试运行和画布节点生成都能拿到 ComfyUI 输出图片。
 - 配置与用户偏好：每个模型渠道新增 OpenAI / Gemini 调用格式选择，默认 OpenAI，切换默认格式时同步更新默认 Base URL；渠道 Tab 增加紧凑醒目的提醒，说明模型是否可选需要到“模型”Tab 选择。
 - Gemini 调用格式：支持拉取 Gemini 模型列表，并用于文本问答、在线 Agent 工具调用、基础生图和图生图请求。
@@ -18,3 +19,5 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 后端配置同步：新增 Java Spring Boot 后端（`backend/`），SQLite 存储，提供 `GET/PUT /api/config` 和 `GET /api/health` 端点，通过 `AUTH_CODE` 环境变量做 Bearer Token 认证。前端配置弹窗新增"后端同步"Tab，可填入后端地址和认证码并启用同步。启用后应用启动时自动拉取远端配置（last-write-wins），配置变更后 2s debounce 自动推送。`docker-compose.yml` 和 `docker-compose.local.yml` 新增 `backend` 服务。需要确认：后端启动后健康检查可用、认证码校验生效、前端拉取和推送配置正常、Docker Compose 两个服务同时启动可用。
 - 公网图片代理：后端新增 `POST /api/public-image`（需认证，上传图片）和 `GET /api/public-image/{filename}`（无需认证，公网可访问）端点。配置弹窗"后端同步"Tab 新增"公网访问地址"字段。Agnes 视频生成时，若后端同步已启用且填了公网地址，本地参考图优先上传到后端获取公网 URL；未设置时降级到 temp.sh/litterbox 临时图床。需要确认：后端上传图片后可通过公网地址访问、Agnes 图生视频使用后端公网 URL 正常生成。
 - ComfyUI 暴露参数与上游节点绑定：画布配置节点切换到 ComfyUI 模式时重新加载工作流列表，工作流无暴露参数时给出提示。image/video/audio 类型的暴露字段渲染为上游节点选择器（而非纯文本输入），只展示类型匹配的上游节点（图片字段只能选图片节点，视频字段只能选视频节点，音频字段只能选音频节点），选择后以 `@[node:nodeId]` 格式存储。生成时自动将引用的上游媒体上传到 ComfyUI `/upload/image`，用返回的文件名替换字段值并注入工作流 JSON。需要确认：暴露参数正确展示、类型匹配过滤生效、上游图片/视频/音频上传到 ComfyUI 后工作流执行正常。
+- 后端配置同步修复：启动拉取逻辑从"本地无 `config_updated_at` 时直接推送本地覆盖远端"改为"始终先拉取远端，远端为空才推送本地"，避免本地标记丢失时空配置覆盖远端。配置弹窗"后端同步"Tab 新增"从后端拉取"和"推送到后端"两个手动按钮，强制覆盖方向。需要确认：换浏览器后启动不再覆盖远端配置、手动拉取和推送按钮正常工作。
+- ComfyUI 工作流后端同步（双文件模式）：后端工作流存储改为双文件分离模式——`xxx.json` 保持原始 ComfyUI API JSON 不修改，`xxx.config.json` 存放 title 和 fields 配置。API 端点调整为 `GET /api/workflows`（列表）、`GET /api/workflows/{id}`（详情）、`POST /api/workflows/upload`（上传原始工作流）、`PUT /api/workflows/{id}/config`（保存配置）、`DELETE /api/workflows/{id}`（删除）。前端导入工作流时自动上传原始 JSON 到后端，保存配置时只推送 config，同步时按 id+title+fields 合并。工作流 id 改为文件名（去 `.json`），确保本地和后端一致。需要确认：导入工作流后后端 `data/workflows/` 有原始 `.json` 和 `.config.json` 两个文件、原始文件内容不被修改、保存配置只更新 `.config.json`、换浏览器拉取能恢复工作流和参数配置。

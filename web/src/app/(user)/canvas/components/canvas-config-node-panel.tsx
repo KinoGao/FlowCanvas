@@ -2,7 +2,7 @@
 
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
-import { Button, Input, InputNumber, Segmented, Select, Switch } from "antd";
+import { Button, InputNumber, Segmented, Select, Switch } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -11,28 +11,31 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
+import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
-import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "../types";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import { listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
+import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
     inputs: NodeGenerationInput[];
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
+    mentionReferences?: CanvasResourceReference[];
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onGenerate: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, mentionReferences = [], onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const comfyui = useConfigStore((state) => state.comfyui);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const mode = node.metadata?.generationMode || "image";
+    const mode = node.metadata?.generationMode || defaultModeForNode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const selectedWorkflow = useMemo(() => workflows.find((workflow) => workflow.id === (node.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId)) || workflows[0], [comfyui.defaultWorkflowId, node.metadata?.comfyWorkflowId, workflows]);
@@ -54,7 +57,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, o
     }, [comfyui.defaultWorkflowId, mode, node.id, node.metadata?.comfyWorkflowId, onConfigChange, selectedWorkflow]);
 
     return (
-        <div className="flex h-full w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+        <div className="flex h-full min-h-0 w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="shrink-0 text-sm font-semibold">生成配置</div>
                 <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
@@ -125,9 +128,9 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, o
                 </button>
             </div>
 
-            <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div className={`mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`} onMouseDown={(event) => event.stopPropagation()}>
                 {mode === "comfyui" ? (
-                    <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} inputs={inputs} onConfigChange={onConfigChange} />
+                    <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} inputs={inputs} mentionReferences={mentionReferences} onConfigChange={onConfigChange} />
                 ) : (
                     <>
                         <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
@@ -177,14 +180,14 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, o
     );
 }
 
-function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; inputs: NodeGenerationInput[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
+function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, mentionReferences, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; inputs: NodeGenerationInput[]; mentionReferences: CanvasResourceReference[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
     const values = node.metadata?.comfyFieldValues || {};
     const updateValue = (field: ComfyWorkflowField, value: unknown) => {
         onConfigChange(node.id, { comfyFieldValues: { ...values, [field.id]: value } });
     };
 
     return (
-        <div className="grid min-w-0 gap-2">
+        <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
             <Select
                 className="canvas-compact-control h-10"
                 popupMatchSelectWidth={false}
@@ -192,13 +195,14 @@ function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, onCo
                 value={selectedWorkflow?.id}
                 options={workflows.map((workflow) => ({ label: workflow.title, value: workflow.id }))}
                 onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
+                classNames={{ popup: { root: "canvas-no-zoom-popup" } }}
             />
             {selectedWorkflow?.fields.length ? (
-                <div className="grid max-h-60 gap-2 overflow-y-auto pr-1">
+                <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
                     {selectedWorkflow.fields.map((field) => (
                         <div key={field.id} className="grid gap-1 text-[11px]">
                             <span className="truncate opacity-70">{field.name || field.input}</span>
-                            <ComfyFieldControl field={field} value={values[field.id] ?? field.default} inputs={inputs} onChange={(value) => updateValue(field, value)} />
+                            <ComfyFieldControl field={field} value={values[field.id] ?? field.default} inputs={inputs} mentionReferences={mentionReferences} onChange={(value) => updateValue(field, value)} />
                         </div>
                     ))}
                 </div>
@@ -209,15 +213,39 @@ function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, onCo
     );
 }
 
-function ComfyFieldControl({ field, value, inputs, onChange }: { field: ComfyWorkflowField; value: unknown; inputs: NodeGenerationInput[]; onChange: (value: unknown) => void }) {
+function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }: { field: ComfyWorkflowField; value: unknown; inputs: NodeGenerationInput[]; mentionReferences: CanvasResourceReference[]; onChange: (value: unknown) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const textInputStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
+    const mentionLabels = useMemo(() => Array.from(new Set(mentionReferences.filter((reference) => reference.active).map((reference) => reference.label))).sort((a, b) => b.length - a.length), [mentionReferences]);
+    const rawTextValue = String(value ?? "");
+    const textValue = normalizeAdjacentMentionLabels(rawTextValue, mentionLabels);
+
+    useEffect(() => {
+        if (field.type !== "text" && field.type !== "textarea") return;
+        if (textValue !== rawTextValue) onChange(textValue);
+    }, [field.type, onChange, rawTextValue, textValue]);
+
     if (field.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
     if (field.type === "number") return <InputNumber className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
     if (field.type === "slider") return <InputNumber className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
     if (field.type === "dropdown") return <Select value={String(value ?? "")} options={(field.options || []).map((option) => ({ label: option, value: option }))} onChange={onChange} />;
-    if (field.type === "textarea") return <Input.TextArea autoSize={{ minRows: 2 }} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+    if (field.type === "textarea") {
+        return (
+            <CanvasResourceMentionTextarea
+                value={textValue}
+                references={mentionReferences}
+                onChange={(next) => onChange(normalizeAdjacentMentionLabels(next, mentionLabels))}
+                className="thin-scrollbar min-h-20 w-full resize-y rounded-md border px-2 py-1.5 text-xs leading-5 outline-none"
+                style={textInputStyle}
+                placeholder="输入内容，按 @ 引用上游素材"
+                onKeyDown={(event) => event.stopPropagation()}
+            />
+        );
+    }
     if (field.type === "image" || field.type === "video" || field.type === "audio") {
         const fieldType = field.type;
         const matched = inputs.filter((input) => input.type === fieldType);
+        const referenceByNodeId = new Map(mentionReferences.filter((reference) => reference.active && reference.kind === fieldType).map((reference) => [reference.nodeId, reference]));
         const currentValue = String(value ?? "");
         const isNodeRef = currentValue.startsWith("@[node:");
         return (
@@ -225,13 +253,24 @@ function ComfyFieldControl({ field, value, inputs, onChange }: { field: ComfyWor
                 className="w-full"
                 placeholder={matched.length ? "选择上游节点" : `没有可用的上游${fieldType === "image" ? "图片" : fieldType === "video" ? "视频" : "音频"}节点`}
                 value={isNodeRef ? currentValue : undefined}
-                options={matched.map((input) => ({ label: input.title, value: `@[node:${input.nodeId}]` }))}
+                options={matched.map((input, index) => ({ label: referenceByNodeId.get(input.nodeId)?.label || mediaLabel(fieldType, index), value: `@[node:${input.nodeId}]` }))}
                 allowClear
+                classNames={{ popup: { root: "canvas-no-zoom-popup" } }}
                 onChange={(next) => onChange(next ?? "")}
             />
         );
     }
-    return <Input.TextArea autoSize={{ minRows: 1 }} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} />;
+    return (
+        <CanvasResourceMentionTextarea
+            value={textValue}
+            references={mentionReferences.filter((reference) => field.type === "text" || reference.kind === field.type)}
+            onChange={(next) => onChange(normalizeAdjacentMentionLabels(next, mentionLabels))}
+            className="thin-scrollbar min-h-12 w-full resize-y rounded-md border px-2 py-1.5 text-xs leading-5 outline-none"
+            style={textInputStyle}
+            placeholder="输入内容，按 @ 引用上游素材"
+            onKeyDown={(event) => event.stopPropagation()}
+        />
+    );
 }
 
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {
@@ -274,4 +313,17 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
+}
+
+function mediaLabel(type: "image" | "video" | "audio", index: number) {
+    if (type === "image") return `图片${index + 1}`;
+    if (type === "video") return `视频${index + 1}`;
+    return `音频${index + 1}`;
+}
+
+function defaultModeForNode(type: CanvasNodeData["type"]): CanvasGenerationMode {
+    if (type === CanvasNodeType.Video) return "video";
+    if (type === CanvasNodeType.Audio) return "audio";
+    if (type === CanvasNodeType.Text) return "text";
+    return "image";
 }

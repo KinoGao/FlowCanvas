@@ -12,5 +12,6 @@ server:
   port: ${PORT:4001}
 
 app:
-  auth-code: ${AUTH_CODE:}
+  auth-code: ${AUTH_CODE:gycode}
   public-image-dir: ${PUBLIC_IMAGE_DIR:./data/public-images}
+  workflow-dir: ${WORKFLOW_DIR:./data/workflows}

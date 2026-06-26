@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -10,6 +12,7 @@ export function ConnectionPath({
     to,
     active,
     onSelect,
+    onDelete,
     onContextMenu,
 }: {
     connection: CanvasConnection;
@@ -17,9 +20,12 @@ export function ConnectionPath({
     to: CanvasNodeData;
     active: boolean;
     onSelect: () => void;
+    onDelete?: () => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const [deleteVisible, setDeleteVisible] = useState(false);
+    const hoverTimerRef = useRef<number | null>(null);
     const startX = from.position.x + from.width;
     const startY = from.position.y + from.height / 2;
     const endX = to.position.x;
@@ -27,9 +33,33 @@ export function ConnectionPath({
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
+    const mid = cubicPoint(
+        { x: startX, y: startY },
+        { x: startX + curvature, y: startY },
+        { x: endX - curvature, y: endY },
+        { x: endX, y: endY },
+        0.5,
+    );
+    const deleteSize = 24;
+
+    const showDeleteLater = () => {
+        if (!onDelete) return;
+        if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = window.setTimeout(() => setDeleteVisible(true), 1000);
+    };
+
+    const hideDelete = () => {
+        if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+        setDeleteVisible(false);
+    };
+
+    useEffect(() => () => {
+        if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+    }, []);
 
     return (
-        <g>
+        <g onMouseEnter={showDeleteLater} onMouseLeave={hideDelete}>
             <path
                 data-connection-id={connection.id}
                 d={pathD}
@@ -55,8 +85,39 @@ export function ConnectionPath({
                 fill="none"
                 style={{ filter: active ? `drop-shadow(0 0 8px ${theme.node.activeStroke}66)` : undefined, pointerEvents: "none" }}
             />
+            {deleteVisible && onDelete ? (
+                <foreignObject x={mid.x - deleteSize / 2} y={mid.y - deleteSize / 2} width={deleteSize} height={deleteSize} style={{ overflow: "visible", pointerEvents: "auto" }}>
+                    <button
+                        type="button"
+                        className="grid size-6 place-items-center rounded-full border shadow-lg backdrop-blur-md transition hover:scale-110"
+                        style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: "#ef4444" }}
+                        onMouseDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onDelete();
+                        }}
+                        aria-label="删除连线"
+                        title="删除连线"
+                    >
+                        <X className="size-3.5" />
+                    </button>
+                </foreignObject>
+            ) : null}
         </g>
     );
+}
+
+function cubicPoint(p0: Position, p1: Position, p2: Position, p3: Position, t: number) {
+    const mt = 1 - t;
+    const mt2 = mt * mt;
+    const t2 = t * t;
+    return {
+        x: mt2 * mt * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t2 * t * p3.x,
+        y: mt2 * mt * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t2 * t * p3.y,
+    };
 }
 
 export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {

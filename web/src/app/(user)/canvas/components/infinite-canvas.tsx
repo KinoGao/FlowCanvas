@@ -89,6 +89,7 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest("[data-canvas-no-zoom]")) return;
         if (target?.closest("[data-connection-create-menu]")) return;
+        if (target?.closest(".canvas-no-zoom-popup")) return;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id]");
 
         if (event.button === 0 && (event.ctrlKey || event.metaKey) && isBackgroundClick) {

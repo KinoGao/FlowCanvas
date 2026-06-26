@@ -94,6 +94,10 @@ type CanvasGenerationRequest = {
     controller: AbortController;
 };
 
+function defaultGenerationMode(type?: CanvasNodeType): CanvasNodeGenerationMode {
+    return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
+}
+
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
@@ -745,7 +749,7 @@ function InfiniteCanvasPage() {
                     generationOps.forEach((op) => {
                         const target = nodesRef.current.find((node) => node.id === op.nodeId);
                         const prompt = op.prompt?.trim() ? op.prompt : target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "";
-                        void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || "image", prompt);
+                        void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || defaultGenerationMode(target?.type), prompt);
                     }),
                 );
             }
@@ -1949,7 +1953,7 @@ function InfiniteCanvasPage() {
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
+                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt, { appendUpstreamText: mode === "image" || mode === "text" }),
             );
             const effectivePrompt = generationContext.prompt.trim();
             if (runController.signal.aborted) {
@@ -1958,14 +1962,14 @@ function InfiniteCanvasPage() {
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
-            const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
+            const rawPrompt = prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
                 return;
             }
             let pendingChildIds: string[] = [];
-            if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: statusPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+            if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
                 if (mode === "comfyui") {
@@ -1973,6 +1977,7 @@ function InfiniteCanvasPage() {
                     const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
                     if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
                     const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, effectivePrompt);
+                    resolveComfyTextFields(comfyWorkflow, values, generationContext);
                     await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
                     const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
                     const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
@@ -1995,7 +2000,8 @@ function InfiniteCanvasPage() {
                             width: imageSize.width,
                             height: imageSize.height,
                             metadata: {
-                                prompt: effectivePrompt,
+                                prompt: rawPrompt,
+                                requestPrompt: effectivePrompt,
                                 model: "ComfyUI",
                                 comfyWorkflowId: comfyWorkflow.id,
                                 ...imageMetadata(image),
@@ -2004,7 +2010,7 @@ function InfiniteCanvasPage() {
                     });
                     pendingChildIds = imageNodes.map((node) => node.id);
                     setNodes((prev) => [
-                        ...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
+                        ...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
                         ...imageNodes,
                     ]);
                     setConnections((prev) => [...prev, ...imageNodes.map((node) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: node.id }))]);
@@ -2043,7 +2049,8 @@ function InfiniteCanvasPage() {
                         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
                         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
                         metadata: {
-                            prompt: effectivePrompt,
+                            prompt: rawPrompt,
+                            requestPrompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
                             isBatchRoot: count > 1,
                             batchChildIds: count > 1 ? childIds : undefined,
@@ -2062,7 +2069,7 @@ function InfiniteCanvasPage() {
                         },
                         width: imageConfig.width,
                         height: imageConfig.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
+                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
                     }));
                     const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
 
@@ -2072,7 +2079,7 @@ function InfiniteCanvasPage() {
                                 ? isConfigNode
                                     ? {
                                           ...node,
-                                          metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
+                                          metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined },
                                       }
                                     : isEmptyImageNode
                                       ? {
@@ -2189,7 +2196,7 @@ function InfiniteCanvasPage() {
                         position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) },
+                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) },
                     };
                     pendingChildIds = [videoId];
                     setNodes((prev) => (isEmptyVideoNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode]));
@@ -2198,7 +2205,7 @@ function InfiniteCanvasPage() {
                     try {
                         const video = await storeGeneratedVideo(await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, { signal: controller.signal }));
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: rawPrompt, requestPrompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, references: generationReferenceUrls(generationContext) } } : node)));
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -2217,7 +2224,7 @@ function InfiniteCanvasPage() {
                         position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
                         width: isEmptyAudioNode ? sourceNode.width : spec.width,
                         height: isEmptyAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
+                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
                     };
                     pendingChildIds = [audioId];
                     setNodes((prev) => (isEmptyAudioNode ? prev.map((node) => (node.id === nodeId ? { ...node, ...audioNode } : node)) : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode]));
@@ -2225,7 +2232,7 @@ function InfiniteCanvasPage() {
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
                         const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
-                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: rawPrompt, requestPrompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
@@ -2251,9 +2258,9 @@ function InfiniteCanvasPage() {
                         },
                         width: textConfig.width,
                         height: textConfig.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
+                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
                     }));
-                    setNodes((prev) => [...prev.map((node) => (node.id === nodeId && isConfigNode ? { ...node, metadata: { ...node.metadata, prompt: effectivePrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
+                    setNodes((prev) => [...prev.map((node) => (node.id === nodeId && isConfigNode ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
                     setConnections((prev) => [...prev, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))]);
                 }
 
@@ -2324,7 +2331,7 @@ function InfiniteCanvasPage() {
             }
 
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
-            const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
+            const prompt = (savedImageMetadata?.requestPrompt || savedImageMetadata?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
                 return;
@@ -2581,6 +2588,7 @@ function InfiniteCanvasPage() {
                                             setSelectedNodeIds(new Set());
                                             setContextMenu(null);
                                         }}
+                                        onDelete={() => deleteConnection(connection.id)}
                                         onContextMenu={(event) => {
                                             setSelectedConnectionId(connection.id);
                                             setSelectedNodeIds(new Set());
@@ -2643,12 +2651,13 @@ function InfiniteCanvasPage() {
                                     isRunning={runningNodeId === contentNode.id}
                                     inputs={configInputsById.get(contentNode.id) || []}
                                     inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
+                                    mentionReferences={mentionReferencesByNodeId.get(contentNode.id) || []}
                                     onConfigChange={handleConfigNodeChange}
                                     onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                                     onStop={confirmStopGeneration}
                                     onGenerate={(nodeId) => {
                                         const target = nodesRef.current.find((item) => item.id === nodeId);
-                                        void handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                                        void handleGenerateNode(nodeId, target?.metadata?.generationMode || defaultGenerationMode(target?.type), target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
                                     }}
                                 />
                             )}
@@ -3076,6 +3085,15 @@ function isComfyPromptField(field: ComfyWorkflowField) {
 }
 
 const NODE_REF_PATTERN = /@\[node:([^\]]+)\]/;
+const NODE_REF_PATTERN_GLOBAL = /@\[node:([^\]]+)\]/g;
+
+function resolveComfyTextFields(workflow: ComfyWorkflow, values: Record<string, unknown>, context: NodeGenerationContext) {
+    workflow.fields
+        .filter((field) => field.type === "text" || field.type === "textarea")
+        .forEach((field) => {
+            values[field.id] = replaceComfyReferences(String(values[field.id] ?? ""), context, "text");
+        });
+}
 
 async function resolveComfyMediaFields(
     workflow: ComfyWorkflow,
@@ -3087,22 +3105,66 @@ async function resolveComfyMediaFields(
     const mediaFields = workflow.fields.filter((field) => field.type === "image" || field.type === "video" || field.type === "audio");
     for (const field of mediaFields) {
         const raw = String(values[field.id] ?? "");
-        const match = raw.match(NODE_REF_PATTERN);
-        if (!match) continue;
-        const nodeId = match[1];
-        const media = findMediaByNodeId(field.type, nodeId, context);
-        if (!media) throw new Error(`字段「${field.name || field.input}」引用的上游节点不存在或类型不匹配`);
+        const media = findMediaByReference(field.type, raw, context);
+        if (!media) {
+            if (raw.match(NODE_REF_PATTERN)) throw new Error(`字段「${field.name || field.input}」引用的上游节点不存在或类型不匹配`);
+            continue;
+        }
         const { blob, filename } = await fetchMediaBlob(media);
         const uploaded = await uploadComfyFile(config, blob, filename, signal);
         values[field.id] = uploaded.subfolder ? `${uploaded.subfolder}/${uploaded.name}` : uploaded.name;
     }
 }
 
+function replaceComfyReferences(value: string, context: NodeGenerationContext, type: "text" | "image" | "video" | "audio") {
+    let next = value.replace(NODE_REF_PATTERN_GLOBAL, (_, nodeId: string) => {
+        const text = findTextByNodeId(nodeId, context);
+        return text ?? "";
+    });
+    getLabeledInputs(context, type).forEach((input) => {
+        if (input.type !== "text") return;
+        next = next.replace(new RegExp(escapeRegExp(input.label), "g"), input.text || "");
+    });
+    return next;
+}
+
+function findMediaByReference(type: ComfyWorkflowField["type"], raw: string, context: NodeGenerationContext) {
+    const match = raw.match(NODE_REF_PATTERN);
+    if (match) return findMediaByNodeId(type, match[1], context);
+    const reference = getLabeledInputs(context, type).find((input) => raw.trim() === input.label || raw.includes(input.label));
+    if (!reference) return null;
+    return findMediaByNodeId(type, reference.nodeId, context);
+}
+
 function findMediaByNodeId(type: ComfyWorkflowField["type"], nodeId: string, context: NodeGenerationContext) {
-    if (type === "image") return context.referenceImages.find((img) => img.id === nodeId) || null;
-    if (type === "video") return context.referenceVideos.find((vid) => vid.id === nodeId) || null;
-    if (type === "audio") return context.referenceAudios.find((aud) => aud.id === nodeId) || null;
+    const input = context.inputs.find((item) => item.nodeId === nodeId && item.type === type);
+    if (type === "image") return input?.image || null;
+    if (type === "video") return input?.video || null;
+    if (type === "audio") return input?.audio || null;
     return null;
+}
+
+function findTextByNodeId(nodeId: string, context: NodeGenerationContext) {
+    return getLabeledInputs(context, "text").find((input) => input.nodeId === nodeId)?.text;
+}
+
+function getLabeledInputs(context: NodeGenerationContext, type: "text" | "image" | "video" | "audio") {
+    const items =
+        type === "text"
+            ? context.inputs.filter((input) => input.type === "text")
+            : context.inputs.filter((input) => input.type === type);
+    return items.map((item, index) => ({ ...item, label: comfyReferenceLabel(type, index) }));
+}
+
+function comfyReferenceLabel(type: "text" | "image" | "video" | "audio", index: number) {
+    if (type === "image") return `图片${index + 1}`;
+    if (type === "video") return `视频${index + 1}`;
+    if (type === "audio") return `音频${index + 1}`;
+    return `文本${index + 1}`;
+}
+
+function escapeRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function fetchMediaBlob(media: { dataUrl?: string; url?: string; storageKey?: string; name?: string; type?: string }) {

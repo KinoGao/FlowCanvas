@@ -27,6 +27,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
+    const lastInsertRef = useRef<{ key: string; at: number } | null>(null);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [hasSelection, setHasSelection] = useState(false);
@@ -38,6 +39,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         return activeReferences.filter((item) => `${item.label} ${item.title} ${item.kind} ${item.text || ""}`.toLowerCase().includes(query));
     }, [mention, references]);
     const activeLabels = useMemo(() => (highlightLabels ? Array.from(new Set(references.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length) : []), [highlightLabels, references]);
+    const mentionLabels = useMemo(() => Array.from(new Set(references.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length), [references]);
 
     const updateValue = (next: string, selectionStart?: number) => {
         onChange(next);
@@ -68,10 +70,13 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         if (!mention) return;
         const textarea = textareaRef.current;
         const end = textarea?.selectionStart ?? value.length;
+        const insertKey = `${reference.id}:${mention.start}`;
+        if (lastInsertRef.current?.key === insertKey && Date.now() - lastInsertRef.current.at < 600) return;
+        lastInsertRef.current = { key: insertKey, at: Date.now() };
         const insertText = `${reference.label} `;
-        const next = `${value.slice(0, mention.start)}${insertText}${value.slice(end)}`;
+        const next = normalizeAdjacentMentionLabels(`${value.slice(0, mention.start)}${insertText}${value.slice(end)}`, mentionLabels);
         closeMention();
-        updateValue(next, mention.start + insertText.length);
+        updateValue(next, Math.min(mention.start + insertText.length, next.length));
     };
 
     const syncOverlayScroll = () => {
@@ -272,4 +277,16 @@ function clamp(value: number, min: number, max: number) {
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function normalizeAdjacentMentionLabels(value: string, labels: string[]) {
+    let next = value.replace(/(【[^】]+】)(?:\s+\1)+/g, "$1");
+    const uniqueLabels = Array.from(new Set(labels.filter(Boolean))).sort((a, b) => b.length - a.length);
+    uniqueLabels.forEach((label) => {
+        [label, `【${label}】`].forEach((variant) => {
+            const escapedLabel = escapeRegExp(variant);
+            next = next.replace(new RegExp(`(${escapedLabel})(?:\\s+${escapedLabel})+(?=\\s|$)`, "g"), "$1");
+        });
+    });
+    return next;
 }

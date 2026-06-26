@@ -71,10 +71,12 @@ export async function saveComfyWorkflow(workflow: ComfyWorkflow) {
 
 export async function createComfyWorkflow(input: { name: string; title?: string; workflow: ComfyWorkflowJson }) {
     const now = new Date().toISOString();
+    const name = normalizeWorkflowName(input.name);
+    const id = name.replace(/\.json$/i, "");
     const workflow: ComfyWorkflow = {
-        id: nanoid(),
-        name: normalizeWorkflowName(input.name),
-        title: input.title?.trim() || input.name.replace(/\.json$/i, ""),
+        id,
+        name,
+        title: input.title?.trim() || id,
         workflow: input.workflow,
         fields: [],
         createdAt: now,
@@ -103,7 +105,8 @@ export function isComfyWorkflowJson(value: unknown): value is ComfyWorkflowJson 
     return nodes.length > 0 && nodes.every((node) => Boolean(node && typeof node === "object" && !Array.isArray(node) && ("inputs" in node || "class_type" in node)));
 }
 
-export function listComfyWorkflowInputCandidates(workflow: ComfyWorkflowJson): ComfyWorkflowInputCandidate[] {
+export function listComfyWorkflowInputCandidates(workflow: ComfyWorkflowJson | null | undefined): ComfyWorkflowInputCandidate[] {
+    if (!workflow || typeof workflow !== "object") return [];
     return Object.entries(workflow).flatMap(([nodeId, node]) =>
         Object.entries(node.inputs || {})
             .filter(([, value]) => !isWorkflowLink(value))

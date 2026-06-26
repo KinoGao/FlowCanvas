@@ -1,11 +1,11 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Server, Trash2, Wifi, Workflow } from "lucide-react";
+import { CircleAlert, Cloud, Download, Plus, RefreshCw, Server, Trash2, Upload, Wifi, Workflow } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
-import { testBackendConnection } from "@/services/api/backend";
+import { fetchRemoteConfig, pushRemoteConfig, testBackendConnection } from "@/services/api/backend";
 import { testComfyConnection } from "@/services/api/comfyui";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
@@ -72,6 +72,7 @@ export function AppConfigModal() {
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [testingComfyUi, setTestingComfyUi] = useState(false);
     const [testingBackend, setTestingBackend] = useState(false);
+    const [syncingBackend, setSyncingBackend] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
@@ -220,6 +221,49 @@ export function AppConfigModal() {
             message.error(error instanceof Error ? error.message : "后端连接测试失败");
         } finally {
             setTestingBackend(false);
+        }
+    };
+
+    const pullFromBackend = async () => {
+        if (!backend.url.trim() || !backend.authCode.trim()) {
+            message.error("请先填写后端地址和认证码");
+            return;
+        }
+        setSyncingBackend(true);
+        try {
+            const remote = await fetchRemoteConfig(backend.url, backend.authCode);
+            if (!remote || !remote.data) {
+                message.warning("后端暂无配置，无可拉取");
+                return;
+            }
+            const remoteConfig = JSON.parse(remote.data) as Partial<AiConfig>;
+            const fullConfig = { ...config, ...remoteConfig };
+            (Object.keys(fullConfig) as Array<keyof AiConfig>).forEach((key) => {
+                updateConfig(key, fullConfig[key]);
+            });
+            localStorage.setItem("infinite-canvas:config_updated_at", new Date(remote.updatedAt).getTime().toString());
+            message.success("已从后端拉取配置覆盖本地");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "从后端拉取配置失败");
+        } finally {
+            setSyncingBackend(false);
+        }
+    };
+
+    const pushToBackend = async () => {
+        if (!backend.url.trim() || !backend.authCode.trim()) {
+            message.error("请先填写后端地址和认证码");
+            return;
+        }
+        setSyncingBackend(true);
+        try {
+            await pushRemoteConfig(backend.url, backend.authCode, JSON.stringify(config));
+            localStorage.setItem("infinite-canvas:config_updated_at", Date.now().toString());
+            message.success("已将本地配置推送到后端");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "推送配置到后端失败");
+        } finally {
+            setSyncingBackend(false);
         }
     };
 
@@ -630,8 +674,24 @@ export function AppConfigModal() {
                                         >
                                             测试连接
                                         </Button>
+                                        <Button
+                                            icon={<Download className="size-4" />}
+                                            disabled={!backend.url.trim() || !backend.authCode.trim()}
+                                            loading={syncingBackend}
+                                            onClick={() => void pullFromBackend()}
+                                        >
+                                            从后端拉取
+                                        </Button>
+                                        <Button
+                                            icon={<Upload className="size-4" />}
+                                            disabled={!backend.url.trim() || !backend.authCode.trim()}
+                                            loading={syncingBackend}
+                                            onClick={() => void pushToBackend()}
+                                        >
+                                            推送到后端
+                                        </Button>
                                         <span className="text-xs text-stone-500">
-                                            启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。
+                                            启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。手动按钮可强制覆盖。
                                         </span>
                                     </div>
                                 </section>

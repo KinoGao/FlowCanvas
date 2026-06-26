@@ -17,7 +17,7 @@ public class AuthFilter implements Filter {
     private final String authCode;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AuthFilter(@Value("${app.auth-code:}") String authCode) {
+    public AuthFilter(@Value("${app.auth-code:gycode}") String authCode) {
         if (authCode == null || authCode.isBlank()) {
             this.authCode = UUID.randomUUID().toString().replace("-", "");
             System.out.println("========================================");
@@ -50,6 +50,8 @@ public class AuthFilter implements Filter {
         if (token == null || !token.equals(authCode)) {
             resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             resp.setContentType("application/json;charset=UTF-8");
+            resp.setHeader("Access-Control-Allow-Origin", req.getHeader("Origin"));
+            resp.setHeader("Access-Control-Allow-Credentials", "true");
             objectMapper.writeValue(resp.getWriter(), ApiResponse.fail("认证失败，请检查认证码"));
             return;
         }
