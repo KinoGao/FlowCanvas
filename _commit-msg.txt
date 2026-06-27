@@ -1,6 +1,0 @@
-fix: canvas SVG black screen, connection panel overflow, and re-render optimization
-
-- SVG container from hardcoded 10000px to 1x1 + overflow:visible
-- Node prompt panel max-h-[60vh] with internal scroll
-- useCanvasStore selector return primitive string instead of object
-- ConnectionPath and ActiveConnectionPath wrapped with React.memo
