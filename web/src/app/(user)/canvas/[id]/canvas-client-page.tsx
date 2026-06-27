@@ -267,7 +267,7 @@ function InfiniteCanvasPage() {
     const updateProject = useCanvasStore((state) => state.updateProject);
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
-    const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
+    const projectTitle = useCanvasStore((state) => { const p = state.projects.find((project) => project.id === projectId); return p?.title || ""; });
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
     const [connections, setConnections] = useState<CanvasConnection[]>([]);
@@ -315,6 +315,9 @@ function InfiniteCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+
+    const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
+    const [dragNonce, setDragNonce] = useState(0);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -646,7 +649,7 @@ function InfiniteCanvasPage() {
     );
 
     const visibleNodes = useMemo(() => {
-        const padding = 280;
+        const padding = isNodeDragging ? 2000 : 280;
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
@@ -656,7 +659,7 @@ function InfiniteCanvasPage() {
         const viewBottom = viewTop + height / viewport.k + padding * 2;
 
         return nodes.filter((node) => !isHiddenBatchChild(node, nodes, collapsingBatchIds) && node.position.x + node.width > viewLeft && node.position.x < viewRight && node.position.y + node.height > viewTop && node.position.y < viewBottom);
-    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+    }, [collapsingBatchIds, isNodeDragging, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
@@ -724,13 +727,13 @@ function InfiniteCanvasPage() {
         return map;
     }, [connections, nodes]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: currentProject?.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: projectTitle || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
+        [connections, projectTitle, nodes, projectId, selectedNodeIds, viewport],
     );
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
-            const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
+            const before = { projectId, title: projectTitle || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
             const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
             const next = applyCanvasAgentOps(before, safeOps.filter((op) => op.type !== "run_generation"));
             nodesRef.current = next.nodes;
@@ -753,9 +756,9 @@ function InfiniteCanvasPage() {
                     }),
                 );
             }
-            return { ...next, projectId, title: currentProject?.title || "未命名画布" };
+            return { ...next, projectId, title: projectTitle || "未命名画布" };
         },
-        [currentProject?.title, projectId],
+        [projectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
@@ -770,8 +773,8 @@ function InfiniteCanvasPage() {
         setViewport(agentUndoSnapshot.viewport);
         setContextMenu(null);
         setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布" };
-    }, [agentUndoSnapshot, currentProject?.title, projectId]);
+        return { ...agentUndoSnapshot, projectId, title: projectTitle || "未命名画布" };
+    }, [agentUndoSnapshot, projectTitle, projectId]);
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
@@ -1104,6 +1107,7 @@ function InfiniteCanvasPage() {
     }, []);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
+        dragOffsetRef.current = null;
         if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
@@ -1155,14 +1159,10 @@ function InfiniteCanvasPage() {
                     dragRef.current.hasMoved = true;
                 }
 
+                dragOffsetRef.current = { dx, dy };
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
-                    setNodes((prev) =>
-                        prev.map((node) => {
-                            const initial = initialPositions.find((item) => item.id === node.id);
-                            return initial ? { ...node, position: { x: initial.x + dx, y: initial.y + dy } } : node;
-                        }),
-                    );
+                    setDragNonce((n) => n + 1);
                     rafRef.current = null;
                 });
                 return;
@@ -1922,9 +1922,9 @@ function InfiniteCanvasPage() {
     }, []);
 
     const startTitleEditing = useCallback(() => {
-        setTitleDraft(currentProject?.title || "未命名画布");
+        setTitleDraft(projectTitle || "未命名画布");
         setTitleEditing(true);
-    }, [currentProject?.title]);
+    }, [projectTitle]);
 
     const finishTitleEditing = useCallback(() => {
         const nextTitle = titleDraft.trim();
@@ -2531,7 +2531,7 @@ function InfiniteCanvasPage() {
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
-                    title={currentProject?.title || "未命名画布"}
+                    title={projectTitle || "未命名画布"}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
                     onTitleDraftChange={setTitleDraft}
@@ -2564,7 +2564,12 @@ function InfiniteCanvasPage() {
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
                 >
-                    <svg className="absolute left-0 top-0 h-[10000px] w-[10000px] overflow-visible" style={{ pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
+                    {(() => {
+                        const activeDragOffset = dragOffsetRef.current;
+                        const draggedNodeIds = activeDragOffset ? new Set(dragRef.current.initialSelectedNodes.map((n) => n.id)) : null;
+                        return (
+                            <>
+                    <svg className="absolute left-0 top-0 overflow-visible" style={{ width: 1, height: 1, pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
                         {connections
                             .filter((connection) => {
                                 const from = nodeById.get(connection.fromNodeId);
@@ -2582,6 +2587,8 @@ function InfiniteCanvasPage() {
                                         connection={connection}
                                         from={from}
                                         to={to}
+                                        fromOffset={draggedNodeIds?.has(connection.fromNodeId) ? activeDragOffset ?? undefined : undefined}
+                                        toOffset={draggedNodeIds?.has(connection.toNodeId) ? activeDragOffset ?? undefined : undefined}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
                                         onSelect={() => {
                                             setSelectedConnectionId(connection.id);
@@ -2604,6 +2611,7 @@ function InfiniteCanvasPage() {
                         <CanvasNode
                             key={node.id}
                             data={node}
+                            dragOffset={draggedNodeIds?.has(node.id) ? activeDragOffset ?? undefined : undefined}
                             scale={viewport.k}
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
@@ -2701,6 +2709,9 @@ function InfiniteCanvasPage() {
                         />
                     ) : null}
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
+                    </>
+                    );
+                    })()}
                 </InfiniteCanvas>
 
                 <CanvasNodeHoverToolbar

@@ -17,6 +17,7 @@ const selectionBlue = "#2f80ff";
 type CanvasNodeProps = {
     data: CanvasNodeData;
     scale: number;
+    dragOffset?: { dx: number; dy: number };
     isSelected: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
@@ -72,6 +73,7 @@ type NodeContentRendererProps = {
 export const CanvasNode = React.memo(function CanvasNode({
     data,
     scale,
+    dragOffset,
     isSelected,
     isRelated,
     isFocusRelated,
@@ -241,7 +243,9 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-id={data.id}
             className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
             style={{
-                transform: `translate(${data.position.x}px, ${data.position.y}px)`,
+                transform: dragOffset
+                    ? `translate(${data.position.x + dragOffset.dx}px, ${data.position.y + dragOffset.dy}px)`
+                    : `translate(${data.position.x}px, ${data.position.y}px)`,
                 width: data.width,
                 height: data.height,
                 transition: "box-shadow 200ms ease",
@@ -329,7 +333,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar">{renderPanel(data)}</div> : null}
         </div>
     );
 });

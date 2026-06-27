@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { X } from "lucide-react";
 
@@ -6,10 +6,12 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "../types";
 
-export function ConnectionPath({
+export const ConnectionPath = React.memo(function ConnectionPath({
     connection,
     from,
     to,
+    fromOffset,
+    toOffset,
     active,
     onSelect,
     onDelete,
@@ -18,6 +20,8 @@ export function ConnectionPath({
     connection: CanvasConnection;
     from: CanvasNodeData;
     to: CanvasNodeData;
+    fromOffset?: { dx: number; dy: number };
+    toOffset?: { dx: number; dy: number };
     active: boolean;
     onSelect: () => void;
     onDelete?: () => void;
@@ -26,10 +30,10 @@ export function ConnectionPath({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [deleteVisible, setDeleteVisible] = useState(false);
     const hoverTimerRef = useRef<number | null>(null);
-    const startX = from.position.x + from.width;
-    const startY = from.position.y + from.height / 2;
-    const endX = to.position.x;
-    const endY = to.position.y + to.height / 2;
+    const startX = from.position.x + (fromOffset?.dx ?? 0) + from.width;
+    const startY = from.position.y + (fromOffset?.dy ?? 0) + from.height / 2;
+    const endX = to.position.x + (toOffset?.dx ?? 0);
+    const endY = to.position.y + (toOffset?.dy ?? 0) + to.height / 2;
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
@@ -108,7 +112,7 @@ export function ConnectionPath({
             ) : null}
         </g>
     );
-}
+});
 
 function cubicPoint(p0: Position, p1: Position, p2: Position, p3: Position, t: number) {
     const mt = 1 - t;
@@ -120,7 +124,7 @@ function cubicPoint(p0: Position, p1: Position, p2: Position, p3: Position, t: n
     };
 }
 
-export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
+export const ActiveConnectionPath = React.memo(function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (!node) return null;
 
@@ -136,4 +140,4 @@ export function ActiveConnectionPath({ node, handle, mouseWorld, target }: { nod
     const pathD = `M ${snappedStartX} ${snappedStartY} C ${snappedStartX + distance * 0.5} ${snappedStartY}, ${snappedEndX - distance * 0.5} ${snappedEndY}, ${snappedEndX} ${snappedEndY}`;
 
     return <path d={pathD} stroke={theme.node.activeStroke} strokeWidth="2" fill="none" strokeDasharray="5,5" />;
-}
+});
