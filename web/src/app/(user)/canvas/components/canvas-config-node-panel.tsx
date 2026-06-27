@@ -240,7 +240,7 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
     if (field.type === "image" || field.type === "video" || field.type === "audio") {
         const fieldType = field.type;
         const matched = inputs.filter((input) => input.type === fieldType);
-        const referenceByNodeId = new Map(mentionReferences.filter((reference) => reference.active && reference.kind === fieldType).map((reference) => [reference.nodeId, reference]));
+        const mentionByNodeId = new Map(mentionReferences.filter((reference) => reference.active && reference.kind === fieldType).map((reference) => [reference.nodeId, reference]));
         const currentValue = String(value ?? "");
         const isNodeRef = currentValue.startsWith("@[node:");
         return (
@@ -248,7 +248,11 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
                 className="w-full"
                 placeholder={matched.length ? "选择上游节点" : `没有可用的上游${fieldType === "image" ? "图片" : fieldType === "video" ? "视频" : "音频"}节点`}
                 value={isNodeRef ? currentValue : undefined}
-                options={matched.map((input, index) => ({ label: referenceByNodeId.get(input.nodeId)?.label || mediaLabel(fieldType, index), value: `@[node:${input.nodeId}]` }))}
+                options={matched.map((input) => {
+                    const mention = mentionByNodeId.get(input.nodeId);
+                    const label = mention ? `${mention.label} · ${input.title}` : input.title;
+                    return { label, value: `@[node:${input.nodeId}]` };
+                })}
                 allowClear
                 classNames={{ popup: { root: "canvas-no-zoom-popup" } }}
                 onChange={(next) => onChange(next ?? "")}
@@ -308,12 +312,6 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     if (key === "audioFormat") return { audioFormat: value };
     if (key === "audioSpeed") return { audioSpeed: value };
     return { audioInstructions: value };
-}
-
-function mediaLabel(type: "image" | "video" | "audio", index: number) {
-    if (type === "image") return `图片${index + 1}`;
-    if (type === "video") return `视频${index + 1}`;
-    return `音频${index + 1}`;
 }
 
 function defaultModeForNode(type: CanvasNodeData["type"]): CanvasGenerationMode {

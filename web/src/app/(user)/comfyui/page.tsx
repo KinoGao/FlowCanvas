@@ -46,6 +46,8 @@ export default function ComfyUiPage() {
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const [selectedId, setSelectedId] = useState("");
     const [runImages, setRunImages] = useState<string[]>([]);
+    const [runVideos, setRunVideos] = useState<string[]>([]);
+    const [runAudios, setRunAudios] = useState<string[]>([]);
     const [runPromptId, setRunPromptId] = useState("");
     const selected = workflows.find((workflow) => workflow.id === selectedId) || null;
     const candidates = useMemo(() => (selected ? listComfyWorkflowInputCandidates(selected.workflow) : []), [selected]);
@@ -220,12 +222,16 @@ export default function ComfyUiPage() {
         if (!selected) return;
         setRunning(true);
         setRunImages([]);
+        setRunVideos([]);
+        setRunAudios([]);
         setRunPromptId("");
         try {
             const workflow = applyComfyWorkflowFields(selected.workflow, selected.fields, Object.fromEntries(selected.fields.map((field) => [field.id, field.default])));
             const result = await runComfyWorkflow(comfyui, workflow);
             setRunPromptId(result.promptId);
             setRunImages(result.images);
+            setRunVideos(result.videos);
+            setRunAudios(result.audios);
             message.success("ComfyUI 任务完成");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "试运行失败");
@@ -388,12 +394,18 @@ export default function ComfyUiPage() {
                                     </div>
                                 </div>
 
-                                {runPromptId || runImages.length ? (
+                                {runPromptId || runImages.length || runVideos.length || runAudios.length ? (
                                     <div className="mt-5 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                         <div className="mb-3 text-sm font-semibold">试运行结果 {runPromptId ? <span className="text-xs font-normal text-stone-500">prompt_id: {runPromptId}</span> : null}</div>
                                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                             {runImages.map((url) => (
                                                 <img key={url} src={url} alt="" className="aspect-square w-full rounded-md border border-stone-200 object-contain dark:border-stone-800" />
+                                            ))}
+                                            {runVideos.map((url) => (
+                                                <video key={url} src={url} controls className="aspect-square w-full rounded-md border border-stone-200 object-contain dark:border-stone-800" />
+                                            ))}
+                                            {runAudios.map((url) => (
+                                                <audio key={url} src={url} controls className="w-full rounded-md border border-stone-200 dark:border-stone-800" />
                                             ))}
                                         </div>
                                     </div>

@@ -1981,15 +1981,20 @@ function InfiniteCanvasPage() {
                     await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
                     const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
                     const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
-                    if (!result.images.length) throw new Error("ComfyUI 没有返回图片输出");
+                    if (!result.images.length && !result.videos.length && !result.audios.length) throw new Error("ComfyUI 没有返回任何输出");
 
                     const parentConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const videoConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+                    const audioConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const uploadedImages = await Promise.all(result.images.map((url) => uploadImage(url)));
-                    const imageNodes: CanvasNodeData[] = uploadedImages.map((image, index) => {
+                    const uploadedVideos = await Promise.all(result.videos.map((url) => uploadMediaFile(url, "video")));
+                    const uploadedAudios = await Promise.all(result.audios.map((url) => uploadMediaFile(url, "audio")));
+                    const allNodes: CanvasNodeData[] = [];
+                    uploadedImages.forEach((image, index) => {
                         const imageSize = fitNodeSize(image.width, image.height, imageConfig.width, imageConfig.height);
-                        return {
+                        allNodes.push({
                             id: nanoid(),
                             type: CanvasNodeType.Image,
                             title: comfyWorkflow.title || "ComfyUI Image",
@@ -2006,14 +2011,58 @@ function InfiniteCanvasPage() {
                                 comfyWorkflowId: comfyWorkflow.id,
                                 ...imageMetadata(image),
                             },
-                        };
+                        });
                     });
-                    pendingChildIds = imageNodes.map((node) => node.id);
+                    const imageCount = uploadedImages.length;
+                    uploadedVideos.forEach((video, index) => {
+                        const videoSize = fitNodeSize(video.width || videoConfig.width, video.height || videoConfig.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                        allNodes.push({
+                            id: nanoid(),
+                            type: CanvasNodeType.Video,
+                            title: comfyWorkflow.title || "ComfyUI Video",
+                            position: {
+                                x: parentPosition.x + parentConfig.width + 96 + ((imageCount + index) % 2) * (videoConfig.width + 36),
+                                y: parentPosition.y + Math.floor((imageCount + index) / 2) * (videoConfig.height + 36),
+                            },
+                            width: videoSize.width,
+                            height: videoSize.height,
+                            metadata: {
+                                prompt: rawPrompt,
+                                requestPrompt: effectivePrompt,
+                                model: "ComfyUI",
+                                comfyWorkflowId: comfyWorkflow.id,
+                                ...videoMetadata(video),
+                            },
+                        });
+                    });
+                    const videoCount = uploadedVideos.length;
+                    uploadedAudios.forEach((audio, index) => {
+                        const colIndex = imageCount + videoCount + index;
+                        allNodes.push({
+                            id: nanoid(),
+                            type: CanvasNodeType.Audio,
+                            title: comfyWorkflow.title || "ComfyUI Audio",
+                            position: {
+                                x: parentPosition.x + parentConfig.width + 96 + (colIndex % 2) * (audioConfig.width + 36),
+                                y: parentPosition.y + Math.floor(colIndex / 2) * (audioConfig.height + 36),
+                            },
+                            width: audioConfig.width,
+                            height: audioConfig.height,
+                            metadata: {
+                                prompt: rawPrompt,
+                                requestPrompt: effectivePrompt,
+                                model: "ComfyUI",
+                                comfyWorkflowId: comfyWorkflow.id,
+                                ...audioMetadata(audio),
+                            },
+                        });
+                    });
+                    pendingChildIds = allNodes.map((node) => node.id);
                     setNodes((prev) => [
                         ...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
-                        ...imageNodes,
+                        ...allNodes,
                     ]);
-                    setConnections((prev) => [...prev, ...imageNodes.map((node) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: node.id }))]);
+                    setConnections((prev) => [...prev, ...allNodes.map((node) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: node.id }))]);
                     return;
                 }
 

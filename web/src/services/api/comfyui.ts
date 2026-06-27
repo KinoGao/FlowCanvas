@@ -10,7 +10,7 @@ export type ComfyPromptResponse = {
 };
 
 export type ComfyHistoryItem = {
-    outputs?: Record<string, { images?: ComfyOutputFile[]; videos?: ComfyOutputFile[]; gifs?: ComfyOutputFile[] }>;
+    outputs?: Record<string, { images?: ComfyOutputFile[]; videos?: ComfyOutputFile[]; gifs?: ComfyOutputFile[]; audio?: ComfyOutputFile[] }>;
     status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
 };
 
@@ -69,6 +69,14 @@ export function extractComfyOutputImages(history: ComfyHistoryItem) {
     return Object.values(history.outputs || {}).flatMap((output) => output.images || []);
 }
 
+export function extractComfyOutputVideos(history: ComfyHistoryItem) {
+    return Object.values(history.outputs || {}).flatMap((output) => [...(output.videos || []), ...(output.gifs || [])]);
+}
+
+export function extractComfyOutputAudios(history: ComfyHistoryItem) {
+    return Object.values(history.outputs || {}).flatMap((output) => output.audio || []);
+}
+
 export type ComfyUploadResult = {
     name: string;
     subfolder?: string;
@@ -107,11 +115,10 @@ export function buildComfyViewUrl(config: ComfyUiConfig, file: ComfyOutputFile) 
 export async function runComfyWorkflow(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
     const queued = await queueComfyPrompt(config, workflow, signal);
     const history = await waitForComfyHistory(config, queued.prompt_id!, signal);
-    return {
-        promptId: queued.prompt_id!,
-        history,
-        images: extractComfyOutputImages(history).map((file) => buildComfyViewUrl(config, file)),
-    };
+    const images = extractComfyOutputImages(history).map((file) => buildComfyViewUrl(config, file));
+    const videos = extractComfyOutputVideos(history).map((file) => buildComfyViewUrl(config, file));
+    const audios = extractComfyOutputAudios(history).map((file) => buildComfyViewUrl(config, file));
+    return { promptId: queued.prompt_id!, history, images, videos, audios };
 }
 
 async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: ComfyRequestOptions = {}): Promise<T> {
