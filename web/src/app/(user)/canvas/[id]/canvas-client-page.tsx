@@ -1579,9 +1579,10 @@ function InfiniteCanvasPage() {
         setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId: id });
     }, []);
 
-    const downloadNodeImage = useCallback((node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
+        const url = await resolveNodeContent(node);
+        saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
     }, []);
 
     const saveNodeAsset = useCallback(
@@ -1670,8 +1671,9 @@ function InfiniteCanvasPage() {
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
-        if (!node.metadata?.content) return;
-        const cropped = await cropDataUrl(node.metadata.content, crop);
+        if (!node.metadata?.content && !node.metadata?.storageKey) return;
+        const url = await resolveNodeContent(node);
+        const cropped = await cropDataUrl(url, crop);
         const image = await uploadImage(cropped);
         const width = Math.min(node.width, Math.max(220, image.width));
         const childId = nanoid();
@@ -1696,9 +1698,10 @@ function InfiniteCanvasPage() {
 
     const splitImageNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageSplitParams) => {
-            if (!node.metadata?.content) return;
+            if (!node.metadata?.content && !node.metadata?.storageKey) return;
             setSplitNodeId(null);
-            const pieces = await splitDataUrl(node.metadata.content, params);
+            const url = await resolveNodeContent(node);
+            const pieces = await splitDataUrl(url, params);
             const gap = 16;
             const cellWidth = node.width / params.columns;
             const cellHeight = node.height / params.rows;
@@ -1783,9 +1786,10 @@ function InfiniteCanvasPage() {
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
-        if (!node.metadata?.content) return;
+        if (!node.metadata?.content && !node.metadata?.storageKey) return;
         setUpscaleNodeId(null);
-        const upscaled = await upscaleDataUrl(node.metadata.content, params);
+        const url = await resolveNodeContent(node);
+        const upscaled = await upscaleDataUrl(url, params);
         const image = await uploadImage(upscaled);
         const size = fitNodeSize(image.width, image.height);
         const childId = nanoid();
@@ -2729,8 +2733,14 @@ function InfiniteCanvasPage() {
                                     <ConnectionPath
                                         key={connection.id}
                                         connection={connection}
-                                        from={from}
-                                        to={to}
+                                        fromX={from.position.x}
+                                        fromY={from.position.y}
+                                        fromWidth={from.width}
+                                        fromHeight={from.height}
+                                        toX={to.position.x}
+                                        toY={to.position.y}
+                                        toWidth={to.width}
+                                        toHeight={to.height}
                                         fromOffset={draggedNodeIds?.has(connection.fromNodeId) ? activeDragOffset ?? undefined : undefined}
                                         toOffset={draggedNodeIds?.has(connection.toNodeId) ? activeDragOffset ?? undefined : undefined}
                                         active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
@@ -3317,13 +3327,23 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
+/** Resolve a node's media content URL from storageKey if needed.
+ *  After lazy-hydrate, `content` may be a stale blob URL; this ensures a valid URL for user actions. */
+async function resolveNodeContent(node: CanvasNodeData): Promise<string> {
+    const { storageKey, content } = node.metadata ?? {};
+    if (!content && !storageKey) return "";
+    if (node.type === CanvasNodeType.Image) return resolveImageUrl(storageKey, content ?? "");
+    return resolveMediaUrl(storageKey, content ?? "");
+}
+
 async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
+            // Image/Video/Audio: defer URL resolution to component (lazy hydrate)
+            if (node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) return node;
+            if (node.type === CanvasNodeType.Image && node.metadata?.storageKey) return node;
             if (node.type !== CanvasNodeType.Image || !content) return node;
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content) } };
             if (!content.startsWith("data:image/")) return node;
             return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
         }),

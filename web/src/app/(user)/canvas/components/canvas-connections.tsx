@@ -4,36 +4,62 @@ import { X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import type { CanvasConnection, CanvasNodeData, ConnectionHandle, Position } from "../types";
+import type { CanvasConnection, ConnectionHandle, Position } from "../types";
 
-export const ConnectionPath = React.memo(function ConnectionPath({
-    connection,
-    from,
-    to,
-    fromOffset,
-    toOffset,
-    active,
-    onSelect,
-    onDelete,
-    onContextMenu,
-}: {
+type ConnectionPathProps = {
     connection: CanvasConnection;
-    from: CanvasNodeData;
-    to: CanvasNodeData;
+    fromX: number;
+    fromY: number;
+    fromWidth: number;
+    fromHeight: number;
+    toX: number;
+    toY: number;
+    toWidth: number;
+    toHeight: number;
     fromOffset?: { dx: number; dy: number };
     toOffset?: { dx: number; dy: number };
     active: boolean;
     onSelect: (connectionId: string) => void;
     onDelete?: (connectionId: string) => void;
     onContextMenu?: (event: ReactMouseEvent<SVGPathElement>, connectionId: string) => void;
-}) {
+};
+
+/** Skip callback props; only compare primitives that affect rendering. */
+function connectionPathPropsEqual(prev: ConnectionPathProps, next: ConnectionPathProps) {
+    if (prev.connection !== next.connection) return false;
+    if (prev.fromX !== next.fromX || prev.fromY !== next.fromY) return false;
+    if (prev.fromWidth !== next.fromWidth || prev.fromHeight !== next.fromHeight) return false;
+    if (prev.toX !== next.toX || prev.toY !== next.toY) return false;
+    if (prev.toWidth !== next.toWidth || prev.toHeight !== next.toHeight) return false;
+    if (prev.fromOffset !== next.fromOffset || prev.toOffset !== next.toOffset) return false;
+    if (prev.active !== next.active) return false;
+    return true;
+}
+
+export const ConnectionPath = React.memo(function ConnectionPath({
+    connection,
+    fromX,
+    fromY,
+    fromWidth,
+    fromHeight,
+    toX,
+    toY,
+    toWidth,
+    toHeight,
+    fromOffset,
+    toOffset,
+    active,
+    onSelect,
+    onDelete,
+    onContextMenu,
+}: ConnectionPathProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [deleteVisible, setDeleteVisible] = useState(false);
     const hoverTimerRef = useRef<number | null>(null);
-    const startX = from.position.x + (fromOffset?.dx ?? 0) + from.width;
-    const startY = from.position.y + (fromOffset?.dy ?? 0) + from.height / 2;
-    const endX = to.position.x + (toOffset?.dx ?? 0);
-    const endY = to.position.y + (toOffset?.dy ?? 0) + to.height / 2;
+    const startX = fromX + (fromOffset?.dx ?? 0) + fromWidth;
+    const startY = fromY + (fromOffset?.dy ?? 0) + fromHeight / 2;
+    const endX = toX + (toOffset?.dx ?? 0);
+    const endY = toY + (toOffset?.dy ?? 0) + toHeight / 2;
     const dx = Math.abs(endX - startX);
     const curvature = Math.max(dx * 0.5, 50);
     const pathD = `M ${startX} ${startY} C ${startX + curvature} ${startY}, ${endX - curvature} ${endY}, ${endX} ${endY}`;
@@ -112,7 +138,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
             ) : null}
         </g>
     );
-});
+}, connectionPathPropsEqual);
 
 function cubicPoint(p0: Position, p1: Position, p2: Position, p3: Position, t: number) {
     const mt = 1 - t;
@@ -124,7 +150,7 @@ function cubicPoint(p0: Position, p1: Position, p2: Position, p3: Position, t: n
     };
 }
 
-export const ActiveConnectionPath = React.memo(function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: CanvasNodeData; handle: ConnectionHandle; mouseWorld: Position; target?: CanvasNodeData }) {
+export const ActiveConnectionPath = React.memo(function ActiveConnectionPath({ node, handle, mouseWorld, target }: { node?: { position: Position; width: number; height: number }; handle: ConnectionHandle; mouseWorld: Position; target?: { position: Position; width: number; height: number } }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     if (!node) return null;
 

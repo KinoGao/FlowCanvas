@@ -7,12 +7,31 @@ import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { resolveImageUrl } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
+
+/** Lazy-resolve media URL from storageKey on mount.
+ *  - If storageKey is present, resolve via IndexedDB (cached after first hit).
+ *  - Falls back to `content` while resolving (valid blob URL in same session). */
+function useLazyMediaUrl(storageKey: string | undefined, content: string | undefined, type: "image" | "media"): string {
+    const [url, setUrl] = useState<string>(content ?? "");
+    useEffect(() => {
+        if (!storageKey) return;
+        const resolve = type === "image" ? resolveImageUrl : resolveMediaUrl;
+        let cancelled = false;
+        resolve(storageKey, content ?? "").then((resolved) => {
+            if (!cancelled && resolved) setUrl(resolved);
+        });
+        return () => { cancelled = true; };
+    }, [storageKey, content, type]);
+    return url;
+}
 
 type CanvasNodeProps = {
     data: CanvasNodeData;
@@ -69,6 +88,31 @@ type NodeContentRendererProps = {
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
 };
+
+/** Custom memo comparator: skip function props (renderPanel, renderNodeContent, callbacks)
+ *  that change reference every render. Compare data by identity + primitive/enum props. */
+function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
+    if (prev.data !== next.data) return false;
+    if (prev.scale !== next.scale) return false;
+    if (prev.isSelected !== next.isSelected) return false;
+    if (prev.isRelated !== next.isRelated) return false;
+    if (prev.isFocusRelated !== next.isFocusRelated) return false;
+    if (prev.isConnectionTarget !== next.isConnectionTarget) return false;
+    if (prev.isConnecting !== next.isConnecting) return false;
+    if (prev.showPanel !== next.showPanel) return false;
+    if (prev.showImageInfo !== next.showImageInfo) return false;
+    if (prev.editRequestNonce !== next.editRequestNonce) return false;
+    if (prev.dragOffset !== next.dragOffset) return false;
+    if (prev.batchCount !== next.batchCount) return false;
+    if (prev.batchExpanded !== next.batchExpanded) return false;
+    if (prev.batchClosing !== next.batchClosing) return false;
+    if (prev.batchOpening !== next.batchOpening) return false;
+    if (prev.batchRecovering !== next.batchRecovering) return false;
+    if (prev.batchMotion !== next.batchMotion) return false;
+    if (prev.resourceLabel !== next.resourceLabel) return false;
+    if (prev.mentionReferences !== next.mentionReferences) return false;
+    return true;
+}
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
@@ -336,7 +380,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar">{renderPanel(data)}</div> : null}
         </div>
     );
-});
+}, canvasNodePropsEqual);
 
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
@@ -463,7 +507,8 @@ function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference 
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
-    if (!props.node.metadata?.content && props.isBatchRoot) {
+    const hasMedia = props.node.metadata?.content || props.node.metadata?.storageKey;
+    if (!hasMedia && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
                 <LoadingContent theme={props.theme} />
@@ -478,7 +523,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             </BatchFrame>
         );
     }
-    if (!props.node.metadata?.content) return <EmptyImageContent {...props} />;
+    if (!hasMedia) return <EmptyImageContent {...props} />;
 
     return (
         <ImageContent
@@ -513,18 +558,20 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 }
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    if (!src)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    return <video src={src} controls preload="none" className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
-    if (!node.metadata?.content)
+    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    if (!src)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-7 opacity-35" />
@@ -537,7 +584,7 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <audio src={src} controls className="w-full" data-canvas-no-zoom />
         </div>
     );
 }
@@ -563,12 +610,13 @@ function ImageContent({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchChild = Boolean(node.metadata?.batchRootId);
+    const imgSrc = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "image");
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
                 <img
-                    src={node.metadata!.content!}
+                    src={imgSrc}
                     alt={node.title}
                     draggable={false}
                     onDragStart={(event) => event.preventDefault()}
