@@ -34,7 +34,7 @@ const fieldTypes: Array<{ label: string; value: ComfyWorkflowFieldType }> = [
 ];
 
 export default function ComfyUiPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const comfyui = useConfigStore((state) => state.comfyui);
     const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
@@ -200,7 +200,7 @@ export default function ComfyUiPage() {
 
     const removeSelected = () => {
         if (!selected) return;
-        Modal.confirm({
+        modal.confirm({
             title: "删除工作流",
             content: `确定删除「${selected.title}」吗？`,
             okText: "删除",

@@ -49,9 +49,12 @@ export type ComfyWorkflowInputCandidate = {
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "comfyui_workflows" });
 const LIST_KEY = "items";
+let workflowCache: ComfyWorkflow[] | null = null;
 
 export async function listComfyWorkflows() {
-    return (await store.getItem<ComfyWorkflow[]>(LIST_KEY)) || [];
+    if (workflowCache) return [...workflowCache];
+    workflowCache = (await store.getItem<ComfyWorkflow[]>(LIST_KEY)) || [];
+    return [...workflowCache];
 }
 
 export async function getComfyWorkflow(id: string) {
@@ -66,6 +69,7 @@ export async function saveComfyWorkflow(workflow: ComfyWorkflow) {
     if (index >= 0) workflows[index] = next;
     else workflows.unshift(next);
     await store.setItem(LIST_KEY, workflows);
+    workflowCache = [...workflows];
     return next;
 }
 
@@ -87,10 +91,9 @@ export async function createComfyWorkflow(input: { name: string; title?: string;
 
 export async function deleteComfyWorkflow(id: string) {
     const workflows = await listComfyWorkflows();
-    await store.setItem(
-        LIST_KEY,
-        workflows.filter((workflow) => workflow.id !== id),
-    );
+    const next = workflows.filter((workflow) => workflow.id !== id);
+    await store.setItem(LIST_KEY, next);
+    workflowCache = [...next];
 }
 
 export function parseComfyWorkflowJson(text: string): ComfyWorkflowJson {

@@ -12,3 +12,9 @@ data/
 .claude/settings.local.json
 backend/target/
 backend/data/
+
+# AI agent temp/planning files
+findings.md
+progress.md
+task_plan.md
+.qoder/

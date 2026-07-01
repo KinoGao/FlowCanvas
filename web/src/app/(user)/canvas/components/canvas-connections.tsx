@@ -23,9 +23,9 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     fromOffset?: { dx: number; dy: number };
     toOffset?: { dx: number; dy: number };
     active: boolean;
-    onSelect: () => void;
-    onDelete?: () => void;
-    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>) => void;
+    onSelect: (connectionId: string) => void;
+    onDelete?: (connectionId: string) => void;
+    onContextMenu?: (event: ReactMouseEvent<SVGPathElement>, connectionId: string) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [deleteVisible, setDeleteVisible] = useState(false);
@@ -73,12 +73,12 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                 style={{ cursor: "pointer", pointerEvents: "stroke" }}
                 onClick={(event) => {
                     event.stopPropagation();
-                    onSelect();
+                    onSelect(connection.id);
                 }}
                 onContextMenu={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    onContextMenu?.(event);
+                    onContextMenu?.(event, connection.id);
                 }}
             />
             <path
@@ -101,7 +101,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                         }}
                         onClick={(event) => {
                             event.stopPropagation();
-                            onDelete();
+                            onDelete(connection.id);
                         }}
                         aria-label="删除连线"
                         title="删除连线"
