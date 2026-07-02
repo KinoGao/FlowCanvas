@@ -45,6 +45,7 @@ import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasDragStore } from "../stores/use-canvas-drag-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
@@ -319,9 +320,6 @@ function InfiniteCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
-
-    const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
-    const [dragNonce, setDragNonce] = useState(0);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -717,6 +715,40 @@ function InfiniteCanvasPage() {
 
         return { nodeIds, connectionIds };
     }, [activeNodeId, connections]);
+
+    /** Pre-resolved visible connections: viewport culling + single-pass nodeById lookup.
+     *  Excludes connections where both endpoints are outside viewport. */
+    const visibleConnections = useMemo(() => {
+        const padding = isNodeDragging ? 2000 : 280;
+        const rect = containerRef.current?.getBoundingClientRect();
+        const w = rect?.width || size.width;
+        const h = rect?.height || size.height;
+        const viewLeft = -viewport.x / viewport.k - padding;
+        const viewTop = -viewport.y / viewport.k - padding;
+        const viewRight = viewLeft + w / viewport.k + padding * 2;
+        const viewBottom = viewTop + h / viewport.k + padding * 2;
+
+        const result: Array<{
+            connection: CanvasConnection;
+            fromX: number; fromY: number; fromWidth: number; fromHeight: number;
+            toX: number; toY: number; toWidth: number; toHeight: number;
+        }> = [];
+        for (const connection of connections) {
+            const from = nodeById.get(connection.fromNodeId);
+            const to = nodeById.get(connection.toNodeId);
+            if (!from || !to) continue;
+            if (isHiddenBatchConnectionEndpoint(from, nodeById) || isHiddenBatchConnectionEndpoint(to, nodeById)) continue;
+            const fromIn = from.position.x + from.width > viewLeft && from.position.x < viewRight && from.position.y + from.height > viewTop && from.position.y < viewBottom;
+            const toIn = to.position.x + to.width > viewLeft && to.position.x < viewRight && to.position.y + to.height > viewTop && to.position.y < viewBottom;
+            if (!fromIn && !toIn) continue;
+            result.push({
+                connection,
+                fromX: from.position.x, fromY: from.position.y, fromWidth: from.width, fromHeight: from.height,
+                toX: to.position.x, toY: to.position.y, toWidth: to.width, toHeight: to.height,
+            });
+        }
+        return result;
+    }, [connections, nodeById, isNodeDragging, size.height, size.width, viewport.k, viewport.x, viewport.y]);
 
     const configInputsById = useMemo(() => {
         const map = new Map<string, NodeGenerationInput[]>();
@@ -1129,10 +1161,10 @@ function InfiniteCanvasPage() {
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
+        useCanvasDragStore.getState().startDrag(dragIds);
     }, []);
 
     const finishNodeDrag = useCallback((clientX?: number, clientY?: number) => {
-        dragOffsetRef.current = null;
         if (rafRef.current) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
@@ -1149,6 +1181,7 @@ function InfiniteCanvasPage() {
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
+        useCanvasDragStore.getState().endDrag();
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
             setNodes((prev) =>
                 prev.map((node) => {
@@ -1179,15 +1212,13 @@ function InfiniteCanvasPage() {
             if (dragRef.current.isDraggingNode) {
                 const dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
                 const dy = (event.clientY - dragRef.current.startY) / currentViewport.k;
-                const initialPositions = dragRef.current.initialSelectedNodes;
                 if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) {
                     dragRef.current.hasMoved = true;
                 }
 
-                dragOffsetRef.current = { dx, dy };
                 if (rafRef.current) cancelAnimationFrame(rafRef.current);
                 rafRef.current = requestAnimationFrame(() => {
-                    setDragNonce((n) => n + 1);
+                    useCanvasDragStore.getState().updateOffset({ dx, dy });
                     rafRef.current = null;
                 });
                 return;
@@ -2712,44 +2743,25 @@ function InfiniteCanvasPage() {
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
                 >
-                    {(() => {
-                        const activeDragOffset = dragOffsetRef.current;
-                        const draggedNodeIds = activeDragOffset ? new Set(dragRef.current.initialSelectedNodes.map((n) => n.id)) : null;
-                        return (
-                            <>
                     <svg className="absolute left-0 top-0 overflow-visible" style={{ width: 1, height: 1, pointerEvents: "none", transform: "translateZ(0)", zIndex: 0 }}>
-                        {connections
-                            .filter((connection) => {
-                                const from = nodeById.get(connection.fromNodeId);
-                                const to = nodeById.get(connection.toNodeId);
-                                return Boolean(from && to && !isHiddenBatchConnectionEndpoint(from, nodes) && !isHiddenBatchConnectionEndpoint(to, nodes));
-                            })
-                            .map((connection) => {
-                                const from = nodeById.get(connection.fromNodeId);
-                                const to = nodeById.get(connection.toNodeId);
-                                if (!from || !to) return null;
-
-                                return (
-                                    <ConnectionPath
-                                        key={connection.id}
-                                        connection={connection}
-                                        fromX={from.position.x}
-                                        fromY={from.position.y}
-                                        fromWidth={from.width}
-                                        fromHeight={from.height}
-                                        toX={to.position.x}
-                                        toY={to.position.y}
-                                        toWidth={to.width}
-                                        toHeight={to.height}
-                                        fromOffset={draggedNodeIds?.has(connection.fromNodeId) ? activeDragOffset ?? undefined : undefined}
-                                        toOffset={draggedNodeIds?.has(connection.toNodeId) ? activeDragOffset ?? undefined : undefined}
-                                        active={selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id)}
-                                        onSelect={selectConnection}
-                                        onDelete={deleteConnection}
-                                        onContextMenu={openConnectionContextMenu}
-                                    />
-                                );
-                            })}
+                        {visibleConnections.map((item) => (
+                            <ConnectionPath
+                                key={item.connection.id}
+                                connection={item.connection}
+                                fromX={item.fromX}
+                                fromY={item.fromY}
+                                fromWidth={item.fromWidth}
+                                fromHeight={item.fromHeight}
+                                toX={item.toX}
+                                toY={item.toY}
+                                toWidth={item.toWidth}
+                                toHeight={item.toHeight}
+                                active={selectedConnectionId === item.connection.id || relatedHighlight.connectionIds.has(item.connection.id)}
+                                onSelect={selectConnection}
+                                onDelete={deleteConnection}
+                                onContextMenu={openConnectionContextMenu}
+                            />
+                        ))}
                         {connectingParams ? <ActiveConnectionPath node={nodeById.get(connectingParams.nodeId)} handle={connectingParams} mouseWorld={mouseWorld} target={connectionTargetNodeId ? nodeById.get(connectionTargetNodeId) : undefined} /> : null}
                     </svg>
 
@@ -2757,7 +2769,6 @@ function InfiniteCanvasPage() {
                         <CanvasNode
                             key={node.id}
                             data={node}
-                            dragOffset={draggedNodeIds?.has(node.id) ? activeDragOffset ?? undefined : undefined}
                             scale={viewport.k}
                             isSelected={selectedNodeIds.has(node.id)}
                             isRelated={relatedHighlight.nodeIds.has(node.id)}
@@ -2806,9 +2817,6 @@ function InfiniteCanvasPage() {
                         />
                     ) : null}
                     {pendingConnectionCreate ? <ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /> : null}
-                    </>
-                    );
-                    })()}
                 </InfiniteCanvas>
 
                 <CanvasNodeHoverToolbar
@@ -3477,10 +3485,10 @@ function isHiddenBatchChild(node: CanvasNodeData, nodes: CanvasNodeData[], colla
     return Boolean(root && !root.metadata?.imageBatchExpanded);
 }
 
-function isHiddenBatchConnectionEndpoint(node: CanvasNodeData, nodes: CanvasNodeData[]) {
+function isHiddenBatchConnectionEndpoint(node: CanvasNodeData, nodeById: Map<string, CanvasNodeData>) {
     const rootId = node.metadata?.batchRootId;
     if (!rootId) return false;
-    const root = nodes.find((item) => item.id === rootId);
+    const root = nodeById.get(rootId);
     return Boolean(root && !root.metadata?.imageBatchExpanded);
 }
 

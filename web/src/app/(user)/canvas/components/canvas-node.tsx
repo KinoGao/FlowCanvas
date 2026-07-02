@@ -7,6 +7,7 @@ import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useCanvasDragStore } from "../stores/use-canvas-drag-store";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -36,7 +37,6 @@ function useLazyMediaUrl(storageKey: string | undefined, content: string | undef
 type CanvasNodeProps = {
     data: CanvasNodeData;
     scale: number;
-    dragOffset?: { dx: number; dy: number };
     isSelected: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
@@ -102,7 +102,6 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.showPanel !== next.showPanel) return false;
     if (prev.showImageInfo !== next.showImageInfo) return false;
     if (prev.editRequestNonce !== next.editRequestNonce) return false;
-    if (prev.dragOffset !== next.dragOffset) return false;
     if (prev.batchCount !== next.batchCount) return false;
     if (prev.batchExpanded !== next.batchExpanded) return false;
     if (prev.batchClosing !== next.batchClosing) return false;
@@ -117,7 +116,6 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
 export const CanvasNode = React.memo(function CanvasNode({
     data,
     scale,
-    dragOffset,
     isSelected,
     isRelated,
     isFocusRelated,
@@ -150,6 +148,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     onContextMenu,
 }: CanvasNodeProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    // Subscribe to drag store: only re-renders when THIS node is being dragged
+    const dragOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(data.id)) ? s.offset : null);
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);

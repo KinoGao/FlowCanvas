@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useCanvasDragStore } from "../stores/use-canvas-drag-store";
 import type { CanvasConnection, ConnectionHandle, Position } from "../types";
 
 type ConnectionPathProps = {
@@ -16,8 +17,6 @@ type ConnectionPathProps = {
     toY: number;
     toWidth: number;
     toHeight: number;
-    fromOffset?: { dx: number; dy: number };
-    toOffset?: { dx: number; dy: number };
     active: boolean;
     onSelect: (connectionId: string) => void;
     onDelete?: (connectionId: string) => void;
@@ -31,7 +30,6 @@ function connectionPathPropsEqual(prev: ConnectionPathProps, next: ConnectionPat
     if (prev.fromWidth !== next.fromWidth || prev.fromHeight !== next.fromHeight) return false;
     if (prev.toX !== next.toX || prev.toY !== next.toY) return false;
     if (prev.toWidth !== next.toWidth || prev.toHeight !== next.toHeight) return false;
-    if (prev.fromOffset !== next.fromOffset || prev.toOffset !== next.toOffset) return false;
     if (prev.active !== next.active) return false;
     return true;
 }
@@ -46,14 +44,15 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     toY,
     toWidth,
     toHeight,
-    fromOffset,
-    toOffset,
     active,
     onSelect,
     onDelete,
     onContextMenu,
 }: ConnectionPathProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    // Only re-renders when this connection's endpoints are being dragged
+    const fromOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(connection.fromNodeId)) ? s.offset : null);
+    const toOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(connection.toNodeId)) ? s.offset : null);
     const [deleteVisible, setDeleteVisible] = useState(false);
     const hoverTimerRef = useRef<number | null>(null);
     const startX = fromX + (fromOffset?.dx ?? 0) + fromWidth;
