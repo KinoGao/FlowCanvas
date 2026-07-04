@@ -16,6 +16,7 @@
 ## 开发与数据
 
 - [本地开发](/docs/backend/local-development)
+- [代理（转发）系统](/docs/backend/proxy-system)
 - [画布数据结构](/docs/backend/canvas-data-structure)
 
 ## 商务合作
