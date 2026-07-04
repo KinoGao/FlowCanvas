@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "../types";
+import { CanvasScaleCtx } from "./canvas-scale-context";
 
 type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
@@ -180,14 +181,16 @@ export function InfiniteCanvas({ containerRef, viewport, backgroundMode = "lines
             onDrop={onDrop}
         >
             <CanvasGrid viewport={viewport} mode={backgroundMode} />
-            <div
-                className="absolute origin-top-left"
-                style={{
-                    transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
-                }}
-            >
-                {children}
-            </div>
+            <CanvasScaleCtx.Provider value={scaleRef}>
+                <div
+                    className="absolute origin-top-left"
+                    style={{
+                        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`,
+                    }}
+                >
+                    {children}
+                </div>
+            </CanvasScaleCtx.Provider>
         </div>
     );
 }

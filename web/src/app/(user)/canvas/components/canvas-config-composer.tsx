@@ -5,6 +5,7 @@ import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "rea
 import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
+import { resolveImageUrl } from "@/services/image-storage";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
@@ -16,9 +17,7 @@ type CanvasConfigComposerProps = {
     onClose: () => void;
 };
 
-type Token =
-    | { type: "text"; value: string }
-    | { type: "reference"; nodeId: string };
+type Token = { type: "text"; value: string } | { type: "reference"; nodeId: string };
 
 type MentionState = {
     query: string;
@@ -33,6 +32,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const [resolvedImageUrlsByNodeId, setResolvedImageUrlsByNodeId] = useState<Record<string, string>>({});
     const tokens = useMemo(() => parseComposerTokens(value), [value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const candidates = useMemo(() => {
@@ -41,6 +41,28 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         if (!query) return inputs;
         return inputs.filter((input) => `${resourceLabel(input, inputs)} ${input.title} ${input.text || ""}`.toLowerCase().includes(query));
     }, [inputs, mention]);
+
+    useEffect(() => {
+        const imageInputs = inputs.filter((input): input is NodeGenerationInput & { image: NonNullable<NodeGenerationInput["image"]> } => input.type === "image" && Boolean(input.image?.storageKey));
+        if (!imageInputs.length) return;
+        let cancelled = false;
+        void Promise.all(
+            imageInputs.map(async (input) => {
+                const resolved = await resolveImageUrl(input.image.storageKey as string, input.image.dataUrl || "");
+                return [input.nodeId, resolved] as const;
+            }),
+        ).then((entries) => {
+            if (cancelled) return;
+            setResolvedImageUrlsByNodeId((current) => {
+                const next = { ...current };
+                for (const [nodeId, url] of entries) if (url) next[nodeId] = url;
+                return next;
+            });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [inputs]);
 
     useEffect(() => {
         if (document.activeElement === editorRef.current) return;
@@ -53,9 +75,9 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 return;
             }
             const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
+            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, resolvedImageUrlsByNodeId));
         });
-    }, [inputs, referenceById, theme, tokens]);
+    }, [inputs, referenceById, resolvedImageUrlsByNodeId, theme, tokens]);
 
     const syncFromEditor = () => {
         const editor = editorRef.current;
@@ -85,7 +107,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         const editor = editorRef.current;
         if (!editor) return;
         removeActiveMention();
-        const chip = createReferenceChip(input, inputs, theme, setImagePreview);
+        const chip = createReferenceChip(input, inputs, theme, setImagePreview, resolvedImageUrlsByNodeId);
         const space = document.createTextNode(" ");
         const selection = window.getSelection();
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
@@ -123,12 +145,16 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
             </div>
             <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>输入提示词，按 @ 引用连接的图片或文本</div> : null}
+                {!value.trim() ? (
+                    <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>
+                        输入提示词，按 @ 引用连接的图片或文本
+                    </div>
+                ) : null}
                 <div
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
-                    className="thin-scrollbar min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
+                    className="thin-scrollbar min-h-24 w-full whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
                     style={{ color: theme.node.text }}
                     onInput={() => {
                         if (!composingRef.current) syncFromEditor();
@@ -173,15 +199,30 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     }}
                     onBlur={() => window.setTimeout(closeMention, 120)}
                 />
-                {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
+                {mention && candidates.length ? (
+                    <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} resolvedImageUrlsByNodeId={resolvedImageUrlsByNodeId} />
+                ) : null}
             </div>
             {imagePreview ? <Image src={imagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
         </div>
     );
-
 }
 
-function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
+function MentionMenu({
+    inputs,
+    allInputs,
+    activeIndex,
+    theme,
+    onSelect,
+    resolvedImageUrlsByNodeId,
+}: {
+    inputs: NodeGenerationInput[];
+    allInputs: NodeGenerationInput[];
+    activeIndex: number;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onSelect: (input: NodeGenerationInput) => void;
+    resolvedImageUrlsByNodeId: Record<string, string>;
+}) {
     const selectedRef = useRef(false);
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -210,7 +251,7 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
                         selectInput(input);
                     }}
                 >
-                    <ResourcePreview input={input} />
+                    <ResourcePreview input={input} resolvedImageUrlsByNodeId={resolvedImageUrlsByNodeId} />
                     <span className="min-w-0 flex-1">
                         <span className="block font-medium">{resourceLabel(input, allInputs)}</span>
                         <span className="block truncate opacity-65">{input.text || input.title}</span>
@@ -221,8 +262,9 @@ function MentionMenu({ inputs, allInputs, activeIndex, theme, onSelect }: { inpu
     );
 }
 
-function ResourcePreview({ input }: { input: NodeGenerationInput }) {
-    if (input.type === "image" && input.image) return <img src={input.image.dataUrl} alt="" className="size-9 rounded-md object-cover" />;
+function ResourcePreview({ input, resolvedImageUrlsByNodeId }: { input: NodeGenerationInput; resolvedImageUrlsByNodeId: Record<string, string> }) {
+    const resolvedSrc = input.type === "image" && input.image ? resolvedImageUrlsByNodeId[input.nodeId] || input.image.dataUrl : "";
+    if (input.type === "image" && input.image) return <img src={resolvedSrc || undefined} alt="" className="size-9 rounded-md object-cover" />;
     if (input.type === "video" && input.video) return <video src={input.video.url} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;
     return (
@@ -232,7 +274,7 @@ function ResourcePreview({ input }: { input: NodeGenerationInput }) {
     );
 }
 
-function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void) {
+function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, resolvedImageUrlsByNodeId: Record<string, string>) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
     wrapper.dataset.referenceNodeId = input.nodeId;
@@ -240,7 +282,8 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
     Object.assign(wrapper.style, chipStyle(theme));
     if (input.type === "image" && input.image) {
         const image = document.createElement("img");
-        image.src = input.image.dataUrl;
+        const resolvedSrc = resolvedImageUrlsByNodeId[input.nodeId] || input.image.dataUrl;
+        if (resolvedSrc) image.src = resolvedSrc;
         image.alt = input.title;
         image.className = "size-6 rounded object-cover";
         wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
@@ -248,7 +291,7 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
         wrapper.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
-            onImagePreview(input.image?.dataUrl || "");
+            onImagePreview(resolvedSrc || "");
         });
     } else {
         wrapper.title = input.text || input.title;
@@ -361,7 +404,10 @@ function parseComposerTokens(value: string): Token[] {
 
 function resourceLabel(input: NodeGenerationInput, inputs: NodeGenerationInput[]) {
     const sameTypeInputs = inputs.filter((item) => item.type === input.type);
-    const index = Math.max(0, sameTypeInputs.findIndex((item) => item.nodeId === input.nodeId));
+    const index = Math.max(
+        0,
+        sameTypeInputs.findIndex((item) => item.nodeId === input.nodeId),
+    );
     if (input.type === "image") return `图片${index + 1}`;
     if (input.type === "video") return `视频${index + 1}`;
     if (input.type === "audio") return `音频${index + 1}`;

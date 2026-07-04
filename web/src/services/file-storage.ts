@@ -18,6 +18,12 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
 }
 
+/** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
+export function peekCachedMediaUrl(storageKey?: string): string | undefined {
+    if (!storageKey) return undefined;
+    return objectUrls.get(storageKey);
+}
+
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);

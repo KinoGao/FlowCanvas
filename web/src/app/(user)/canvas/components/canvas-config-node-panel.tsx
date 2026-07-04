@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
 import { Button, InputNumber, Segmented, Select, Switch } from "antd";
 
@@ -14,6 +14,7 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
+import { NODE_DEFAULT_SIZE } from "../constants";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import { listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
@@ -25,12 +26,17 @@ type CanvasConfigNodePanelProps = {
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     mentionReferences?: CanvasResourceReference[];
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+    onHeightChange?: (nodeId: string, height: number) => void;
     onGenerate: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle: () => void;
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, mentionReferences = [], onConfigChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
+const COMFY_AUTO_EXPAND_BASE = 250;
+const COMFY_AUTO_EXPAND_PER_FIELD = 88;
+const COMFY_AUTO_EXPAND_MAX = 800;
+
+export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, mentionReferences = [], onConfigChange, onHeightChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
     const comfyui = useConfigStore((state) => state.comfyui);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -54,16 +60,35 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
         if (mode === "comfyui" && selectedWorkflow && !node.metadata?.comfyWorkflowId && !comfyui.defaultWorkflowId) {
             onConfigChange(node.id, { comfyWorkflowId: selectedWorkflow.id });
         }
-    }, [comfyui.defaultWorkflowId, mode, node.id, node.metadata?.comfyWorkflowId, onConfigChange, selectedWorkflow]);
+    }, [comfyui.defaultWorkflowId, mode, node.id, node.metadata?.comfyWorkflowId, onConfigChange, selectedWorkflow?.id]);
+
+    const heightRef = useRef(node.height);
+    useEffect(() => {
+        heightRef.current = node.height;
+    }, [node.height]);
+
+    useEffect(() => {
+        if (!onHeightChange) return;
+        let desired: number;
+        if (mode === "comfyui") {
+            if (!selectedWorkflow) return;
+            const fieldsCount = selectedWorkflow.fields?.length ?? 0;
+            desired = Math.min(COMFY_AUTO_EXPAND_BASE + fieldsCount * COMFY_AUTO_EXPAND_PER_FIELD, COMFY_AUTO_EXPAND_MAX);
+        } else {
+            desired = NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
+        }
+        if (desired === heightRef.current) return;
+        onHeightChange(node.id, desired);
+    }, [mode, node.id, onHeightChange, selectedWorkflow?.fields?.length]);
 
     return (
-        <div className="flex h-full min-h-0 w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+        <div className="flex h-full min-h-0 min-w-0 w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="shrink-0 text-sm font-semibold">生成配置</div>
-                <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
-                        className="canvas-config-mode !rounded-md !p-0.5"
+                        className="!flex-nowrap !min-w-0 !rounded-md !p-0.5 [&_.ant-segmented-item]:!flex-none [&_.ant-segmented-item-label]:!whitespace-nowrap"
                         value={mode}
                         onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode })}
                         options={[
@@ -128,18 +153,37 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                 </button>
             </div>
 
-            <div className={`mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`} onMouseDown={(event) => event.stopPropagation()}>
+            <div
+                className={`mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
+                onMouseDown={(event) => event.stopPropagation()}
+            >
                 {mode === "comfyui" ? (
                     <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} inputs={inputs} mentionReferences={mentionReferences} onConfigChange={onConfigChange} />
                 ) : (
                     <>
                         <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                         {mode === "video" ? (
-                            <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <CanvasVideoSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
+                            />
                         ) : mode === "image" ? (
-                            <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                            <CanvasImageSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                autoAdjustOverflow={false}
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                            />
                         ) : mode === "audio" ? (
-                            <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
+                            <CanvasAudioSettingsPopover
+                                config={config}
+                                placement="topRight"
+                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))}
+                            />
                         ) : null}
                     </>
                 )}
@@ -180,7 +224,21 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
     );
 }
 
-function ComfyWorkflowControls({ node, workflows, selectedWorkflow, inputs, mentionReferences, onConfigChange }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; selectedWorkflow?: ComfyWorkflow; inputs: NodeGenerationInput[]; mentionReferences: CanvasResourceReference[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void }) {
+function ComfyWorkflowControls({
+    node,
+    workflows,
+    selectedWorkflow,
+    inputs,
+    mentionReferences,
+    onConfigChange,
+}: {
+    node: CanvasNodeData;
+    workflows: ComfyWorkflow[];
+    selectedWorkflow?: ComfyWorkflow;
+    inputs: NodeGenerationInput[];
+    mentionReferences: CanvasResourceReference[];
+    onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+}) {
     const values = node.metadata?.comfyFieldValues || {};
     const updateValue = (field: ComfyWorkflowField, value: unknown) => {
         onConfigChange(node.id, { comfyFieldValues: { ...values, [field.id]: value } });

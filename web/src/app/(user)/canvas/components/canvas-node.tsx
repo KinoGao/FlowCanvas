@@ -8,29 +8,49 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useCanvasDragStore } from "../stores/use-canvas-drag-store";
-import { resolveImageUrl } from "@/services/image-storage";
-import { resolveMediaUrl } from "@/services/file-storage";
+import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { useCanvasScale } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
 
 /** Lazy-resolve media URL from storageKey on mount.
  *  - If storageKey is present, resolve via IndexedDB (cached after first hit).
- *  - Falls back to `content` while resolving (valid blob URL in same session). */
+ *  - Sync-checks the in-memory cache to avoid showing stale blob URLs from previous sessions.
+ *  - Only falls back to `content` when there is no storageKey (legacy data without upload). */
 function useLazyMediaUrl(storageKey: string | undefined, content: string | undefined, type: "image" | "media"): string {
-    const [url, setUrl] = useState<string>(content ?? "");
+    const [url, setUrl] = useState<string>(() => {
+        if (!storageKey) return content ?? "";
+        const cached = type === "image" ? peekCachedImageUrl(storageKey) : peekCachedMediaUrl(storageKey);
+        return cached ?? "";
+    });
+    const currentBlobUrlRef = useRef<string | null>(null);
+
     useEffect(() => {
         if (!storageKey) return;
         const resolve = type === "image" ? resolveImageUrl : resolveMediaUrl;
         let cancelled = false;
         resolve(storageKey, content ?? "").then((resolved) => {
-            if (!cancelled && resolved) setUrl(resolved);
+            if (!cancelled && resolved) {
+                // Revoke previous blob URL only if different from the new one
+                if (resolved !== currentBlobUrlRef.current) {
+                    if (currentBlobUrlRef.current) {
+                        URL.revokeObjectURL(currentBlobUrlRef.current);
+                    }
+                    currentBlobUrlRef.current = resolved.startsWith("blob:") ? resolved : null;
+                }
+                setUrl(resolved);
+            }
         });
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+        };
     }, [storageKey, content, type]);
+
     return url;
 }
 
@@ -115,7 +135,6 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
 
 export const CanvasNode = React.memo(function CanvasNode({
     data,
-    scale,
     isSelected,
     isRelated,
     isFocusRelated,
@@ -147,9 +166,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
+    const scale = useCanvasScale();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     // Subscribe to drag store: only re-renders when THIS node is being dragged
-    const dragOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(data.id)) ? s.offset : null);
+    const dragOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(data.id) ? s.offset : null));
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
@@ -160,6 +180,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
     const resizeRef = useRef({
         isResizing: false,
         corner: "bottom-right" as ResizeCorner,
@@ -181,6 +202,15 @@ export const CanvasNode = React.memo(function CanvasNode({
         textarea.addEventListener("wheel", handleWheel, { passive: false });
         return () => textarea.removeEventListener("wheel", handleWheel);
     }, [data.type, isEditingContent]);
+
+    useEffect(() => {
+        if (!showPanel) return;
+        const panel = panelRef.current;
+        if (!panel) return;
+        const stopWheel = (event: WheelEvent) => event.stopPropagation();
+        panel.addEventListener("wheel", stopWheel, { capture: true, passive: true });
+        return () => panel.removeEventListener("wheel", stopWheel, true);
+    }, [showPanel]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -287,9 +317,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-id={data.id}
             className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
             style={{
-                transform: dragOffset
-                    ? `translate(${data.position.x + dragOffset.dx}px, ${data.position.y + dragOffset.dy}px)`
-                    : `translate(${data.position.x}px, ${data.position.y}px)`,
+                transform: dragOffset ? `translate(${data.position.x + dragOffset.dx}px, ${data.position.y + dragOffset.dy}px)` : `translate(${data.position.x}px, ${data.position.y}px)`,
                 width: data.width,
                 height: data.height,
                 transition: "box-shadow 200ms ease",
@@ -377,7 +405,16 @@ export const CanvasNode = React.memo(function CanvasNode({
             <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel
+                ? <div ref={panelRef} className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar" onWheel={(event) => {
+                    const el = event.currentTarget;
+                    if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
+                    const atTop = el.scrollTop === 0;
+                    const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 1;
+                    if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) return; // at boundary → let canvas scroll
+                    event.stopPropagation();
+                }}>{renderPanel(data)}</div>
+                : null}
         </div>
     );
 }, canvasNodePropsEqual);
@@ -412,7 +449,9 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
                     }}
                 />
             </div>
-            <span className="relative z-10 text-[10px] tracking-[0.2em]" style={{ color: theme.node.activeStroke }}>生成中</span>
+            <span className="relative z-10 text-[10px] tracking-[0.2em]" style={{ color: theme.node.activeStroke }}>
+                生成中
+            </span>
         </div>
     );
 }
@@ -486,11 +525,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     onWheel={(event) => event.stopPropagation()}
                 />
             ) : (
-                <div
-                    className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
-                    style={textStyle}
-                    onWheel={(event) => event.stopPropagation()}
-                >
+                <div className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono" style={textStyle} onWheel={(event) => event.stopPropagation()}>
                     {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
                 </div>
             )}
@@ -499,11 +534,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 }
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
-    return (
-        <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>
-            {reference.label}
-        </span>
-    );
+    return <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>{reference.label}</span>;
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
@@ -615,13 +646,13 @@ function ImageContent({
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
-                <img
-                    src={imgSrc}
-                    alt={node.title}
-                    draggable={false}
-                    onDragStart={(event) => event.preventDefault()}
-                    className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-                />
+                {imgSrc ? (
+                    <img src={imgSrc} alt={node.title} draggable={false} onDragStart={(event) => event.preventDefault()} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} />
+                ) : (
+                    <div className="flex h-full w-full items-center justify-center" style={{ background: theme.node.fill, color: theme.node.placeholder }} aria-label="图片加载中">
+                        <ImageIcon className="size-6 opacity-30" />
+                    </div>
+                )}
             </div>
             {isBatchRoot ? (
                 <button
@@ -722,9 +753,7 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
 
     return (
         <div className={`group/resize absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)}>
-            {corner === "bottom-right" ? (
-                <span className="absolute bottom-2 right-2 size-3 rounded-br-md border-b-2 border-r-2 border-white/55 opacity-0 transition group-hover/resize:opacity-100" />
-            ) : null}
+            {corner === "bottom-right" ? <span className="absolute bottom-2 right-2 size-3 rounded-br-md border-b-2 border-r-2 border-white/55 opacity-0 transition group-hover/resize:opacity-100" /> : null}
         </div>
     );
 }

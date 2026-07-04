@@ -3,7 +3,7 @@
 import type { WebdavSyncConfig } from "@/stores/use-config-store";
 
 export const WEBDAV_MANIFEST_FILE_NAME = "manifest.json";
-const WEBDAV_REQUEST_TIMEOUT_MS = 120000;
+const WEBDAV_REQUEST_TIMEOUT_MS = 300000;
 const ensuredDirectories = new Set<string>();
 
 export async function testWebdavConnection(config: WebdavSyncConfig) {

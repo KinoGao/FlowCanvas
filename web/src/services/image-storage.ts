@@ -27,6 +27,12 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
 
+/** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
+export function peekCachedImageUrl(storageKey?: string): string | undefined {
+    if (!storageKey) return undefined;
+    return objectUrls.get(storageKey);
+}
+
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     const cached = objectUrls.get(storageKey);
