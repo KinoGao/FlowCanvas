@@ -92,7 +92,7 @@ export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?:
             label: "画布",
             emptyData: { projects: [] },
             localData: async () => ({ projects: useCanvasStore.getState().projects }),
-            mergeData: (local, remote) => ({ projects: mergeById(local.projects, remote.projects, "updatedAt") }),
+            mergeData: (local, remote) => ({ projects: mergeCanvasProjects(local.projects, remote.projects) }),
             applyData: async (data) => useCanvasStore.getState().replaceProjects(data.projects),
         }),
         syncDomain<AssetDomainData>(config, onProgress, {
@@ -306,6 +306,38 @@ function mergeById<T extends { id?: string }>(local: T[], remote: T[], timeKey: 
         if (!current || getTime(item as Record<string, unknown>, timeKey) >= getTime(current as Record<string, unknown>, timeKey)) items.set(id, item);
     });
     return Array.from(items.values()).sort((a, b) => getTime(b as Record<string, unknown>, timeKey) - getTime(a as Record<string, unknown>, timeKey));
+}
+
+function mergeCanvasProjects(local: CanvasProject[] | undefined, remote: CanvasProject[] | undefined) {
+    const localProjects = Array.isArray(local) ? local : [];
+    const remoteProjects = Array.isArray(remote) ? remote : [];
+    const items = new Map<string, CanvasProject>();
+    remoteProjects.forEach((project) => {
+        const id = project.id || "";
+        if (id) items.set(id, project);
+    });
+    localProjects.forEach((project) => {
+        const id = project.id || "";
+        if (!id) return;
+        const current = items.get(id);
+        items.set(id, current ? pickCanvasProject(project, current) : project);
+    });
+    return Array.from(items.values()).sort((a, b) => getTime(b as unknown as Record<string, unknown>, "updatedAt") - getTime(a as unknown as Record<string, unknown>, "updatedAt"));
+}
+
+function pickCanvasProject(local: CanvasProject, remote: CanvasProject) {
+    const localScore = canvasProjectContentScore(local);
+    const remoteScore = canvasProjectContentScore(remote);
+    if (localScore > 0 && remoteScore === 0) return local;
+    if (remoteScore > 0 && localScore === 0) return remote;
+    return getTime(local as unknown as Record<string, unknown>, "updatedAt") >= getTime(remote as unknown as Record<string, unknown>, "updatedAt") ? local : remote;
+}
+
+function canvasProjectContentScore(project: Partial<CanvasProject>) {
+    const nodes = Array.isArray(project.nodes) ? project.nodes.length : 0;
+    const connections = Array.isArray(project.connections) ? project.connections.length : 0;
+    const chatSessions = Array.isArray(project.chatSessions) ? project.chatSessions.length : 0;
+    return nodes + connections + chatSessions;
 }
 
 function collectStorageKeys(value: unknown, keys = new Set<string>()) {

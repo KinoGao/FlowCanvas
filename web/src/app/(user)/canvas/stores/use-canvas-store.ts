@@ -38,6 +38,23 @@ type PersistedCanvasState = Pick<CanvasStore, "projects">;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
 
+function normalizeCanvasProject(source: Partial<CanvasProject> = {}): CanvasProject {
+    const now = new Date().toISOString();
+    return {
+        id: source.id || nanoid(),
+        title: source.title || "Untitled canvas",
+        createdAt: source.createdAt || now,
+        updatedAt: source.updatedAt || source.createdAt || now,
+        nodes: Array.isArray(source.nodes) ? source.nodes : [],
+        connections: Array.isArray(source.connections) ? source.connections : [],
+        chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
+        activeChatId: source.activeChatId || null,
+        backgroundMode: source.backgroundMode || "lines",
+        showImageInfo: Boolean(source.showImageInfo),
+        viewport: source.viewport || initialViewport,
+    };
+}
+
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
         const value = await localForageStorage.getItem(name);
@@ -98,11 +115,13 @@ export const useCanvasStore = create<CanvasStore>()(
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
                 };
-                set((state) => ({ projects: [project, ...state.projects] }));
-                return project.id;
+                const normalizedProject = normalizeCanvasProject(project);
+                set((state) => ({ projects: [normalizedProject, ...state.projects] }));
+                return normalizedProject.id;
             },
             openProject: (id) => {
-                return get().projects.find((item) => item.id === id) || null;
+                const project = get().projects.find((item) => item.id === id);
+                return project ? normalizeCanvasProject(project) : null;
             },
             renameProject: (id, title) =>
                 set((state) => ({
@@ -113,7 +132,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     const projects = state.projects.filter((project) => !ids.includes(project.id));
                     return { projects };
                 }),
-            replaceProjects: (projects) => set({ projects }),
+            replaceProjects: (projects) => set({ projects: projects.map((project) => normalizeCanvasProject(project)) }),
             updateProject: (id, patch) =>
                 set((state) => ({
                     projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
@@ -122,6 +141,13 @@ export const useCanvasStore = create<CanvasStore>()(
         {
             name: CANVAS_STORE_KEY,
             storage: canvasStorage,
+            merge: (persistedState, currentState) => {
+                const persisted = persistedState as Partial<PersistedCanvasState> | undefined;
+                return {
+                    ...currentState,
+                    projects: Array.isArray(persisted?.projects) ? persisted.projects.map((project) => normalizeCanvasProject(project)) : currentState.projects,
+                };
+            },
             partialize: (state) =>
                 ({
                     projects: state.projects,
