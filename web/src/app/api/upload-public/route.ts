@@ -50,10 +50,7 @@ export async function POST(request: NextRequest) {
         attempts.push(r);
         if (r.ok) return NextResponse.json({ url: r.body, source: "temp.sh" });
         if (requestedSource === "temp.sh") {
-            return NextResponse.json(
-                { error: "temp.sh 上传失败", attempts: [{ source: r.source, ok: r.ok, status: r.status, error: r.error }] },
-                { status: 502 },
-            );
+            return NextResponse.json({ error: "temp.sh 上传失败", attempts: [{ source: r.source, ok: r.ok, status: r.status, error: r.error }] }, { status: 502 });
         }
     }
 
@@ -62,10 +59,7 @@ export async function POST(request: NextRequest) {
         attempts.push(r);
         if (r.ok) return NextResponse.json({ url: r.body, source: "litterbox" });
         if (requestedSource === "litterbox") {
-            return NextResponse.json(
-                { error: "litterbox 上传失败", attempts: [{ source: r.source, ok: r.ok, status: r.status, error: r.error }] },
-                { status: 502 },
-            );
+            return NextResponse.json({ error: "litterbox 上传失败", attempts: [{ source: r.source, ok: r.ok, status: r.status, error: r.error }] }, { status: 502 });
         }
     }
 

@@ -166,7 +166,11 @@ export default function ComfyUiPage() {
             updateComfyUiConfig("defaultWorkflowId", created.id);
             await refreshWorkflows(created.id);
             if (backendReady) {
-                try { await uploadRemoteWorkflow(backend.url, backend.authCode, created.id, workflow); } catch { /* 静默 */ }
+                try {
+                    await uploadRemoteWorkflow(backend.url, backend.authCode, created.id, workflow);
+                } catch {
+                    /* 静默 */
+                }
             }
             message.success("ComfyUI workflow 已导入");
         } catch (error) {
@@ -188,7 +192,11 @@ export default function ComfyUiPage() {
             updateComfyUiConfig("defaultWorkflowId", saved.id);
             await refreshWorkflows(saved.id);
             if (backendReady) {
-                try { await pushRemoteWorkflowConfig(backend.url, backend.authCode, saved.id, { title: saved.title, fields: saved.fields }); } catch { /* 静默 */ }
+                try {
+                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, saved.id, { title: saved.title, fields: saved.fields });
+                } catch {
+                    /* 静默 */
+                }
             }
             message.success("工作流配置已保存");
         } catch (error) {
@@ -209,7 +217,11 @@ export default function ComfyUiPage() {
             onOk: async () => {
                 await deleteComfyWorkflow(selected.id);
                 if (backendReady) {
-                    try { await deleteRemoteWorkflow(backend.url, backend.authCode, selected.id); } catch { /* 静默 */ }
+                    try {
+                        await deleteRemoteWorkflow(backend.url, backend.authCode, selected.id);
+                    } catch {
+                        /* 静默 */
+                    }
                 }
                 if (comfyui.defaultWorkflowId === selected.id) updateComfyUiConfig("defaultWorkflowId", "");
                 await refreshWorkflows("");
@@ -335,7 +347,10 @@ export default function ComfyUiPage() {
                                                     <button
                                                         key={`${candidate.node}:${candidate.input}`}
                                                         type="button"
-                                                        className={cn("rounded-md border p-3 text-left transition", active ? "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30" : "border-stone-200 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900")}
+                                                        className={cn(
+                                                            "rounded-md border p-3 text-left transition",
+                                                            active ? "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/30" : "border-stone-200 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900",
+                                                        )}
                                                         onClick={() => toggleField(candidate)}
                                                     >
                                                         <div className="flex items-start justify-between gap-3">

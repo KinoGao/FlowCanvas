@@ -18,6 +18,15 @@ interface AnimatedThemeTogglerProps extends React.ComponentPropsWithoutRef<"butt
     onThemeChange?: (theme: "light" | "dark") => void;
 }
 
+type ViewTransition = {
+    ready?: Promise<unknown>;
+    finished?: Promise<unknown>;
+};
+
+type ViewTransitionDocument = Document & {
+    startViewTransition?: (callback: () => void) => ViewTransition;
+};
+
 function polygonCollapsed(cx: number, cy: number, vertexCount: number): string {
     const pairs = Array.from({ length: vertexCount }, () => `${cx}px ${cy}px`).join(", ");
     return `polygon(${pairs})`;
@@ -138,7 +147,8 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             onThemeChange?.(nextTheme);
         };
 
-        if (typeof document.startViewTransition !== "function") {
+        const viewTransitionDocument = document as ViewTransitionDocument;
+        if (typeof viewTransitionDocument.startViewTransition !== "function") {
             applyTheme();
             return;
         }
@@ -157,7 +167,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             root.style.removeProperty("--magicui-theme-vt-clip-from");
         };
 
-        const transition = document.startViewTransition(() => {
+        const transition = viewTransitionDocument.startViewTransition(() => {
             flushSync(applyTheme);
         });
         if (typeof transition?.finished?.finally === "function") {

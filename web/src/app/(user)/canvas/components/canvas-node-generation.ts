@@ -4,7 +4,7 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
-import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
+import { getGenerationResourceNodes, type CanvasResourceGraph } from "../utils/canvas-resource-references";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -28,10 +28,25 @@ export type NodeGenerationInput = {
     audio?: ReferenceAudio;
 };
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, options?: { appendUpstreamText?: boolean }): NodeGenerationContext {
+type NodeGenerationBuildOptions = { appendUpstreamText?: boolean };
+
+export function buildNodeGenerationContext(nodeId: string, graph: CanvasResourceGraph, prompt: string, options?: NodeGenerationBuildOptions): NodeGenerationContext;
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, options?: NodeGenerationBuildOptions): NodeGenerationContext;
+export function buildNodeGenerationContext(
+    nodeId: string,
+    source: CanvasResourceGraph | CanvasNodeData[],
+    connectionsOrPrompt: CanvasConnection[] | string,
+    promptOrOptions?: string | NodeGenerationBuildOptions,
+    maybeOptions?: NodeGenerationBuildOptions,
+): NodeGenerationContext {
+    const graph = Array.isArray(source) ? null : source;
+    const nodes = Array.isArray(source) ? source : [];
+    const connections = Array.isArray(connectionsOrPrompt) ? connectionsOrPrompt : [];
+    const prompt = Array.isArray(source) ? (promptOrOptions as string) : (connectionsOrPrompt as string);
+    const options = Array.isArray(source) ? maybeOptions : (promptOrOptions as NodeGenerationBuildOptions | undefined);
     const appendUpstreamText = options?.appendUpstreamText ?? true;
-    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
-    const sourceNode = nodes.find((node) => node.id === nodeId);
+    const inputs = graph ? buildNodeGenerationInputs(nodeId, graph) : buildNodeGenerationInputs(nodeId, nodes, connections);
+    const sourceNode = graph ? graph.nodeById.get(nodeId) : nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt);
     }
@@ -41,9 +56,9 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 
     const upstreamText = appendUpstreamText
         ? inputs
-            .map((input) => input.text)
-            .filter(Boolean)
-            .join("\n\n")
+              .map((input) => input.text)
+              .filter(Boolean)
+              .join("\n\n")
         : "";
     const referenceImages = inputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = inputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
@@ -163,8 +178,11 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     };
 }
 
-export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
+export function buildNodeGenerationInputs(nodeId: string, graph: CanvasResourceGraph): NodeGenerationInput[];
+export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[];
+export function buildNodeGenerationInputs(nodeId: string, source: CanvasResourceGraph | CanvasNodeData[], connections?: CanvasConnection[]): NodeGenerationInput[] {
+    const resourceNodes = Array.isArray(source) ? getGenerationResourceNodes(nodeId, source, connections || []) : getGenerationResourceNodes(nodeId, source);
+    return resourceNodes.flatMap((node): NodeGenerationInput[] => {
         const image = readReferenceImage(node);
         if (image) return [{ nodeId: node.id, type: "image" as const, title: node.title, image }];
         const video = readReferenceVideo(node);
@@ -192,11 +210,27 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
 
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
     const { imageToDataUrl } = await import("@/services/image-storage");
-    const imageById = new Map(await Promise.all(context.referenceImages.map(async (image) => [image.id, { ...image, dataUrl: await imageToDataUrl(image) }] as const)));
+    const referenceImages = (
+        await Promise.all(
+            context.referenceImages.map(async (image) => {
+                try {
+                    return { ...image, dataUrl: await imageToDataUrl(image) };
+                } catch {
+                    return null;
+                }
+            }),
+        )
+    ).filter((image): image is ReferenceImage => Boolean(image));
+    const imageById = new Map(referenceImages.map((image) => [image.id, image] as const));
     return {
         ...context,
-        inputs: context.inputs.map((input) => (input.image ? { ...input, image: imageById.get(input.image.id) || input.image } : input)),
-        referenceImages: Array.from(imageById.values()),
+        inputs: context.inputs.flatMap((input) => {
+            if (!input.image) return [input];
+            const image = imageById.get(input.image.id);
+            return image ? [{ ...input, image }] : [];
+        }),
+        referenceImages,
+        imageCount: referenceImages.length,
     };
 }
 
@@ -218,9 +252,7 @@ function escapeRegExp(value: string) {
 
 function replaceLabelToken(value: string, label: string, replacement: string) {
     const escaped = escapeRegExp(label);
-    return value
-        .replace(new RegExp(`【${escaped}】`, "g"), replacement)
-        .replace(new RegExp(`(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
+    return value.replace(new RegExp(`【${escaped}】`, "g"), replacement).replace(new RegExp(`(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
 }
 
 function hasLabelToken(value: string, label: string) {
@@ -229,23 +261,23 @@ function hasLabelToken(value: string, label: string) {
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
-    if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Image || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.png`,
         type: node.metadata.mimeType || "image/png",
-        dataUrl: node.metadata.content,
+        dataUrl: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
     };
 }
 
 function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
-    if (node.type !== CanvasNodeType.Video || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Video || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.mp4`,
         type: node.metadata.mimeType || "video/mp4",
-        url: node.metadata.content,
+        url: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         bytes: node.metadata.bytes,
         width: node.metadata.naturalWidth,
@@ -255,12 +287,12 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
 }
 
 function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
-    if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) return null;
+    if (node.type !== CanvasNodeType.Audio || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
         name: `${node.title || node.id}.mp3`,
         type: node.metadata.mimeType || "audio/mpeg",
-        url: node.metadata.content,
+        url: node.metadata.content || "",
         storageKey: node.metadata.storageKey,
         durationMs: node.metadata.durationMs,
     };

@@ -12,6 +12,7 @@ export function useBackendSync() {
     const updateConfig = useConfigStore((s) => s.updateConfig);
     const pullingRef = useRef(false);
     const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastPushedConfigRef = useRef<string | null>(null);
     const configRef = useRef(config);
     configRef.current = config;
 
@@ -31,7 +32,9 @@ export function useBackendSync() {
                 // 远端为空：本地推送到远端
                 if (!remote || !remote.data) {
                     try {
-                        await pushRemoteConfig(backend.url, backend.authCode, JSON.stringify(configRef.current));
+                        const configJson = stableConfigStringify(configRef.current);
+                        await pushRemoteConfig(backend.url, backend.authCode, configJson);
+                        lastPushedConfigRef.current = configJson;
                         localStorage.setItem("infinite-canvas:config_updated_at", String(Date.now()));
                     } catch {
                         // 推送失败静默处理，后续变更会重试
@@ -47,6 +50,7 @@ export function useBackendSync() {
                     (Object.keys(fullConfig) as Array<keyof typeof config>).forEach((key) => {
                         updateConfig(key, fullConfig[key]);
                     });
+                    lastPushedConfigRef.current = stableConfigStringify(fullConfig);
                     localStorage.setItem("infinite-canvas:config_updated_at", String(remoteUpdatedAt));
                     if (localUpdatedAt) message.success("已从后端同步最新配置");
                 }
@@ -66,8 +70,10 @@ export function useBackendSync() {
         if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
         pushTimerRef.current = setTimeout(async () => {
             try {
-                const configJson = JSON.stringify(config);
+                const configJson = stableConfigStringify(config);
+                if (lastPushedConfigRef.current === configJson) return;
                 await pushRemoteConfig(backend.url, backend.authCode, configJson);
+                lastPushedConfigRef.current = configJson;
                 localStorage.setItem("infinite-canvas:config_updated_at", String(Date.now()));
             } catch {
                 message.warning("配置同步到后端失败，请检查后端连接");
@@ -77,5 +83,17 @@ export function useBackendSync() {
         return () => {
             if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
         };
-    }, [config, backend.enabled, backend.url, backend.authCode]);
+    }, [config, backend.enabled, backend.url, backend.authCode, message]);
+}
+
+function stableConfigStringify(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(stableConfigStringify).join(",")}]`;
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return `{${Object.keys(record)
+            .sort()
+            .map((key) => `${JSON.stringify(key)}:${stableConfigStringify(record[key])}`)
+            .join(",")}}`;
+    }
+    return JSON.stringify(value);
 }

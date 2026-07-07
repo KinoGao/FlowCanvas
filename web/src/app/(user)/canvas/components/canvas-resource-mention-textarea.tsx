@@ -1,11 +1,13 @@
 "use client";
 
-import { forwardRef, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { resolveMediaUrl, peekCachedMediaUrl } from "@/services/file-storage";
+import { resolveImageUrl, peekCachedImageUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
@@ -23,7 +25,10 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     highlightLabels?: boolean;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props }, forwardedRef) {
+export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
+    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props },
+    forwardedRef,
+) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -201,7 +206,19 @@ function MentionHighlightText({ value, labels, placeholder }: { value: string; l
     );
 }
 
-function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { textarea: HTMLTextAreaElement; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void }) {
+function MentionMenu({
+    textarea,
+    references,
+    activeIndex,
+    theme,
+    onSelect,
+}: {
+    textarea: HTMLTextAreaElement;
+    references: CanvasResourceReference[];
+    activeIndex: number;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onSelect: (reference: CanvasResourceReference) => void;
+}) {
     const selectedRef = useRef(false);
     const rect = textarea.getBoundingClientRect();
     const boundary = textarea.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
@@ -260,14 +277,41 @@ function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { t
 }
 
 function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-9 rounded-md object-cover" />;
-    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
-    const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
+    const { kind, previewUrl, storageKey } = reference;
+    const [src, setSrc] = useState(() => resolvePreviewUrlFromCache(kind, storageKey, previewUrl));
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        setFailed(false);
+        setSrc(resolvePreviewUrlFromCache(kind, storageKey, previewUrl));
+        if (!storageKey) return;
+        const resolve = kind === "image" ? resolveImageUrl : resolveMediaUrl;
+        void resolve(storageKey, "")
+            .then((url) => {
+                if (!cancelled) setSrc(url || "");
+            })
+            .catch(() => {
+                if (!cancelled) setSrc("");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [kind, previewUrl, storageKey]);
+
+    if (kind === "image" && src && !failed) return <img src={src} alt="" className="size-9 rounded-md object-cover" onError={() => setFailed(true)} />;
+    if (kind === "video" && src && !failed) return <video src={src} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" onError={() => setFailed(true)} />;
+    const Icon = kind === "audio" ? Music2 : kind === "video" ? Video : kind === "image" ? ImageIcon : FileText;
     return (
         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
             <Icon className="size-4" />
         </span>
     );
+}
+
+function resolvePreviewUrlFromCache(kind: CanvasResourceReference["kind"], storageKey?: string, previewUrl = "") {
+    if (!storageKey) return previewUrl.startsWith("blob:") ? "" : previewUrl;
+    return (kind === "image" ? peekCachedImageUrl(storageKey) : peekCachedMediaUrl(storageKey)) || "";
 }
 
 function clamp(value: number, min: number, max: number) {

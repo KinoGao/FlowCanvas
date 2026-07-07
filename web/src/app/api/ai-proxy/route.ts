@@ -4,18 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const PROXY_TIMEOUT_MS = 600_000;
-const HOP_BY_HOP_HEADERS = new Set([
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-    "content-encoding",
-    "content-length",
-]);
+const HOP_BY_HOP_HEADERS = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length"]);
 
 export async function GET(request: NextRequest) {
     return handle(request, "GET");

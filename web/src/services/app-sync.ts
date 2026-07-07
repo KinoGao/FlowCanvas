@@ -155,9 +155,14 @@ async function syncDomain<T>(config: WebdavSyncConfig, onProgress: AppSyncProgre
         emitProgress(onProgress, { domain: options.key, label: options.label, stage: "上传新增媒体", status: "active" });
         const uploaded = await uploadChangedFiles(config, options.key, mergedData, remoteManifest?.files || [], onProgress);
         const manifest: DomainManifest<T> = { app: "infinite-canvas", version: 1, domain: options.key, exportedAt: new Date().toISOString(), data: mergedData, files: uploaded.files };
-        const manifestFile = new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" });
-        emitProgress(onProgress, { domain: options.key, label: options.label, stage: `上传清单 ${formatBytes(manifestFile.size)}`, status: "active" });
-        await uploadWebdavFile(config, domainPath(options.key, WEBDAV_MANIFEST_FILE_NAME), manifestFile, "application/json");
+        const manifestJson = JSON.stringify(manifest, null, 2);
+        const manifestFile = new Blob([manifestJson], { type: "application/json" });
+        if (!remoteManifest || uploaded.uploadedFiles > 0 || !sameManifestContent(remoteManifest, manifest)) {
+            emitProgress(onProgress, { domain: options.key, label: options.label, stage: `上传清单 ${formatBytes(manifestFile.size)}`, status: "active" });
+            await uploadWebdavFile(config, domainPath(options.key, WEBDAV_MANIFEST_FILE_NAME), manifestFile, "application/json");
+        } else {
+            emitProgress(onProgress, { domain: options.key, label: options.label, stage: "清单无需上传", current: 1, total: 1, status: "active" });
+        }
         emitProgress(onProgress, { domain: options.key, label: options.label, stage: "完成", current: 1, total: 1, status: "success" });
 
         return {
@@ -194,17 +199,13 @@ async function downloadMissingFiles<T>(config: WebdavSyncConfig, domain: DomainK
     const tasks: AppSyncFile[] = [];
     const storageKeys = collectStorageKeys(data);
     let scanned = 0;
-    for (const storageKey of storageKeys) {
+    const missingFiles = await runWithConcurrency(storageKeys, FILE_CONCURRENCY, async (storageKey) => {
         const localBlob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
         scanned += 1;
-        if (localBlob) {
-            emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查缺失媒体", current: scanned, total: storageKeys.length, status: "active" });
-            continue;
-        }
-        const remoteFile = remoteFileMap.get(storageKey);
-        if (remoteFile) tasks.push(remoteFile);
         emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查缺失媒体", current: scanned, total: storageKeys.length, status: "active" });
-    }
+        return localBlob ? null : remoteFileMap.get(storageKey) || null;
+    });
+    tasks.push(...missingFiles.filter((item): item is AppSyncFile => Boolean(item)));
     if (!tasks.length) {
         emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "媒体已齐全", current: 1, total: 1, status: "active" });
         return;
@@ -229,25 +230,24 @@ async function uploadChangedFiles<T>(config: WebdavSyncConfig, domain: DomainKey
 
     const storageKeys = collectStorageKeys(data);
     let scanned = 0;
-    for (const storageKey of storageKeys) {
+    const scannedFiles = await runWithConcurrency(storageKeys, FILE_CONCURRENCY, async (storageKey) => {
         const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
         const remoteFile = remoteFileMap.get(storageKey);
-        if (!blob) {
-            if (remoteFile) files.push(remoteFile);
-            scanned += 1;
-            emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查本地媒体", current: scanned, total: storageKeys.length, status: "active" });
-            continue;
-        }
+        scanned += 1;
+        emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查本地媒体", current: scanned, total: storageKeys.length, status: "active" });
+        if (!blob) return remoteFile ? { item: remoteFile, blob: null } : null;
         const item: AppSyncFile = {
             storageKey,
             path: remoteFile?.path || domainPath(domain, `files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`),
             mimeType: blob.type || remoteFile?.mimeType || "application/octet-stream",
             bytes: blob.size,
         };
-        files.push(item);
-        if (!remoteFile || remoteFile.bytes !== blob.size) tasks.push({ item, blob });
-        scanned += 1;
-        emitProgress(onProgress, { domain, label: domainLabel(domain), stage: "检查本地媒体", current: scanned, total: storageKeys.length, status: "active" });
+        return { item, blob, shouldUpload: !remoteFile || remoteFile.bytes !== blob.size };
+    });
+    for (const entry of scannedFiles) {
+        if (!entry) continue;
+        files.push(entry.item);
+        if (entry.blob && entry.shouldUpload) tasks.push({ item: entry.item, blob: entry.blob });
     }
 
     if (!tasks.length) {
@@ -360,6 +360,22 @@ function fileExtension(mimeType: string, storageKey: string) {
     if (mimeType.includes("wav")) return "wav";
     if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
     return storageKey.startsWith("image:") ? "png" : "bin";
+}
+
+function sameManifestContent<T>(left: DomainManifest<T>, right: DomainManifest<T>) {
+    return stableStringify({ app: left.app, version: left.version, domain: left.domain, data: left.data, files: left.files }) === stableStringify({ app: right.app, version: right.version, domain: right.domain, data: right.data, files: right.files });
+}
+
+function stableStringify(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return `{${Object.keys(record)
+            .sort()
+            .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+            .join(",")}}`;
+    }
+    return JSON.stringify(value);
 }
 
 function waitForHydration<T extends { hydrated: boolean }>(store: { getState: () => T; subscribe: (listener: (state: T) => void) => () => void }) {

@@ -121,9 +121,11 @@ export default function IndexPage() {
                 }}
             >
                 <div className="hidden">
-                    {promptShowcase.filter((item) => item.coverUrl).map((item) => (
-                        <Image key={item.id} src={item.coverUrl} alt={item.title} />
-                    ))}
+                    {promptShowcase
+                        .filter((item) => item.coverUrl)
+                        .map((item) => (
+                            <Image key={item.id} src={item.coverUrl} alt={item.title} />
+                        ))}
                 </div>
             </Image.PreviewGroup>
         </main>

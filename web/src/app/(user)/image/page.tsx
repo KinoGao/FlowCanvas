@@ -471,7 +471,7 @@ export default function ImagePage() {
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={assetPickerOpen} onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedLogIds.length} 条生成记录吗？
             </Modal>
@@ -546,14 +546,9 @@ function PendingImageCard() {
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
             <div className="absolute inset-0 bg-stone-100 dark:bg-stone-900" />
             <div className="absolute inset-0 overflow-hidden">
-                <div
-                    className="absolute inset-0"
-                    style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)", animation: "shimmer-sweep 2s ease-in-out infinite" }}
-                />
+                <div className="absolute inset-0" style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)", animation: "shimmer-sweep 2s ease-in-out infinite" }} />
             </div>
-            <div className="absolute inset-0 flex items-center justify-center text-sm text-stone-400 dark:text-stone-500">
-                生成中
-            </div>
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-stone-400 dark:text-stone-500">生成中</div>
         </div>
     );
 }

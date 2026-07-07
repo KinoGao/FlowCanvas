@@ -116,15 +116,6 @@ export type ConnectionHandle = {
     handleType: "source" | "target";
 };
 
-export type SelectionBox = {
-    startWorldX: number;
-    startWorldY: number;
-    currentWorldX: number;
-    currentWorldY: number;
-    additive: boolean;
-    initialSelectedNodeIds: string[];
-};
-
 export type ContextMenuState =
     | {
           type: "node";

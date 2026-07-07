@@ -1,9 +1,22 @@
 import axios from "axios";
 
-import { dataUrlToFile } from "@/lib/image-utils";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { imageToDataUrl } from "@/services/image-storage";
-import { boolConfig, buildSeedancePromptText, isAgnesVideoConfig, isSeedanceNewModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceCapabilityError, seedanceGenerationMode, seedanceSupportsGenerateAudio, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { imageToDataUrl, imageToFile } from "@/services/image-storage";
+import {
+    boolConfig,
+    buildSeedancePromptText,
+    isAgnesVideoConfig,
+    isSeedanceNewModel,
+    isSeedanceVideoConfig,
+    normalizeSeedanceDuration,
+    normalizeSeedanceRatio,
+    normalizeSeedanceResolution,
+    seedanceCapabilityError,
+    seedanceGenerationMode,
+    seedanceSupportsGenerateAudio,
+    seedanceVideoReferenceError,
+    SEEDANCE_REFERENCE_LIMITS,
+} from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { uploadImageToBackend, buildPublicImageUrl } from "@/services/api/backend";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
@@ -109,7 +122,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
     body.append("resolution_name", normalizeVideoResolution(config.vquality));
     body.append("preset", "normal");
-    const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+    const files = await Promise.all(references.slice(0, 7).map(imageToFile));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
@@ -159,12 +172,9 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         // 1.0/lite 只支持 content text 里的 --key value 格式
         const textItem = content.find((item: Record<string, unknown>) => item.type === "text");
         if (textItem && typeof textItem.text === "string") {
-            const flags = [
-                `--resolution ${normalizeSeedanceResolution(config.vquality, modelName)}`,
-                `--duration ${normalizeSeedanceDuration(config.videoSeconds)}`,
-                `--watermark ${boolConfig(config.videoWatermark, false)}`,
-                `--camerafixed false`,
-            ].join("  ");
+            const flags = [`--resolution ${normalizeSeedanceResolution(config.vquality, modelName)}`, `--duration ${normalizeSeedanceDuration(config.videoSeconds)}`, `--watermark ${boolConfig(config.videoWatermark, false)}`, `--camerafixed false`].join(
+                "  ",
+            );
             textItem.text = `${textItem.text}  ${flags}`;
         }
     }
@@ -284,7 +294,7 @@ function agnesResolutionForSize(size: { width: number; height: number }, default
         width = Math.round((baseHeight * ratio) / 16) * 16;
     } else {
         width = baseHeight;
-        height = Math.round((baseHeight / ratio) / 16) * 16;
+        height = Math.round(baseHeight / ratio / 16) * 16;
     }
     const longSide = Math.max(size.width, size.height);
     if (longSide >= 1900) {
@@ -333,14 +343,7 @@ async function createAgnesVideoTask(config: AiConfig, model: string, prompt: str
 }
 
 // 后端公网地址可用时，优先上传到后端；否则降级到临时图床
-async function agnesRetryWithPublicHost(
-    config: AiConfig,
-    model: string,
-    prompt: string,
-    references: ReferenceImage[],
-    imageError: string,
-    options?: RequestOptions,
-): Promise<VideoGenerationTask> {
+async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], imageError: string, options?: RequestOptions): Promise<VideoGenerationTask> {
     const errors: string[] = [`[本地图片准备] ${imageError}`];
 
     const backend = useConfigStore.getState().backend;
@@ -376,9 +379,7 @@ async function agnesRetryWithPublicHost(
         }
     }
 
-    throw new Error(
-        `无法生成视频。已依次尝试 temp.sh、litterbox 两个公网 URL 方案，Agnes 都无法消费这些图片 URL，请手动提供公网图片 URL 后重试。详细：${errors.join(" ")}`,
-    );
+    throw new Error(`无法生成视频。已依次尝试 temp.sh、litterbox 两个公网 URL 方案，Agnes 都无法消费这些图片 URL，请手动提供公网图片 URL 后重试。详细：${errors.join(" ")}`);
 }
 
 async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: string, urls: string[], options?: RequestOptions): Promise<VideoGenerationTask> {
@@ -393,7 +394,7 @@ async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: s
         frame_rate: 24,
     };
     if (urls.length === 1) body.image = urls[0];
-    else if (urls.length > 1) body.extra_body = { image: urls };
+    else if (urls.length > 1) body.extra_body = { image: urls, mode: "keyframes" };
 
     const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data;
     if (created.error?.message) throw new Error(created.error.message);
@@ -407,13 +408,15 @@ async function uploadReferencesToPublicHost(references: ReferenceImage[], source
 }
 
 async function uploadReferencesToBackend(references: ReferenceImage[], backendUrl: string, authCode: string, publicBaseUrl: string, signal?: AbortSignal): Promise<string[]> {
-    return Promise.all(references.map(async (image) => {
-        const dataUrl = await imageToDataUrl(image);
-        if (!dataUrl) throw new Error("读取本地参考图失败");
-        const blob = await (await fetch(dataUrl)).blob();
-        const filename = await uploadImageToBackend(backendUrl, authCode, blob, image.name || "reference.png");
-        return buildPublicImageUrl(publicBaseUrl, filename);
-    }));
+    return Promise.all(
+        references.map(async (image) => {
+            const dataUrl = await imageToDataUrl(image);
+            if (!dataUrl) throw new Error("读取本地参考图失败");
+            const blob = await (await fetch(dataUrl)).blob();
+            const filename = await uploadImageToBackend(backendUrl, authCode, blob, image.name || "reference.png");
+            return buildPublicImageUrl(publicBaseUrl, filename);
+        }),
+    );
 }
 
 async function uploadImageToHost(image: ReferenceImage, source: "temp.sh" | "litterbox", signal?: AbortSignal): Promise<string> {
@@ -429,23 +432,7 @@ async function uploadImageToHost(image: ReferenceImage, source: "temp.sh" | "lit
 
 // Agnes 的图片格式错误通常返回 400/422/415，且响应文本里包含 image / url / 图片 / invalid 之一；
 // 鉴权/余额等错误走其它状态码或不含这些关键字，避免被误判为图片问题触发无效重试
-const AGNES_IMAGE_ERROR_KEYWORDS = [
-    "image url",
-    "image_url",
-    "imageurl",
-    "图片",
-    "图片url",
-    "图片格式",
-    "图片无效",
-    "图片错误",
-    "图片地址",
-    "invalid image",
-    "invalid url",
-    "incorrect padding",
-    "image format",
-    "image invalid",
-    "image must be",
-];
+const AGNES_IMAGE_ERROR_KEYWORDS = ["image url", "image_url", "imageurl", "图片", "图片url", "图片格式", "图片无效", "图片错误", "图片地址", "invalid image", "invalid url", "incorrect padding", "image format", "image invalid", "image must be"];
 
 function isAgnesImageUrlError(error: unknown): boolean {
     if (!axios.isAxiosError(error)) return false;

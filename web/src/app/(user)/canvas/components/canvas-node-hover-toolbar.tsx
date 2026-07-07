@@ -101,19 +101,20 @@ export function CanvasNodeHoverToolbar({
     }, [node?.id]);
 
     if (!node) return null;
+    const currentNode = node;
 
-    const left = viewport.x + (node.position.x + node.width / 2) * viewport.k;
-    const top = viewport.y + node.position.y * viewport.k - 14;
-    const isImage = node.type === CanvasNodeType.Image;
-    const isVideo = node.type === CanvasNodeType.Video;
-    const isAudio = node.type === CanvasNodeType.Audio;
-    const hasImage = isImage && Boolean(node.metadata?.content);
-    const hasVideo = isVideo && Boolean(node.metadata?.content);
-    const hasAudio = isAudio && Boolean(node.metadata?.content);
-    const isText = node.type === CanvasNodeType.Text;
-    const isConfig = node.type === CanvasNodeType.Config;
+    const left = viewport.x + (currentNode.position.x + currentNode.width / 2) * viewport.k;
+    const top = viewport.y + currentNode.position.y * viewport.k - 14;
+    const isImage = currentNode.type === CanvasNodeType.Image;
+    const isVideo = currentNode.type === CanvasNodeType.Video;
+    const isAudio = currentNode.type === CanvasNodeType.Audio;
+    const hasImage = isImage && Boolean(currentNode.metadata?.content);
+    const hasVideo = isVideo && Boolean(currentNode.metadata?.content);
+    const hasAudio = isAudio && Boolean(currentNode.metadata?.content);
+    const isText = currentNode.type === CanvasNodeType.Text;
+    const isConfig = currentNode.type === CanvasNodeType.Config;
     const canOpenDialog = isText || hasImage || isVideo;
-    const canRetry = node.metadata?.status === "error";
+    const canRetry = currentNode.metadata?.status === "error";
     const quickImageToolIdSet = new Set(quickImageToolIds);
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = target.metadata?.prompt?.trim();
@@ -123,10 +124,10 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(node, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
+    const imageTools = buildImageToolbarTools(currentNode, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
 
     function openImageToolSettings() {
-        onKeep(node.id);
+        onKeep(currentNode.id);
         setDraftImageToolIds(quickImageToolIds);
         setDraftShowImageToolLabels(showImageToolLabels);
         setImageToolSettingsOpen(true);
@@ -282,7 +283,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ body: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ container: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
             <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
                 <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
                     {icon}

@@ -2,21 +2,27 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
+import { Handle, Position as ReactFlowPosition, useUpdateNodeInternals } from "@xyflow/react";
+import { ChevronRight, FileText, Image as ImageIcon, Music2, RefreshCw, Settings2, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { useCanvasDragStore } from "../stores/use-canvas-drag-store";
 import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
 import { peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
+import { CanvasNodeType, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
-import { useCanvasScale } from "./canvas-scale-context";
+import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#2f80ff";
+
+type ResizeStartEvent = React.PointerEvent;
 
 /** Lazy-resolve media URL from storageKey on mount.
  *  - If storageKey is present, resolve via IndexedDB (cached after first hit).
@@ -28,23 +34,18 @@ function useLazyMediaUrl(storageKey: string | undefined, content: string | undef
         const cached = type === "image" ? peekCachedImageUrl(storageKey) : peekCachedMediaUrl(storageKey);
         return cached ?? "";
     });
-    const currentBlobUrlRef = useRef<string | null>(null);
 
     useEffect(() => {
-        if (!storageKey) return;
+        if (!storageKey) {
+            setUrl(content ?? "");
+            return;
+        }
         const resolve = type === "image" ? resolveImageUrl : resolveMediaUrl;
+        const peek = type === "image" ? peekCachedImageUrl : peekCachedMediaUrl;
         let cancelled = false;
-        resolve(storageKey, content ?? "").then((resolved) => {
-            if (!cancelled && resolved) {
-                // Revoke previous blob URL only if different from the new one
-                if (resolved !== currentBlobUrlRef.current) {
-                    if (currentBlobUrlRef.current) {
-                        URL.revokeObjectURL(currentBlobUrlRef.current);
-                    }
-                    currentBlobUrlRef.current = resolved.startsWith("blob:") ? resolved : null;
-                }
-                setUrl(resolved);
-            }
+        setUrl(peek(storageKey) ?? "");
+        resolve(storageKey, content?.startsWith("blob:") ? "" : (content ?? "")).then((resolved) => {
+            if (!cancelled) setUrl(resolved);
         });
         return () => {
             cancelled = true;
@@ -54,9 +55,8 @@ function useLazyMediaUrl(storageKey: string | undefined, content: string | undef
     return url;
 }
 
-type CanvasNodeProps = {
+export type CanvasNodeProps = {
     data: CanvasNodeData;
-    scale: number;
     isSelected: boolean;
     isRelated: boolean;
     isFocusRelated: boolean;
@@ -65,6 +65,8 @@ type CanvasNodeProps = {
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
+    isOverview?: boolean;
+    positioned?: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
     renderPanel?: (node: CanvasNodeData) => ReactNode;
@@ -78,8 +80,8 @@ type CanvasNodeProps = {
     onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
-    onConnectStart: (event: React.MouseEvent, nodeId: string, handleType: "source" | "target") => void;
-    onResize: (nodeId: string, width: number, height: number, position?: Position) => void;
+    onConnectStart: (nodeId: string, handleType: "source" | "target") => void;
+    onResize: (nodeId: string, width: number, height: number, position?: CanvasPosition) => void;
     onContentChange: (nodeId: string, content: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
@@ -113,7 +115,6 @@ type NodeContentRendererProps = {
  *  that change reference every render. Compare data by identity + primitive/enum props. */
 function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.data !== next.data) return false;
-    if (prev.scale !== next.scale) return false;
     if (prev.isSelected !== next.isSelected) return false;
     if (prev.isRelated !== next.isRelated) return false;
     if (prev.isFocusRelated !== next.isFocusRelated) return false;
@@ -121,6 +122,8 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.isConnecting !== next.isConnecting) return false;
     if (prev.showPanel !== next.showPanel) return false;
     if (prev.showImageInfo !== next.showImageInfo) return false;
+    if (prev.isOverview !== next.isOverview) return false;
+    if (prev.positioned !== next.positioned) return false;
     if (prev.editRequestNonce !== next.editRequestNonce) return false;
     if (prev.batchCount !== next.batchCount) return false;
     if (prev.batchExpanded !== next.batchExpanded) return false;
@@ -143,6 +146,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
+    isOverview = false,
+    positioned = true,
     resourceLabel,
     mentionReferences = [],
     renderPanel,
@@ -166,21 +171,21 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
-    const scale = useCanvasScale();
+    const scaleRef = useCanvasScaleRef();
+    const updateNodeInternals = useUpdateNodeInternals();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    // Subscribe to drag store: only re-renders when THIS node is being dragged
-    const dragOffset = useCanvasDragStore((s) => (s.offset && s.draggedIds?.has(data.id) ? s.offset : null));
-    const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
-    const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
-    const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
-    const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content);
+    const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
+    const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
+    const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
+    const nodeRef = useRef<HTMLDivElement>(null);
+    const resizeFrameRef = useRef<number | null>(null);
     const resizeRef = useRef({
         isResizing: false,
         corner: "bottom-right" as ResizeCorner,
@@ -190,6 +195,9 @@ export const CanvasNode = React.memo(function CanvasNode({
         startTop: 0,
         startWidth: 0,
         startHeight: 0,
+        currentWidth: data.width,
+        currentHeight: data.height,
+        currentPosition: data.position,
         keepRatio: false,
         ratio: 1,
     });
@@ -240,13 +248,14 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [isEditingContent]);
 
     const handleResizeMove = useCallback(
-        (event: MouseEvent) => {
+        (event: PointerEvent) => {
             if (!resizeRef.current.isResizing) return;
 
+            const scale = Math.max(scaleRef.current, 0.05);
             const dx = (event.clientX - resizeRef.current.startX) / scale;
             const dy = (event.clientY - resizeRef.current.startY) / scale;
-            const minWidth = 220;
-            const minHeight = 160;
+            const minWidth = data.type === CanvasNodeType.Image && data.metadata?.freeResize ? 64 : 220;
+            const minHeight = data.type === CanvasNodeType.Image && data.metadata?.freeResize ? 64 : 160;
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
             const startBottom = resizeRef.current.startTop + resizeRef.current.startHeight;
             const fromLeft = resizeRef.current.corner.includes("left");
@@ -272,21 +281,45 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }
             }
 
-            onResize(data.id, width, height, {
+            const position = {
                 x: fromLeft ? startRight - width : resizeRef.current.startLeft,
                 y: fromTop ? startBottom - height : resizeRef.current.startTop,
+            };
+            resizeRef.current.currentWidth = width;
+            resizeRef.current.currentHeight = height;
+            resizeRef.current.currentPosition = position;
+            if (resizeFrameRef.current) return;
+            resizeFrameRef.current = requestAnimationFrame(() => {
+                resizeFrameRef.current = null;
+                const element = nodeRef.current;
+                if (!element) return;
+                element.style.width = `${resizeRef.current.currentWidth}px`;
+                element.style.height = `${resizeRef.current.currentHeight}px`;
+                if (positioned) element.style.transform = `translate(${resizeRef.current.currentPosition.x}px, ${resizeRef.current.currentPosition.y}px)`;
             });
         },
-        [data.id, onResize, scale],
+        [data.metadata?.freeResize, data.type, positioned, scaleRef],
     );
 
     const handleResizeUp = useCallback(() => {
+        if (!resizeRef.current.isResizing) return;
         resizeRef.current.isResizing = false;
-        window.removeEventListener("mousemove", handleResizeMove);
-        window.removeEventListener("mouseup", handleResizeUp);
-    }, [handleResizeMove]);
+        if (resizeFrameRef.current) {
+            cancelAnimationFrame(resizeFrameRef.current);
+            resizeFrameRef.current = null;
+        }
+        onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
+        updateNodeInternals(data.id);
+        requestAnimationFrame(() => updateNodeInternals(data.id));
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handleResizeMove);
+        window.removeEventListener("pointerup", handleResizeUp);
+        window.removeEventListener("pointercancel", handleResizeUp);
+        window.removeEventListener("blur", handleResizeUp);
+    }, [data.id, handleResizeMove, onResize, updateNodeInternals]);
 
-    const handleResizeMouseDown = (event: React.MouseEvent, corner: ResizeCorner) => {
+    const handleResizeMouseDown = (event: ResizeStartEvent, corner: ResizeCorner) => {
         event.stopPropagation();
         event.preventDefault();
         resizeRef.current = {
@@ -298,47 +331,68 @@ export const CanvasNode = React.memo(function CanvasNode({
             startTop: data.position.y,
             startWidth: data.width,
             startHeight: data.height,
+            currentWidth: data.width,
+            currentHeight: data.height,
+            currentPosition: data.position,
             keepRatio: (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video,
             ratio: (data.metadata?.naturalWidth || data.width) / (data.metadata?.naturalHeight || data.height || 1),
         };
-        window.addEventListener("mousemove", handleResizeMove);
-        window.addEventListener("mouseup", handleResizeUp);
+        document.body.style.cursor = corner.includes("left") === corner.includes("top") ? "nwse-resize" : "nesw-resize";
+        document.body.style.userSelect = "none";
+        const element = nodeRef.current;
+        if (element) {
+            element.style.width = `${data.width}px`;
+            element.style.height = `${data.height}px`;
+            if (positioned) element.style.transform = `translate(${data.position.x}px, ${data.position.y}px)`;
+        }
+        window.addEventListener("pointermove", handleResizeMove);
+        window.addEventListener("pointerup", handleResizeUp);
+        window.addEventListener("pointercancel", handleResizeUp);
+        window.addEventListener("blur", handleResizeUp);
     };
 
     useEffect(() => {
         return () => {
-            window.removeEventListener("mousemove", handleResizeMove);
-            window.removeEventListener("mouseup", handleResizeUp);
+            if (resizeFrameRef.current) cancelAnimationFrame(resizeFrameRef.current);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            window.removeEventListener("pointermove", handleResizeMove);
+            window.removeEventListener("pointerup", handleResizeUp);
+            window.removeEventListener("pointercancel", handleResizeUp);
+            window.removeEventListener("blur", handleResizeUp);
         };
     }, [handleResizeMove, handleResizeUp]);
 
+    const shouldUseOverview = isOverview && !isActive && !showPanel && !isEditingContent;
+
     return (
         <div
+            ref={nodeRef}
             data-node-id={data.id}
-            className={`node-element absolute flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
+            className={`node-element ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
             style={{
-                transform: dragOffset ? `translate(${data.position.x + dragOffset.dx}px, ${data.position.y + dragOffset.dy}px)` : `translate(${data.position.x}px, ${data.position.y}px)`,
+                transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
                 height: data.height,
                 transition: "box-shadow 200ms ease",
                 contain: "layout style",
             }}
             onMouseEnter={() => {
-                setHovered(true);
+                if (shouldUseOverview) return;
                 onHoverStart(data.id);
             }}
             onMouseLeave={() => {
-                setHovered(false);
+                if (shouldUseOverview) return;
                 onHoverEnd(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
-            <div
-                className="relative h-full w-full overflow-visible rounded-3xl border-2"
+            <Card
+                className="relative h-full w-full overflow-visible rounded-[22px] border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
-                    background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
-                    borderColor: hasImageContent ? imageBorderColor : isActive ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: isActive ? `0 0 0 1px ${selectionBlue}55` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.fill : "transparent",
+                    borderColor: shouldUseOverview ? (isRelated ? theme.node.muted : theme.node.stroke) : hasImageContent ? imageBorderColor : isActive ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
+                    boxShadow: shouldUseOverview ? undefined : isActive ? `0 0 0 1px ${selectionBlue}55` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
@@ -361,7 +415,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
-                            background: hasImageContent || hasVideoContent ? "transparent" : theme.node.fill,
+                            background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.fill : "transparent",
                             "--batch-from-x": `${batchMotion?.x || 0}px`,
                             "--batch-from-y": `${batchMotion?.y || 0}px`,
                             "--batch-from-rotate": `${6 + (batchMotion?.index || 0) * 4}deg`,
@@ -370,63 +424,92 @@ export const CanvasNode = React.memo(function CanvasNode({
                         } as React.CSSProperties
                     }
                 >
-                    <NodeContent
-                        node={data}
-                        theme={theme}
-                        isEditingContent={isEditingContent}
-                        textareaRef={textareaRef}
-                        isBatchRoot={isBatchRoot}
-                        batchCount={batchCount}
-                        batchExpanded={batchExpanded}
-                        batchOpening={batchOpening}
-                        batchRecovering={batchRecovering}
-                        renderNodeContent={renderNodeContent}
-                        mentionReferences={mentionReferences}
-                        onContentChange={onContentChange}
-                        onStopEditing={() => setIsEditingContent(false)}
-                        onRetry={onRetry}
-                        onGenerateImage={onGenerateImage}
-                        onToggleBatch={() => onToggleBatch?.(data.id)}
-                        onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
-                    />
+                    {shouldUseOverview ? (
+                        <OverviewNodeContent node={data} theme={theme} />
+                    ) : (
+                        <NodeContent
+                            node={data}
+                            theme={theme}
+                            isEditingContent={isEditingContent}
+                            textareaRef={textareaRef}
+                            isBatchRoot={isBatchRoot}
+                            batchCount={batchCount}
+                            batchExpanded={batchExpanded}
+                            batchOpening={batchOpening}
+                            batchRecovering={batchRecovering}
+                            renderNodeContent={renderNodeContent}
+                            mentionReferences={mentionReferences}
+                            onContentChange={onContentChange}
+                            onStopEditing={() => setIsEditingContent(false)}
+                            onRetry={onRetry}
+                            onGenerateImage={onGenerateImage}
+                            onToggleBatch={() => onToggleBatch?.(data.id)}
+                            onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                        />
+                    )}
                 </div>
 
-                {showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
-                {resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
+                {!shouldUseOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
-                {!hasImageContent && !hasVideoContent && !hasAudioContent ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} /> : null}
+                {!shouldUseOverview && !hasImageContent && !hasVideoContent && !hasAudioContent ? (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} />
+                ) : null}
 
-                <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
-                <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
-            </div>
+                {!shouldUseOverview ? (
+                    <>
+                        <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
+                    </>
+                ) : null}
+            </Card>
 
-            <ConnectionHandleDot side="left" visible={hovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" visible={data.type !== CanvasNodeType.Config && (hovered || isSelected || isConnecting)} onMouseDown={(event) => onConnectStart(event, data.id, "source")} />
+            <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} onMouseDown={() => onConnectStart(data.id, "target")} />
+            <ConnectionHandleDot side="right" visible={!shouldUseOverview && data.type !== CanvasNodeType.Config && (isSelected || isConnecting)} onMouseDown={() => onConnectStart(data.id, "source")} />
 
-            {showPanel && renderPanel
-                ? <div ref={panelRef} className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar" onWheel={(event) => {
-                    const el = event.currentTarget;
-                    if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
-                    const atTop = el.scrollTop === 0;
-                    const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 1;
-                    if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) return; // at boundary → let canvas scroll
-                    event.stopPropagation();
-                }}>{renderPanel(data)}</div>
-                : null}
+            {showPanel && renderPanel ? (
+                <div
+                    ref={panelRef}
+                    className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar"
+                    onWheel={(event) => {
+                        const el = event.currentTarget;
+                        if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
+                        const atTop = el.scrollTop === 0;
+                        const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 1;
+                        if ((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) return; // at boundary → let canvas scroll
+                        event.stopPropagation();
+                    }}
+                >
+                    {renderPanel(data)}
+                </div>
+            ) : null}
         </div>
     );
 }, canvasNodePropsEqual);
 
-function NodeContent(props: NodeContentRendererProps) {
-    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
+function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : FileText;
+    const title = node.title || node.metadata?.prompt || node.metadata?.content || (node.type === CanvasNodeType.Config ? "配置节点" : "节点");
+    return (
+        <div className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3 py-2" style={{ color: theme.node.text }}>
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
+                <Icon className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs font-medium opacity-75">{title}</span>
+        </div>
+    );
+}
+
+function NodeContent(props: NodeContentRendererProps): React.ReactElement {
+    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
-    return Renderer ? <Renderer {...props} /> : <UnknownNodeContent theme={props.theme} />;
+    return <>{Renderer(props)}</>;
 }
 
 const nodeContentRenderers = {
@@ -460,9 +543,11 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
-            <button
+            <Button
                 type="button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-full border px-3 text-xs transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onClick={(event) => {
                     event.stopPropagation();
@@ -472,15 +557,24 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
             >
                 <RefreshCw className="size-3.5" />
                 重试
-            </button>
+            </Button>
         </div>
     );
 }
 
 function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+    return <EmptyState icon={<FileText className="size-6 opacity-35" />} label="未知节点" theme={theme} />;
+}
+
+function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
-        <div className="flex h-full w-full items-center justify-center text-sm" style={{ color: theme.node.placeholder }}>
-            未知节点
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
+            <div className="flex size-14 items-center justify-center rounded-2xl border" style={{ background: theme.toolbar.activeBg, borderColor: `${theme.node.stroke}88` }}>
+                {icon}
+            </div>
+            <Badge variant="outline" className="h-auto rounded-full border px-2.5 py-1 text-[10px] tracking-[0.18em] opacity-60" style={{ borderColor: `${theme.node.stroke}88`, color: theme.node.placeholder }}>
+                {label}
+            </Badge>
         </div>
     );
 }
@@ -491,9 +585,11 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <button
+            <Button
                 type="button"
-                className="absolute right-3 top-3 z-20 inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
+                size="sm"
+                variant="outline"
+                className="absolute right-3 top-3 z-20 h-8 rounded-full border px-2.5 text-xs opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
                 style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
                 onClick={(event) => {
                     event.stopPropagation();
@@ -506,7 +602,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
             >
                 <ImageIcon className="size-3.5" />
                 生图
-            </button>
+            </Button>
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -534,7 +630,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 }
 
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
-    return <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75"}`}>{reference.label}</span>;
+    return <Badge className={cn("pointer-events-none absolute right-2 top-2 z-30 h-auto rounded-md px-1.5 py-0.5 text-[10px]", reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75")}>{reference.label}</Badge>;
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
@@ -571,14 +667,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
 }
 
 function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: NodeContentRendererProps) {
-    const content = (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
-            <div className="flex size-14 items-center justify-center rounded-2xl" style={{ background: theme.toolbar.activeBg }}>
-                <ImageIcon className="size-6 opacity-30" />
-            </div>
-            <span className="text-[10px] tracking-[0.18em] opacity-50">空图片节点</span>
-        </div>
-    );
+    const content = <EmptyState icon={<ImageIcon className="size-6 opacity-35" />} label="空图片节点" theme={theme} />;
     if (isBatchRoot)
         return (
             <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -590,25 +679,13 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src)
-        return (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
-                <Video className="size-7 opacity-35" />
-                <span className="text-sm">空视频节点</span>
-            </div>
-        );
+    if (!src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="空视频节点" theme={theme} />;
     return <video src={src} controls preload="none" className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src)
-        return (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
-                <Music2 className="size-7 opacity-35" />
-                <span className="text-sm">空音频节点</span>
-            </div>
-        );
+    if (!src) return <EmptyState icon={<Music2 className="size-7 opacity-35" />} label="空音频节点" theme={theme} />;
     return (
         <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
@@ -647,7 +724,14 @@ function ImageContent({
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden rounded-3xl">
                 {imgSrc ? (
-                    <img src={imgSrc} alt={node.title} draggable={false} onDragStart={(event) => event.preventDefault()} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} />
+                    <img
+                        src={imgSrc}
+                        alt={node.title}
+                        draggable={false}
+                        decoding="async"
+                        onDragStart={(event) => event.preventDefault()}
+                        className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                    />
                 ) : (
                     <div className="flex h-full w-full items-center justify-center" style={{ background: theme.node.fill, color: theme.node.placeholder }} aria-label="图片加载中">
                         <ImageIcon className="size-6 opacity-30" />
@@ -655,9 +739,11 @@ function ImageContent({
                 )}
             </div>
             {isBatchRoot ? (
-                <button
+                <Button
                     type="button"
-                    className="absolute right-2.5 top-2.5 z-30 flex h-8 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
+                    size="sm"
+                    variant="outline"
+                    className="absolute right-2.5 top-2.5 z-30 h-8 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
                     style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
                     aria-label={batchExpanded ? "图片组已展开" : "图片组已收起"}
                     onClick={(event) => {
@@ -669,12 +755,14 @@ function ImageContent({
                 >
                     <span className="leading-none text-[#2f80ff]">{batchCount}</span>
                     <ChevronRight className={`size-3.5 opacity-55 transition-transform ${batchExpanded ? "rotate-90" : ""}`} />
-                </button>
+                </Button>
             ) : null}
             {isBatchChild ? (
-                <button
+                <Button
                     type="button"
-                    className="absolute right-3 top-3 z-30 flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-medium opacity-0 shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition group-hover/batch:opacity-100 hover:scale-[1.02]"
+                    size="lg"
+                    variant="outline"
+                    className="absolute right-3 top-3 z-30 h-9 rounded-xl border px-2.5 text-xs opacity-0 shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition group-hover/batch:opacity-100 hover:scale-[1.02]"
                     style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                     onClick={(event) => {
                         event.stopPropagation();
@@ -685,7 +773,7 @@ function ImageContent({
                 >
                     <Star className="size-3.5 text-[#2f80ff]" />
                     设为主图
-                </button>
+                </Button>
             ) : null}
         </BatchFrame>
     );
@@ -697,10 +785,10 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     const size = formatBytes(node.metadata?.bytes || 0);
     return (
         <div className="pointer-events-none absolute bottom-3 right-3 z-40 max-w-[calc(100%-24px)]">
-            <span className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+            <Badge className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
                 {width} x {height}
                 {size ? ` · ${size}` : ""}
-            </span>
+            </Badge>
         </div>
     );
 }
@@ -743,7 +831,7 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
         </div>
     );
 }
-function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
+function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: ResizeStartEvent, corner: ResizeCorner) => void }) {
     const positionClass = {
         "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
         "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
@@ -752,23 +840,43 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     }[corner];
 
     return (
-        <div className={`group/resize absolute z-50 size-7 ${positionClass}`} onMouseDown={(event) => onMouseDown(event, corner)}>
+        <div
+            className={`nodrag nopan group/resize absolute z-50 size-7 pointer-events-auto ${positionClass}`}
+            onPointerDown={(event) => onMouseDown(event, corner)}
+            onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+            }}
+        >
             {corner === "bottom-right" ? <span className="absolute bottom-2 right-2 size-3 rounded-br-md border-b-2 border-r-2 border-white/55 opacity-0 transition group-hover/resize:opacity-100" /> : null}
         </div>
     );
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const isSource = side === "right";
+    const visualClass = isSource ? "left-1/2" : "right-1/2";
+    const plusVisibility = visible ? "opacity-100 scale-100" : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
 
     return (
-        <div
-            className={`absolute top-1/2 z-30 flex size-12 -translate-y-1/2 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
-                side === "left" ? "-left-6" : "-right-6"
-            } ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+        <Handle
+            id={isSource ? "source" : "target"}
+            type={isSource ? "source" : "target"}
+            position={isSource ? ReactFlowPosition.Right : ReactFlowPosition.Left}
+            className="group/connection-handle !pointer-events-auto !z-40 !size-3 !border-0 !bg-transparent !opacity-100"
+            isConnectable
             onMouseDown={onMouseDown}
         >
-            <div className="size-3 rounded-full border-2 transition-all hover:scale-125" style={{ background: theme.node.panel, borderColor: theme.node.muted }} />
-        </div>
+            <span className={`absolute top-1/2 flex size-11 -translate-y-1/2 items-center justify-center ${visualClass}`}>
+                <span
+                    className={`pointer-events-none grid size-[22px] place-items-center rounded-full border shadow-[0_8px_20px_rgba(15,23,42,.18)] backdrop-blur-md transition duration-150 ${plusVisibility}`}
+                    style={{ background: theme.toolbar.panel, borderColor: theme.node.muted, color: theme.node.text }}
+                >
+                    <span className="absolute h-2.5 w-px rounded-full bg-current" />
+                    <span className="absolute h-px w-2.5 rounded-full bg-current" />
+                </span>
+            </span>
+        </Handle>
     );
 }

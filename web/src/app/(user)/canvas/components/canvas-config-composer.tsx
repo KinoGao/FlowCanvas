@@ -48,7 +48,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         let cancelled = false;
         void Promise.all(
             imageInputs.map(async (input) => {
-                const resolved = await resolveImageUrl(input.image.storageKey as string, input.image.dataUrl || "");
+                const resolved = await resolveImageUrl(input.image.storageKey as string, "");
                 return [input.nodeId, resolved] as const;
             }),
         ).then((entries) => {
@@ -263,8 +263,8 @@ function MentionMenu({
 }
 
 function ResourcePreview({ input, resolvedImageUrlsByNodeId }: { input: NodeGenerationInput; resolvedImageUrlsByNodeId: Record<string, string> }) {
-    const resolvedSrc = input.type === "image" && input.image ? resolvedImageUrlsByNodeId[input.nodeId] || input.image.dataUrl : "";
-    if (input.type === "image" && input.image) return <img src={resolvedSrc || undefined} alt="" className="size-9 rounded-md object-cover" />;
+    const resolvedSrc = input.type === "image" && input.image ? resolvedImageUrlsByNodeId[input.nodeId] || legacyPreviewUrl(input.image.storageKey, input.image.dataUrl) : "";
+    if (input.type === "image" && input.image && resolvedSrc) return <img src={resolvedSrc} alt="" className="size-9 rounded-md object-cover" />;
     if (input.type === "video" && input.video) return <video src={input.video.url} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;
     return (
@@ -274,6 +274,11 @@ function ResourcePreview({ input, resolvedImageUrlsByNodeId }: { input: NodeGene
     );
 }
 
+function legacyPreviewUrl(storageKey?: string, url = "") {
+    if (storageKey) return "";
+    return url.startsWith("blob:") ? "" : url;
+}
+
 function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, resolvedImageUrlsByNodeId: Record<string, string>) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
@@ -281,18 +286,26 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
     wrapper.className = "mx-px inline-flex h-7 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
     Object.assign(wrapper.style, chipStyle(theme));
     if (input.type === "image" && input.image) {
-        const image = document.createElement("img");
-        const resolvedSrc = resolvedImageUrlsByNodeId[input.nodeId] || input.image.dataUrl;
-        if (resolvedSrc) image.src = resolvedSrc;
-        image.alt = input.title;
-        image.className = "size-6 rounded object-cover";
+        const resolvedSrc = resolvedImageUrlsByNodeId[input.nodeId] || legacyPreviewUrl(input.image.storageKey, input.image.dataUrl);
         wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
-        wrapper.appendChild(image);
-        wrapper.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onImagePreview(resolvedSrc || "");
-        });
+        if (resolvedSrc) {
+            const image = document.createElement("img");
+            image.src = resolvedSrc;
+            image.alt = input.title;
+            image.className = "size-6 rounded object-cover";
+            wrapper.appendChild(image);
+            wrapper.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onImagePreview(resolvedSrc);
+            });
+        } else {
+            wrapper.title = input.title;
+            const fallback = document.createElement("span");
+            fallback.className = "grid size-6 place-items-center rounded bg-black/10 text-[10px]";
+            fallback.textContent = "图";
+            wrapper.appendChild(fallback);
+        }
     } else {
         wrapper.title = input.text || input.title;
         const text = document.createElement("span");

@@ -4,6 +4,7 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { createBlobStorage } from "./blob-storage";
 
 export type UploadedImage = {
     url: string;
@@ -15,70 +16,59 @@ export type UploadedImage = {
 };
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
-const objectUrls = new Map<string, string>();
+const imageBlobs = createBlobStorage(store);
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await fetchImageBlob(input) : input;
     const storageKey = `image:${nanoid()}`;
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    const url = await imageBlobs.setBlob(storageKey, blob);
     const meta = await readImageMeta(url);
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
 
 /** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
 export function peekCachedImageUrl(storageKey?: string): string | undefined {
-    if (!storageKey) return undefined;
-    return objectUrls.get(storageKey);
+    return imageBlobs.peekUrl(storageKey);
 }
 
-export async function resolveImageUrl(storageKey?: string, fallback = "") {
-    if (!storageKey) return fallback;
-    const cached = objectUrls.get(storageKey);
-    if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+export function resolveImageUrl(storageKey?: string, fallback = "") {
+    return imageBlobs.resolveUrl(storageKey, fallback);
 }
 
-export async function getImageBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
+export function getImageBlob(storageKey: string) {
+    return imageBlobs.getBlob(storageKey);
 }
 
-export async function setImageBlob(storageKey: string, blob: Blob) {
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+export function setImageBlob(storageKey: string, blob: Blob) {
+    return imageBlobs.setBlob(storageKey, blob);
+}
+
+export async function imageToBlob(image: { url?: string; dataUrl?: string; storageKey?: string }) {
+    if (image.storageKey) {
+        const blob = await getImageBlob(image.storageKey);
+        if (blob) return blob;
+    }
+    const url = image.dataUrl || image.url || "";
+    if (!url || url.startsWith("blob:")) throw new Error("图片引用已失效，请重新上传或重新生成图片");
+    return fetchImageBlob(url);
+}
+
+export async function imageToFile(image: { name?: string; type?: string; url?: string; dataUrl?: string; storageKey?: string }) {
+    const blob = await imageToBlob(image);
+    return new File([blob], image.name || "reference.png", { type: blob.type || image.type || "image/png" });
 }
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
-    const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
-    if (!url || url.startsWith("data:")) return url;
-    return blobToDataUrl(await fetchImageBlob(url));
+    if (image.dataUrl?.startsWith("data:")) return image.dataUrl;
+    return blobToDataUrl(await imageToBlob(image));
 }
 
-export async function deleteStoredImages(keys: Iterable<string>) {
-    await Promise.all(
-        Array.from(new Set(keys)).map(async (key) => {
-            const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
-            objectUrls.delete(key);
-            await store.removeItem(key);
-        }),
-    );
+export function deleteStoredImages(keys: Iterable<string>) {
+    return imageBlobs.deleteBlobs(keys);
 }
 
 export async function cleanupUnusedImages(usedData: unknown) {
-    const usedKeys = collectImageStorageKeys(usedData);
-    const unused: string[] = [];
-    await store.iterate((_value, key) => {
-        if (!usedKeys.has(key)) unused.push(key);
-    });
-    await deleteStoredImages(unused);
+    await imageBlobs.removeUnused(collectImageStorageKeys(usedData));
 }
 
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {

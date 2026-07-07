@@ -83,6 +83,7 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const DEPRECATED_BACKEND_HOSTS = new Set(["1539e726.r23.cpolar.top"]);
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -167,7 +168,23 @@ function isVideoModelName(model: string) {
 
 function isImageModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("seededit") || value.includes("gpt-image") || value.includes("image") || value.includes("image2image") || value.includes("i2i") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
+    return (
+        !isVideoModelName(model) &&
+        !isAudioModelName(model) &&
+        (value.includes("seedream") ||
+            value.includes("seededit") ||
+            value.includes("gpt-image") ||
+            value.includes("image") ||
+            value.includes("image2image") ||
+            value.includes("i2i") ||
+            value.includes("dall-e") ||
+            value.includes("dalle") ||
+            value.includes("imagen") ||
+            value.includes("flux") ||
+            value.includes("sdxl") ||
+            value.includes("stable-diffusion") ||
+            value.includes("midjourney"))
+    );
 }
 
 function isAudioModelName(model: string) {
@@ -264,7 +281,7 @@ export const useConfigStore = create<ConfigStore>()(
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
                     comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi },
-                    backend: { ...defaultBackendSyncConfig, ...persistedBackend },
+                    backend: normalizeBackendSyncConfig(persistedBackend),
                     config: {
                         ...config,
                         channelMode: "local",
@@ -295,6 +312,21 @@ export const useConfigStore = create<ConfigStore>()(
         },
     ),
 );
+
+function normalizeBackendSyncConfig(source: Partial<BackendSyncConfig>) {
+    const backend = { ...defaultBackendSyncConfig, ...source };
+    return isDeprecatedBackendUrl(backend.url) || isDeprecatedBackendUrl(backend.publicBaseUrl) ? defaultBackendSyncConfig : backend;
+}
+
+function isDeprecatedBackendUrl(value?: string) {
+    const raw = value?.trim();
+    if (!raw) return false;
+    try {
+        return DEPRECATED_BACKEND_HOSTS.has(new URL(raw).hostname);
+    } catch {
+        return Array.from(DEPRECATED_BACKEND_HOSTS).some((host) => raw.includes(host));
+    }
+}
 
 function normalizeModelList(models: string[], channels: ModelChannel[]) {
     const allModelOptions = channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model)));
@@ -358,8 +390,8 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
         const channel = channels.find((item) => item.id === decoded.channelId);
         return channel && channel.models.includes(decoded.model) ? model : "";
     }
-    const channel = channels.find((item) => item.models.includes(decoded?.model || model)) || channels[0];
-    return channel && channel.models.includes(decoded?.model || model) ? encodeChannelModel(channel.id, decoded?.model || model) : model;
+    const channel = channels.find((item) => item.models.includes(model)) || channels[0];
+    return channel && channel.models.includes(model) ? encodeChannelModel(channel.id, model) : model;
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
@@ -399,14 +431,7 @@ function normalizeChannels(config: AiConfig) {
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: uniqueRawModels([
-                    ...(config.models || []),
-                    config.model,
-                    config.imageModel,
-                    config.videoModel,
-                    config.textModel,
-                    config.audioModel,
-                ]),
+                models: uniqueRawModels([...(config.models || []), config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel]),
             }),
         );
     }
