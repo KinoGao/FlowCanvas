@@ -1,11 +1,11 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Download, Plus, RefreshCw, Server, Trash2, Upload, Wifi, Workflow } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi, Workflow } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
-import { fetchRemoteConfig, pushRemoteConfig, testBackendConnection } from "@/services/api/backend";
+import { loginUser, logoutUser, registerUser } from "@/services/api/auth";
 import { testComfyConnection } from "@/services/api/comfyui";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
@@ -26,6 +26,7 @@ import {
     type ModelCapability,
     type ModelChannel,
 } from "@/stores/use-config-store";
+import { useUserStore, type SaveMode } from "@/stores/use-user-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -61,8 +62,9 @@ const imageResponseFormatOptions: Array<{ label: string; value: ImageResponseFor
     { value: "url", label: "强制 URL", description: "不携带 response_format，让模型返回 URL 或 base64" },
 ];
 
-const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
+const webdavDomainKeys: AppSyncDomainKey[] = ["config", "canvas", "assets", "image-workbench", "video-workbench"];
 const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
+    config: "配置",
     canvas: "画布",
     assets: "我的素材",
     "image-workbench": "生图工作台",
@@ -85,29 +87,75 @@ export function AppConfigModal() {
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [testingComfyUi, setTestingComfyUi] = useState(false);
-    const [testingBackend, setTestingBackend] = useState(false);
-    const [syncingBackend, setSyncingBackend] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
+    const [authMode, setAuthMode] = useState<"login" | "register">("login");
+    const [authLoading, setAuthLoading] = useState(false);
+    const [authForm, setAuthForm] = useState({ username: "", password: "", displayName: "", authCode: "" });
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const comfyui = useConfigStore((state) => state.comfyui);
-    const backend = useConfigStore((state) => state.backend);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
-    const updateBackendConfig = useConfigStore((state) => state.updateBackendConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
+    const saveMode = useUserStore((state) => state.saveMode);
+    const setSaveMode = useUserStore((state) => state.setSaveMode);
+    const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
+    const setSession = useUserStore((state) => state.setSession);
+    const clearSession = useUserStore((state) => state.clearSession);
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
     const comfyUiReady = Boolean(comfyui.baseUrl.trim());
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
+    };
+
+    const changeSaveMode = (mode: SaveMode) => {
+        setSaveMode(mode);
+        if (mode === "backend" && !token) message.info("请先登录后端账号，登录后会自动同步该账号的数据");
+        if (mode === "webdav") setActiveTab("webdav");
+    };
+
+    const submitAuth = async () => {
+        if (!authForm.username.trim() || !authForm.password) {
+            message.error("请填写用户名和密码");
+            return;
+        }
+        if (authMode === "register" && !authForm.authCode.trim()) {
+            message.error("请填写后端鉴权码");
+            return;
+        }
+        setAuthLoading(true);
+        try {
+            const result =
+                authMode === "register"
+                    ? await registerUser({ username: authForm.username, password: authForm.password, displayName: authForm.displayName, authCode: authForm.authCode })
+                    : await loginUser({ username: authForm.username, password: authForm.password });
+            setSession(result.user, result.token);
+            setSaveMode("backend");
+            message.success(authMode === "register" ? "注册并登录成功" : "登录成功");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "登录失败");
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const logoutBackend = async () => {
+        try {
+            if (token) await logoutUser(token);
+        } catch {
+            // 本地退出仍继续执行，避免后端会话异常阻断用户。
+        }
+        clearSession();
+        message.success("已退出后端账号");
     };
 
     const finishConfig = () => {
@@ -218,69 +266,6 @@ export function AppConfigModal() {
         }
     };
 
-    const testBackend = async () => {
-        if (!backend.url.trim()) {
-            message.error("请先填写后端地址");
-            return;
-        }
-        setTestingBackend(true);
-        try {
-            const ok = await testBackendConnection(backend.url);
-            if (ok) {
-                message.success("后端连接可用");
-            } else {
-                message.error("后端健康检查未通过，请检查地址是否正确");
-            }
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "后端连接测试失败");
-        } finally {
-            setTestingBackend(false);
-        }
-    };
-
-    const pullFromBackend = async () => {
-        if (!backend.url.trim() || !backend.authCode.trim()) {
-            message.error("请先填写后端地址和认证码");
-            return;
-        }
-        setSyncingBackend(true);
-        try {
-            const remote = await fetchRemoteConfig(backend.url, backend.authCode);
-            if (!remote || !remote.data) {
-                message.warning("后端暂无配置，无可拉取");
-                return;
-            }
-            const remoteConfig = JSON.parse(remote.data) as Partial<AiConfig>;
-            const fullConfig = { ...config, ...remoteConfig };
-            (Object.keys(fullConfig) as Array<keyof AiConfig>).forEach((key) => {
-                updateConfig(key, fullConfig[key]);
-            });
-            localStorage.setItem("infinite-canvas:config_updated_at", new Date(remote.updatedAt).getTime().toString());
-            message.success("已从后端拉取配置覆盖本地");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "从后端拉取配置失败");
-        } finally {
-            setSyncingBackend(false);
-        }
-    };
-
-    const pushToBackend = async () => {
-        if (!backend.url.trim() || !backend.authCode.trim()) {
-            message.error("请先填写后端地址和认证码");
-            return;
-        }
-        setSyncingBackend(true);
-        try {
-            await pushRemoteConfig(backend.url, backend.authCode, JSON.stringify(config));
-            localStorage.setItem("infinite-canvas:config_updated_at", Date.now().toString());
-            message.success("已将本地配置推送到后端");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "推送配置到后端失败");
-        } finally {
-            setSyncingBackend(false);
-        }
-    };
-
     const updateWebdavProgress = (event: AppSyncProgressEvent) => {
         setWebdavSyncStatus(event.stage);
         if (!event.domain) return;
@@ -339,6 +324,76 @@ export function AppConfigModal() {
                 activeKey={activeTab}
                 onChange={setActiveTab}
                 items={[
+                    {
+                        key: "storage",
+                        label: "保存位置",
+                        children: (
+                            <Form layout="vertical" requiredMark={false}>
+                                <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div className="mb-3 text-sm font-semibold">数据保存模式</div>
+                                    <Segmented
+                                        block
+                                        value={saveMode}
+                                        onChange={(value) => changeSaveMode(value as SaveMode)}
+                                        options={[
+                                            { label: "本地浏览器", value: "local" },
+                                            { label: "本地后端账号", value: "backend" },
+                                            { label: "云端 WebDAV", value: "webdav" },
+                                        ]}
+                                    />
+                                    <div className="mt-3 text-xs text-stone-500">
+                                        本地模式保存在当前浏览器；后端模式按登录账号同步画布、素材、配置和媒体；WebDAV 模式保留原有云端同步能力。
+                                    </div>
+                                </section>
+
+                                <section className="mt-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-semibold">后端账号</div>
+                                            <div className="mt-1 text-xs text-stone-500">仅在“本地后端账号”保存模式下使用。</div>
+                                        </div>
+                                        {user ? (
+                                            <Button danger onClick={() => void logoutBackend()}>
+                                                退出登录
+                                            </Button>
+                                        ) : null}
+                                    </div>
+
+                                    {user ? (
+                                        <div className="rounded-md bg-stone-100 px-3 py-2 text-sm dark:bg-stone-900">
+                                            当前账号：<span className="font-semibold">{user.displayName || user.username}</span>
+                                            <span className="ml-2 text-xs text-stone-500">@{user.username}</span>
+                                        </div>
+                                    ) : (
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                            <Form.Item label="用户名" className="mb-0">
+                                                <Input value={authForm.username} autoComplete="username" onChange={(event) => setAuthForm((current) => ({ ...current, username: event.target.value }))} />
+                                            </Form.Item>
+                                            {authMode === "register" ? (
+                                                <Form.Item label="显示名" className="mb-0">
+                                                    <Input value={authForm.displayName} onChange={(event) => setAuthForm((current) => ({ ...current, displayName: event.target.value }))} />
+                                                </Form.Item>
+                                            ) : null}
+                                            <Form.Item label="密码" className="mb-0">
+                                                <Input.Password value={authForm.password} autoComplete={authMode === "login" ? "current-password" : "new-password"} onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))} />
+                                            </Form.Item>
+                                            {authMode === "register" ? (
+                                                <Form.Item label="后端鉴权码" extra="填写后端配置中的 AUTH_CODE，用于允许创建新账号。" className="mb-0">
+                                                    <Input.Password value={authForm.authCode} autoComplete="off" onChange={(event) => setAuthForm((current) => ({ ...current, authCode: event.target.value }))} />
+                                                </Form.Item>
+                                            ) : null}
+                                            <div className="flex items-end gap-2">
+                                                <Button type="primary" loading={authLoading} onClick={() => void submitAuth()}>
+                                                    {authMode === "login" ? "登录" : "注册并登录"}
+                                                </Button>
+                                                <Button onClick={() => setAuthMode((mode) => (mode === "login" ? "register" : "login"))}>{authMode === "login" ? "去注册" : "去登录"}</Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </section>
+                            </Form>
+                        ),
+                    },
                     {
                         key: "channels",
                         label: "渠道",
@@ -404,16 +459,16 @@ export function AppConfigModal() {
                                                             代理模式
                                                         </span>
                                                     }
-                                                    extra="服务不支持 CORS 时勾选 Next.js 转发，请求会走本站服务端。"
+                                                    extra="服务不支持 CORS 时勾选后端代理，请求会走 FlowCanvas 后端服务。"
                                                     className="mb-0 md:col-span-2"
                                                 >
                                                     <Segmented
                                                         block
-                                                        value={channel.useProxy ? "nextjs" : "direct"}
-                                                        onChange={(value) => updateChannel(channel.id, { useProxy: value === "nextjs" })}
+                                                        value={channel.useProxy ? "backend" : "direct"}
+                                                        onChange={(value) => updateChannel(channel.id, { useProxy: value === "backend" })}
                                                         options={[
                                                             { label: "前端直连", value: "direct" },
-                                                            { label: "Next.js 转发", value: "nextjs" },
+                                                            { label: "后端代理", value: "backend" },
                                                         ]}
                                                     />
                                                 </Form.Item>
@@ -507,7 +562,7 @@ export function AppConfigModal() {
                     },
                     {
                         key: "webdav",
-                        label: "WebDAV",
+                        label: "云端 WebDAV",
                         children: (
                             <Form layout="vertical" requiredMark={false}>
                                 <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
@@ -517,7 +572,7 @@ export function AppConfigModal() {
                                                 <Cloud className="size-4" />
                                                 WebDAV 同步
                                             </div>
-                                            <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI API Key；服务不支持 CORS 时可走 Next.js 转发。</div>
+                                            <div className="mt-1 text-xs text-stone-500">同步画布、我的素材、生成记录和本地媒体文件，不包含 AI API Key；服务不支持 CORS 时可走后端代理。</div>
                                         </div>
                                         <div className="text-xs text-stone-500">{webdav.lastSyncedAt ? `上次同步 ${formatWebdavTime(webdav.lastSyncedAt)}` : "尚未同步"}</div>
                                     </div>
@@ -529,7 +584,7 @@ export function AppConfigModal() {
                                                 onChange={(value) => updateWebdavConfig("proxyMode", value as typeof webdav.proxyMode)}
                                                 options={[
                                                     { label: "前端直连", value: "direct" },
-                                                    { label: "Next.js 转发", value: "nextjs" },
+                                                    { label: "后端代理", value: "backend" },
                                                 ]}
                                             />
                                         </Form.Item>
@@ -586,7 +641,7 @@ export function AppConfigModal() {
                                                 onChange={(value) => updateComfyUiConfig("proxyMode", value as typeof comfyui.proxyMode)}
                                                 options={[
                                                     { label: "前端直连", value: "direct" },
-                                                    { label: "Next.js 转发", value: "nextjs" },
+                                                    { label: "后端代理", value: "backend" },
                                                 ]}
                                             />
                                         </Form.Item>
@@ -607,65 +662,7 @@ export function AppConfigModal() {
                                         <Button icon={<Wifi className="size-4" />} disabled={!comfyUiReady} loading={testingComfyUi} onClick={() => void testComfyUi()}>
                                             测试连接
                                         </Button>
-                                        <span className="text-xs text-stone-500">Next.js 转发可避免浏览器 CORS；部署公网时不要把它暴露给不可信用户。</span>
-                                    </div>
-                                </section>
-                            </Form>
-                        ),
-                    },
-                    {
-                        key: "backend",
-                        label: "后端同步",
-                        children: (
-                            <Form layout="vertical" requiredMark={false}>
-                                <section className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                                        <div>
-                                            <div className="flex items-center gap-2 text-sm font-semibold">
-                                                <Server className="size-4" />
-                                                后端配置同步
-                                            </div>
-                                            <div className="mt-1 text-xs text-stone-500">将渠道、模型、偏好等配置同步到自建后端，实现跨浏览器共享。配置包含 API Key，请确保后端安全。</div>
-                                        </div>
-                                        <div className="text-xs text-stone-500">{backend.enabled ? "已启用" : "未启用"}</div>
-                                    </div>
-
-                                    <Form.Item label="启用同步" className="mb-4">
-                                        <Segmented
-                                            block
-                                            value={backend.enabled ? "on" : "off"}
-                                            onChange={(value) => updateBackendConfig("enabled", value === "on")}
-                                            options={[
-                                                { label: "关闭", value: "off" },
-                                                { label: "启用", value: "on" },
-                                            ]}
-                                        />
-                                    </Form.Item>
-
-                                    <div className="grid gap-4 md:grid-cols-2">
-                                        <Form.Item label="后端地址" extra="如 http://127.0.0.1:4001" className="mb-4">
-                                            <Input value={backend.url} placeholder="http://127.0.0.1:4001" onChange={(event) => updateBackendConfig("url", event.target.value)} />
-                                        </Form.Item>
-                                        <Form.Item label="认证码" extra="后端启动时生成的 AUTH_CODE" className="mb-4">
-                                            <Input.Password value={backend.authCode} placeholder="输入后端生成的认证码" onChange={(event) => updateBackendConfig("authCode", event.target.value)} />
-                                        </Form.Item>
-                                    </div>
-
-                                    <Form.Item label="公网访问地址" extra="用于 Agnes 视频生成时上传参考图。填写后端可被模型厂商访问的公网地址，如 https://your-domain.com。留空则使用临时图床" className="mb-4">
-                                        <Input value={backend.publicBaseUrl} placeholder="https://your-domain.com" onChange={(event) => updateBackendConfig("publicBaseUrl", event.target.value)} />
-                                    </Form.Item>
-
-                                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                                        <Button icon={<Wifi className="size-4" />} disabled={!backend.url.trim()} loading={testingBackend} onClick={() => void testBackend()}>
-                                            测试连接
-                                        </Button>
-                                        <Button icon={<Download className="size-4" />} disabled={!backend.url.trim() || !backend.authCode.trim()} loading={syncingBackend} onClick={() => void pullFromBackend()}>
-                                            从后端拉取
-                                        </Button>
-                                        <Button icon={<Upload className="size-4" />} disabled={!backend.url.trim() || !backend.authCode.trim()} loading={syncingBackend} onClick={() => void pushToBackend()}>
-                                            推送到后端
-                                        </Button>
-                                        <span className="text-xs text-stone-500">启用后，配置变更将自动同步到后端，启动时自动拉取最新配置。手动按钮可强制覆盖。</span>
+                                        <span className="text-xs text-stone-500">后端代理可避免浏览器 CORS；部署公网时不要把它暴露给不可信用户。</span>
                                     </div>
                                 </section>
                             </Form>

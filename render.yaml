@@ -7,4 +7,4 @@ services:
     healthCheckPath: /
     envVars:
       - key: PORT
-        value: 4000
+        value: 9800

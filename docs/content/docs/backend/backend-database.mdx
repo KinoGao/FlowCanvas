@@ -26,5 +26,86 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 ### 安全说明
 
 - `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境
-- 所有 API 请求需携带 `Authorization: Bearer <AUTH_CODE>` 头（`/api/health` 除外）
-- `AUTH_CODE` 通过环境变量传入，未设置时后端启动会自动生成随机码并打印到控制台
+- 旧 `/api/config` 等兼容/管理接口仍需携带 `Authorization: Bearer <AUTH_CODE>` 头（`/api/health` 除外）
+- `AUTH_CODE` 通过环境变量传入，未设置时后端启动会自动生成随机码并打印到控制台；注册本地后端账号时也需要填写该鉴权码
+
+## 账号保存相关表
+
+账号保存模式用于“本地后端账号”保存通道。登录态使用后端签发的 Bearer token；注册账号需要提交后端配置中的 `AUTH_CODE`；旧的 `AUTH_CODE` 仍保留给管理、旧配置接口和开发兼容入口，不再作为用户画布、素材、配置和文件数据的共享身份。
+
+### users 表
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 用户 ID |
+| `username` | VARCHAR (unique) | 登录用户名，按小写归一化 |
+| `password_hash` | VARCHAR | PBKDF2 哈希后的密码，不保存明文 |
+| `display_name` | VARCHAR | 显示名称 |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `updated_at` | TIMESTAMP | 更新时间 |
+
+### user_sessions 表
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 会话 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `token_hash` | VARCHAR (unique) | Bearer token 的 SHA-256 哈希 |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `expires_at` | TIMESTAMP | 过期时间 |
+
+### user_configs 表
+
+每个用户一行，保存当前保存通道下的完整配置 JSON，包括 AI 渠道/API Key、ComfyUI、偏好等配置。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 配置记录 ID |
+| `user_id` | VARCHAR (unique, FK) | 所属用户 |
+| `data` | TEXT | 完整配置 JSON 字符串 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
+
+### canvas_projects 表
+
+按用户保存画布项目。`project_json` 保存前端项目 meta 与 detail 的完整 JSON，后端只抽取 `id`、`title`、时间字段用于列表和覆盖写入。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 画布项目 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `title` | VARCHAR | 项目标题 |
+| `project_json` | TEXT | 项目完整 JSON |
+| `created_at` | TIMESTAMP | 项目创建时间 |
+| `updated_at` | TIMESTAMP | 项目更新时间 |
+
+### assets 表
+
+按用户保存素材库条目。素材文件本体通过 `user_files` 落盘，素材条目中的 `storageKey` 指向对应文件。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 素材 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `asset_json` | TEXT | 素材完整 JSON |
+| `updated_at` | TIMESTAMP | 素材更新时间 |
+
+### user_files 表
+
+按用户保存图片、视频、音频等媒体文件元数据，文件本体落盘到 `USER_FILE_DIR` 指定目录，默认 `./data/user-files/{userId}/...`。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 文件 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `storage_key` | VARCHAR (unique) | 前端稳定引用键，格式为 `backend:<id>` |
+| `file_name` | VARCHAR | 原始文件名 |
+| `content_type` | VARCHAR | MIME 类型 |
+| `bytes` | BIGINT | 文件大小 |
+| `relative_path` | VARCHAR | 相对 `USER_FILE_DIR` 的文件路径 |
+| `created_at` | TIMESTAMP | 上传时间 |
+
+### 保存通道说明
+
+- `local`：沿用浏览器本地存储，不写入这些用户表。
+- `backend`：登录后读写 `user_configs`、`canvas_projects`、`assets` 和 `user_files`，不同账号数据隔离。
+- `webdav`：继续通过 WebDAV manifest 与文件同步；WebDAV 配置页和后端 WebDAV proxy 保留，不依赖本地后端账号。

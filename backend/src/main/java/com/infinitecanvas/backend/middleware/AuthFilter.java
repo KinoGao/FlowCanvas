@@ -2,31 +2,38 @@ package com.infinitecanvas.backend.middleware;
 
 import com.infinitecanvas.backend.dto.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infinitecanvas.backend.service.AuthCodeService;
+import com.infinitecanvas.backend.service.AuthService;
+import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.util.UUID;
 
 @Component
 public class AuthFilter implements Filter {
 
-    private final String authCode;
+    private final AuthCodeService authCodeService;
+    private final AuthService authService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public AuthFilter(@Value("${app.auth-code:gycode}") String authCode) {
-        if (authCode == null || authCode.isBlank()) {
-            this.authCode = UUID.randomUUID().toString().replace("-", "");
-            System.out.println("========================================");
-            System.out.println("  AUTH_CODE 未设置，已自动生成: " + this.authCode);
-            System.out.println("  请在前端配置弹窗中填入此认证码");
-            System.out.println("========================================");
-        } else {
-            this.authCode = authCode;
-        }
+    public AuthFilter(AuthCodeService authCodeService, AuthService authService) {
+        this.authCodeService = authCodeService;
+        this.authService = authService;
+    }
+
+    private boolean isPublicApi(String path) {
+        return path.equals("/api/health")
+                || path.equals("/api/ai-proxy")
+                || path.equals("/api/comfyui-proxy")
+                || path.equals("/api/prompts")
+                || path.equals("/api/upload-public")
+                || path.equals("/api/webdav-proxy")
+                || path.equals("/api/auth/login")
+                || path.equals("/api/auth/register")
+                || path.startsWith("/api/public-image/");
     }
 
     @Override
@@ -36,18 +43,39 @@ public class AuthFilter implements Filter {
         HttpServletResponse resp = (HttpServletResponse) response;
 
         String path = req.getRequestURI();
-        if (path.equals("/api/health") || path.startsWith("/api/public-image/") || "OPTIONS".equalsIgnoreCase(req.getMethod())) {
+        if (isPublicApi(path) || "OPTIONS".equalsIgnoreCase(req.getMethod())) {
             chain.doFilter(request, response);
             return;
         }
 
-        String authorization = req.getHeader("Authorization");
-        String token = null;
-        if (authorization != null && authorization.startsWith("Bearer ")) {
-            token = authorization.substring(7);
+        String token = bearerToken(req);
+
+        if (authCodeService.matches(token)) {
+            req.setAttribute(UserRequestContext.LEGACY_AUTH_ATTR, true);
+            chain.doFilter(request, response);
+            return;
         }
 
-        if (token == null || !token.equals(authCode)) {
+        if (token != null) {
+            var user = authService.authenticate(token);
+            if (user.isPresent()) {
+                req.setAttribute(UserRequestContext.USER_ATTR, user.get());
+                chain.doFilter(request, response);
+                return;
+            }
+        }
+
+        if (token == null) token = req.getParameter("token");
+        if (token != null) {
+            var user = authService.authenticate(token);
+            if (user.isPresent()) {
+                req.setAttribute(UserRequestContext.USER_ATTR, user.get());
+                chain.doFilter(request, response);
+                return;
+            }
+        }
+
+        {
             resp.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             resp.setContentType("application/json;charset=UTF-8");
             resp.setHeader("Access-Control-Allow-Origin", req.getHeader("Origin"));
@@ -56,6 +84,11 @@ public class AuthFilter implements Filter {
             return;
         }
 
-        chain.doFilter(request, response);
+    }
+
+    private String bearerToken(HttpServletRequest req) {
+        String authorization = req.getHeader("Authorization");
+        if (authorization != null && authorization.startsWith("Bearer ")) return authorization.substring(7);
+        return null;
     }
 }

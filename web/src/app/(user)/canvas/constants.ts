@@ -1,5 +1,6 @@
 import { CanvasNodeType } from "./types";
 import type { CanvasNodeMetadata } from "./types";
+import { createDefaultCanvasNodeMetadata } from "./utils/canvas-node-metadata";
 
 type CanvasNodeSpec = {
     width: number;
@@ -9,33 +10,33 @@ type CanvasNodeSpec = {
 };
 
 export const NODE_DEFAULT_SIZE = {
-    [CanvasNodeType.Image]: { width: 340, height: 240, title: "New Generation" },
-    [CanvasNodeType.Text]: { width: 340, height: 240, title: "Note" },
+    [CanvasNodeType.Image]: { width: 160, height: 160, title: "New Generation" },
+    [CanvasNodeType.Text]: { width: 160, height: 160, title: "Note" },
     [CanvasNodeType.Config]: { width: 420, height: 240, title: "生成配置" },
-    [CanvasNodeType.Video]: { width: 420, height: 236, title: "Video" },
-    [CanvasNodeType.Audio]: { width: 340, height: 120, title: "Audio" },
+    [CanvasNodeType.Video]: { width: 220, height: 124, title: "Video" },
+    [CanvasNodeType.Audio]: { width: 220, height: 96, title: "Audio" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export const NODE_SPECS = {
     [CanvasNodeType.Image]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Image],
-        metadata: { content: "", status: "idle" },
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Image),
     },
     [CanvasNodeType.Text]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Text],
-        metadata: { content: "", status: "idle", fontSize: 14 },
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Text),
     },
     [CanvasNodeType.Config]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Config],
-        metadata: { content: "", status: "idle", generationMode: "image" },
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Config),
     },
     [CanvasNodeType.Video]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Video],
-        metadata: { content: "", status: "idle" },
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Video),
     },
     [CanvasNodeType.Audio]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Audio],
-        metadata: { content: "", status: "idle" },
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Audio),
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 

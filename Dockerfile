@@ -1,27 +1,18 @@
-# 构建 Next.js 前端产物。
+# 构建 Vite 前端产物。
 FROM oven/bun:1.3.13 AS web-build
 
 WORKDIR /app/web
-COPY web/package.json web/bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --cache-dir=/root/.bun/install/cache
+COPY web/package.json ./
+RUN --mount=type=cache,target=/root/.bun/install/cache bun install --cache-dir=/root/.bun/install/cache
 COPY VERSION /app/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY web ./
 RUN bun run build
 
-# 运行镜像：只启动 Next.js，AI 请求由浏览器前台直连用户自己的接口。
-FROM node:22-bookworm-slim
+# 运行镜像：静态托管 Vite SPA，AI 请求默认由浏览器前台直连用户自己的接口。
+FROM nginx:1.29-alpine
 
-WORKDIR /app
-COPY VERSION /app/VERSION
-COPY CHANGELOG.md /app/CHANGELOG.md
-COPY --from=web-build /app/web/public /app/web/public
-COPY --from=web-build /app/web/.next/standalone /app/web
-COPY --from=web-build /app/web/.next/static /app/web/.next/static
-ENV NODE_ENV=production
-ENV HOSTNAME=0.0.0.0
-ENV PORT=4000
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=web-build /app/web/dist /usr/share/nginx/html
 
-EXPOSE 4000
-CMD ["sh", "-c", "cd /app/web && PORT=4000 node server.js"]
+EXPOSE 9800

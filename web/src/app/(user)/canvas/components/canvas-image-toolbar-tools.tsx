@@ -1,15 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, CircleDot, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "../types";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "panorama360" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
     onUpload: (node: CanvasNodeData) => void;
+    onMarkPanorama360: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
@@ -38,7 +39,7 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
-export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
+export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v7";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
 
@@ -69,6 +70,16 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: "替换图片",
         icon: () => <Upload className="size-4" />,
         run: (node, handlers) => handlers.onUpload(node),
+    },
+    {
+        id: "panorama360",
+        defaultVisible: true,
+        panelLabel: "360场景",
+        label: "360场景",
+        title: (node) => (node.metadata?.canvasTool === "panorama360" ? "已标记为360场景，三击进入全景预览" : "标记为360场景，之后三击进入全景预览"),
+        icon: () => <CircleDot className="size-4" />,
+        active: (node) => node.metadata?.canvasTool === "panorama360",
+        run: (node, handlers) => handlers.onMarkPanorama360(node),
     },
     {
         id: "resize",

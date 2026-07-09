@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Handle, Position as ReactFlowPosition, useUpdateNodeInternals } from "@xyflow/react";
-import { ChevronRight, FileText, Image as ImageIcon, Music2, RefreshCw, Settings2, Star, Video } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Music2, RefreshCw, Settings2, Star, Video } from "lucide-react";
+import * as THREE from "three";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -12,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { imageToDataUrl, peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
 import { peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeData, type Position as CanvasPosition } from "../types";
@@ -20,7 +21,7 @@ import type { CanvasResourceReference } from "../utils/canvas-resource-reference
 import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-const selectionBlue = "#2f80ff";
+const selectionBlue = "#7dd3fc";
 
 type ResizeStartEvent = React.PointerEvent;
 
@@ -85,6 +86,8 @@ export type CanvasNodeProps = {
     onContentChange: (nodeId: string, content: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
+    onOpenComposer?: (node: CanvasNodeData) => void;
+    onUpload?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
@@ -105,10 +108,13 @@ type NodeContentRendererProps = {
     onContentChange: (nodeId: string, content: string) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
+    onStartEditing?: () => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
+    onOpenComposer?: () => void;
+    onUpload?: () => void;
 };
 
 /** Custom memo comparator: skip function props (renderPanel, renderNodeContent, callbacks)
@@ -166,6 +172,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     onContentChange,
     onToggleBatch,
     onSetBatchPrimary,
+    onOpenComposer,
+    onUpload,
     onRetry,
     onGenerateImage,
     onViewImage,
@@ -185,6 +193,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const nodeRef = useRef<HTMLDivElement>(null);
+    const mediaClickTimerRef = useRef<number | null>(null);
+    const mediaClickRef = useRef({ count: 0, lastAt: 0 });
     const resizeFrameRef = useRef<number | null>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -353,6 +363,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     useEffect(() => {
         return () => {
+            if (mediaClickTimerRef.current) window.clearTimeout(mediaClickTimerRef.current);
             if (resizeFrameRef.current) cancelAnimationFrame(resizeFrameRef.current);
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
@@ -363,7 +374,44 @@ export const CanvasNode = React.memo(function CanvasNode({
         };
     }, [handleResizeMove, handleResizeUp]);
 
+    const clearMediaClickTimer = useCallback(() => {
+        if (!mediaClickTimerRef.current) return;
+        window.clearTimeout(mediaClickTimerRef.current);
+        mediaClickTimerRef.current = null;
+    }, []);
+
+    const handleMediaClick = useCallback(
+        (event: React.MouseEvent) => {
+            if (data.type !== CanvasNodeType.Image || !hasImageContent) return;
+            const now = Date.now();
+            if (now - mediaClickRef.current.lastAt > 1200) mediaClickRef.current.count = 0;
+            mediaClickRef.current.count += 1;
+            mediaClickRef.current.lastAt = now;
+
+            if (mediaClickRef.current.count === 2) {
+                event.stopPropagation();
+                clearMediaClickTimer();
+                mediaClickTimerRef.current = window.setTimeout(() => {
+                    mediaClickTimerRef.current = null;
+                    onOpenComposer?.(data);
+                }, 260);
+            } else if (mediaClickRef.current.count >= 3) {
+                event.stopPropagation();
+                clearMediaClickTimer();
+                mediaClickRef.current.count = 0;
+                onViewImage?.(data);
+            }
+        },
+        [clearMediaClickTimer, data, hasImageContent, isBatchRoot, onOpenComposer, onViewImage],
+    );
+
     const shouldUseOverview = isOverview && !isActive && !showPanel && !isEditingContent;
+    const panelWidthClass =
+        data.metadata?.canvasTool === "director"
+            ? "w-[920px] max-w-[calc(100vw-48px)]"
+            : data.metadata?.canvasTool === "script"
+              ? "w-[720px] max-w-[calc(100vw-48px)]"
+              : "w-[500px] max-w-[calc(100vw-32px)]";
 
     return (
         <div
@@ -388,22 +436,22 @@ export const CanvasNode = React.memo(function CanvasNode({
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <Card
-                className="relative h-full w-full overflow-visible rounded-[22px] border bg-transparent p-0 py-0 text-sm ring-0"
+                className="relative h-full w-full overflow-visible rounded-[10px] border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
                     background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.fill : "transparent",
                     borderColor: shouldUseOverview ? (isRelated ? theme.node.muted : theme.node.stroke) : hasImageContent ? imageBorderColor : isActive ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: shouldUseOverview ? undefined : isActive ? `0 0 0 1px ${selectionBlue}55` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}55, 0 18px 48px rgba(0,0,0,.14)` : undefined,
+                    boxShadow: shouldUseOverview ? undefined : isActive ? `0 0 0 1px ${selectionBlue}66, 0 12px 28px rgba(0,0,0,.18)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}44, 0 12px 28px rgba(0,0,0,.12)` : undefined,
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
+                onClick={handleMediaClick}
                 onDoubleClick={(event) => {
+                    if (data.type === CanvasNodeType.Image && hasImageContent) {
+                        event.stopPropagation();
+                        return;
+                    }
                     if (isBatchRoot) {
                         event.stopPropagation();
                         onToggleBatch?.(data.id);
-                        return;
-                    }
-                    if (data.type === CanvasNodeType.Image && hasImageContent) {
-                        event.stopPropagation();
-                        onViewImage?.(data);
                         return;
                     }
                     if (data.type !== CanvasNodeType.Text) return;
@@ -425,7 +473,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     }
                 >
                     {shouldUseOverview ? (
-                        <OverviewNodeContent node={data} theme={theme} />
+                        <MediaAwareOverviewNodeContent node={data} theme={theme} />
                     ) : (
                         <NodeContent
                             node={data}
@@ -439,16 +487,20 @@ export const CanvasNode = React.memo(function CanvasNode({
                             batchRecovering={batchRecovering}
                             renderNodeContent={renderNodeContent}
                             mentionReferences={mentionReferences}
+                            onStartEditing={() => setIsEditingContent(true)}
                             onContentChange={onContentChange}
                             onStopEditing={() => setIsEditingContent(false)}
                             onRetry={onRetry}
                             onGenerateImage={onGenerateImage}
+                            onOpenComposer={() => onOpenComposer?.(data)}
+                            onUpload={() => onUpload?.(data)}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                         />
                     )}
                 </div>
 
+                {!shouldUseOverview ? <NodeTitleBadge node={data} theme={theme} /> : null}
                 {!shouldUseOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
@@ -472,7 +524,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showPanel && renderPanel ? (
                 <div
                     ref={panelRef}
-                    className="absolute left-1/2 top-full z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar"
+                    className={cn("absolute left-1/2 top-full z-[70] max-h-[68vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar", panelWidthClass)}
                     onWheel={(event) => {
                         const el = event.currentTarget;
                         if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
@@ -489,6 +541,71 @@ export const CanvasNode = React.memo(function CanvasNode({
     );
 }, canvasNodePropsEqual);
 
+function MediaAwareOverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const hasMedia = Boolean(node.metadata?.content || node.metadata?.storageKey);
+    if (hasMedia && node.type === CanvasNodeType.Image) return <OverviewImageContent node={node} theme={theme} />;
+    if (hasMedia && node.type === CanvasNodeType.Video) return <OverviewVideoContent node={node} theme={theme} />;
+    if (hasMedia && node.type === CanvasNodeType.Audio) return <OverviewAudioContent node={node} theme={theme} />;
+    return <OverviewNodeContent node={node} theme={theme} />;
+}
+
+function OverviewImageContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "image");
+    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
+    return (
+        <div className="relative h-full w-full overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }}>
+            <img
+                src={src}
+                alt={node.title}
+                draggable={false}
+                decoding="async"
+                onDragStart={(event) => event.preventDefault()}
+                className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+            />
+        </div>
+    );
+}
+
+function OverviewVideoContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
+    return (
+        <div className="relative h-full w-full overflow-hidden rounded-[inherit] bg-black">
+            <video src={src} muted playsInline preload="metadata" className="pointer-events-none h-full w-full select-none object-contain" />
+            <div className="pointer-events-none absolute left-2 top-2 grid size-7 place-items-center rounded-md bg-black/45 text-white/80">
+                <Video className="size-3.5" />
+            </div>
+        </div>
+    );
+}
+
+function OverviewAudioContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
+    return (
+        <div className="flex h-full w-full flex-col justify-center gap-3 overflow-hidden rounded-[inherit] px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <div className="flex min-w-0 items-center gap-2 text-xs font-medium opacity-80">
+                <Music2 className="size-4 shrink-0" />
+                <span className="truncate">{node.title || "\u97f3\u9891"}</span>
+            </div>
+            <div className="flex h-8 items-end gap-1 overflow-hidden rounded-md px-2 py-1.5" style={{ background: theme.toolbar.panel }}>
+                {Array.from({ length: 24 }).map((_, index) => (
+                    <span
+                        key={index}
+                        className="w-1 shrink-0 rounded-full"
+                        style={{
+                            height: `${28 + ((index * 17) % 52)}%`,
+                            background: index % 3 === 0 ? theme.node.activeStroke : theme.node.placeholder,
+                            opacity: index % 3 === 0 ? 0.8 : 0.35,
+                        }}
+                    />
+                ))}
+            </div>
+            <audio src={src} preload="none" className="hidden" />
+        </div>
+    );
+}
+
 function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : FileText;
     const title = node.title || node.metadata?.prompt || node.metadata?.content || (node.type === CanvasNodeType.Config ? "配置节点" : "节点");
@@ -503,6 +620,8 @@ function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (ty
 }
 
 function NodeContent(props: NodeContentRendererProps): React.ReactElement {
+    if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
+    if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
@@ -568,45 +687,48 @@ function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) 
 
 function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
-            <div className="flex size-14 items-center justify-center rounded-2xl border" style={{ background: theme.toolbar.activeBg, borderColor: `${theme.node.stroke}88` }}>
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2.5" style={{ color: theme.node.placeholder }}>
+            <div className="flex size-11 items-center justify-center rounded-lg border" style={{ background: theme.toolbar.activeBg, borderColor: `${theme.node.stroke}88` }}>
                 {icon}
             </div>
-            <Badge variant="outline" className="h-auto rounded-full border px-2.5 py-1 text-[10px] tracking-[0.18em] opacity-60" style={{ borderColor: `${theme.node.stroke}88`, color: theme.node.placeholder }}>
+            <Badge variant="outline" className="h-auto rounded-md border px-2 py-1 text-[10px] opacity-60" style={{ borderColor: `${theme.node.stroke}88`, color: theme.node.placeholder }}>
                 {label}
             </Badge>
         </div>
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer }: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+    const isEmpty = !node.metadata?.content?.trim();
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="absolute right-3 top-3 z-20 h-8 rounded-full border px-2.5 text-xs opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
-                style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onGenerateImage?.(node);
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title="用文本生图"
-                aria-label="用文本生图"
-            >
-                <ImageIcon className="size-3.5" />
-                生图
-            </Button>
+            {!isEmpty ? (
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="absolute right-3 top-3 z-20 h-8 rounded-full border px-2.5 text-xs opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
+                    style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onGenerateImage?.(node);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    title="用文本生图"
+                    aria-label="用文本生图"
+                >
+                    <ImageIcon className="size-3.5" />
+                    生图
+                </Button>
+            ) : null}
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
-                    className="thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
+                    className="nodrag nopan thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
@@ -620,11 +742,130 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     onPointerDown={(event) => event.stopPropagation()}
                     onWheel={(event) => event.stopPropagation()}
                 />
+            ) : isEmpty && node.metadata?.canvasTool === "script" ? (
+                <TryActionList
+                    theme={theme}
+                    actions={[
+                        { label: "自己编写脚本", onClick: onOpenComposer || onStartEditing },
+                        { label: "拆成分镜", onClick: onOpenComposer },
+                        { label: "脚本生视频", onClick: onOpenComposer },
+                        { label: "生成旁白", onClick: onOpenComposer },
+                    ]}
+                />
+            ) : isEmpty ? (
+                <TryActionList
+                    theme={theme}
+                    actions={[
+                        { label: "自己编写内容", onClick: onOpenComposer || onStartEditing },
+                        { label: "文生视频", onClick: onOpenComposer },
+                        { label: "图片反推提示词", onClick: onOpenComposer },
+                        { label: "文字生音乐", onClick: onOpenComposer },
+                    ]}
+                />
             ) : (
-                <div className="thin-scrollbar block h-full w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono" style={textStyle} onWheel={(event) => event.stopPropagation()}>
-                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
+                <div
+                    className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
+                    style={textStyle}
+                    onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        onStartEditing?.();
+                    }}
+                    onWheel={(event) => event.stopPropagation()}
+                >
+                    {node.metadata?.content}
                 </div>
             )}
+        </div>
+    );
+}
+
+function VideoCompositionContent({ node, theme, onOpenComposer }: NodeContentRendererProps) {
+    const connectedCount = node.metadata?.references?.length || 0;
+    return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-4 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <span className="grid size-11 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
+                <Clapperboard className="size-5" />
+            </span>
+            <div className="text-xs leading-5 opacity-65">
+                {connectedCount ? `已连接 ${connectedCount} 个视频节点，可继续编排合成要求` : "空空如也，请连接视频节点后操作"}
+            </div>
+            <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-xs transition"
+                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenComposer?.();
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                编排合成
+            </button>
+        </div>
+    );
+}
+
+function DirectorContent({ theme, onOpenComposer }: NodeContentRendererProps) {
+    return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <span className="grid size-11 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
+                <Layers3 className="size-5" />
+            </span>
+            <div className="text-xs leading-5 opacity-70">
+                在3D空间中搭建场景并进行多视角截图
+            </div>
+            <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-xs transition"
+                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenComposer?.();
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                打开导演台
+            </button>
+        </div>
+    );
+}
+
+function NodeTitleBadge({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : FileText;
+    return (
+        <div className="pointer-events-none absolute -top-6 left-0 flex max-w-full items-center gap-1 text-[11px]" style={{ color: theme.node.label }}>
+            <Icon className="size-3 shrink-0 opacity-65" />
+            <span className="truncate">{node.title || "未命名节点"}</span>
+        </div>
+    );
+}
+
+function TryActionList({ theme, actions }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; actions: Array<{ label: string; onClick?: () => void }> }) {
+    return (
+        <div className="flex h-full w-full flex-col items-start justify-center px-3 text-left">
+            <div className="mb-1.5 text-[12px]" style={{ color: theme.node.placeholder }}>尝试：</div>
+            <div className="flex max-w-full flex-col items-start gap-0.5">
+                {actions.map((action) => (
+                    <button
+                        key={action.label}
+                        type="button"
+                        className="max-w-full rounded-md px-1 py-0.5 text-left text-[12px] leading-5 transition"
+                        style={{ color: theme.node.text }}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            action.onClick?.();
+                        }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
+                        onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
+                    >
+                        {action.label}
+                    </button>
+                ))}
+            </div>
         </div>
     );
 }
@@ -666,8 +907,27 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: NodeContentRendererProps) {
-    const content = <EmptyState icon={<ImageIcon className="size-6 opacity-35" />} label="空图片节点" theme={theme} />;
+function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onOpenComposer, onUpload }: NodeContentRendererProps) {
+    if (node.metadata?.canvasTool === "panorama360") {
+        return (
+            <TryActionList
+                theme={theme}
+                actions={[
+                    { label: "生成360全景", onClick: onOpenComposer },
+                    { label: "上传360图片", onClick: onUpload },
+                ]}
+            />
+        );
+    }
+    const content = (
+        <TryActionList
+            theme={theme}
+            actions={[
+                { label: "图生图", onClick: onOpenComposer },
+                { label: "图片高清", onClick: onOpenComposer },
+            ]}
+        />
+    );
     if (isBatchRoot)
         return (
             <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -722,16 +982,19 @@ function ImageContent({
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden rounded-3xl">
+            <div className="h-full w-full overflow-hidden rounded-[8px]">
                 {imgSrc ? (
-                    <img
-                        src={imgSrc}
-                        alt={node.title}
-                        draggable={false}
-                        decoding="async"
-                        onDragStart={(event) => event.preventDefault()}
-                        className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-                    />
+                    <div className="relative h-full w-full">
+                        <img
+                            src={imgSrc}
+                            alt={node.title}
+                            draggable={false}
+                            decoding="async"
+                            onDragStart={(event) => event.preventDefault()}
+                            className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
+                        />
+                        {node.metadata?.canvasTool === "panorama360" ? <span className="pointer-events-none absolute left-2 top-2 rounded-md bg-black/55 px-2 py-1 text-[10px] font-medium text-white/80 backdrop-blur">360</span> : null}
+                    </div>
                 ) : (
                     <div className="flex h-full w-full items-center justify-center" style={{ background: theme.node.fill, color: theme.node.placeholder }} aria-label="图片加载中">
                         <ImageIcon className="size-6 opacity-30" />
@@ -743,7 +1006,7 @@ function ImageContent({
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="absolute right-2.5 top-2.5 z-30 h-8 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
+                    className="absolute right-2.5 top-2.5 z-30 h-8 rounded-md border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
                     style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
                     aria-label={batchExpanded ? "图片组已展开" : "图片组已收起"}
                     onClick={(event) => {
@@ -779,6 +1042,109 @@ function ImageContent({
     );
 }
 
+function Panorama360Viewer({ src, title }: { src: string; title: string }) {
+    const hostRef = useRef<HTMLDivElement | null>(null);
+    const [textureSrc, setTextureSrc] = useState(src);
+    const [loadError, setLoadError] = useState("");
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoadError("");
+        if (!/^https?:/i.test(src)) {
+            setTextureSrc(src);
+            return;
+        }
+        setTextureSrc("");
+        imageToDataUrl({ url: src })
+            .then((dataUrl) => {
+                if (!cancelled) setTextureSrc(dataUrl);
+            })
+            .catch((error) => {
+                if (!cancelled) setLoadError(error instanceof Error ? error.message : "360贴图加载失败");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [src]);
+
+    useEffect(() => {
+        if (!textureSrc) return;
+        const host = hostRef.current;
+        if (!host) return;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setClearColor(0x050505, 1);
+        host.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1100);
+        camera.position.set(0, 0, 0);
+        let disposed = false;
+        let yaw = 0;
+        let pitch = 0;
+
+        const geometry = new THREE.SphereGeometry(500, 96, 48);
+        geometry.scale(-1, 1, 1);
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin("anonymous");
+        const texture = loader.load(textureSrc, render, undefined, () => {
+            if (!disposed) setLoadError("360贴图加载失败");
+        });
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        const sphere = new THREE.Mesh(geometry, material);
+        scene.add(sphere);
+
+        const updateCameraDirection = () => {
+            const direction = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+            camera.lookAt(direction);
+        };
+        updateCameraDirection();
+
+        const resize = () => {
+            if (!host || disposed) return;
+            const width = Math.max(1, host.clientWidth);
+            const height = Math.max(1, host.clientHeight);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height, false);
+            render();
+        };
+        function render() {
+            if (disposed) return;
+            renderer.render(scene, camera);
+        }
+        const observer = new ResizeObserver(resize);
+        observer.observe(host);
+        renderer.domElement.className = "block h-full w-full";
+        renderer.domElement.style.pointerEvents = "none";
+        resize();
+
+        return () => {
+            disposed = true;
+            observer.disconnect();
+            texture.dispose();
+            geometry.dispose();
+            material.dispose();
+            renderer.dispose();
+            renderer.domElement.remove();
+        };
+    }, [textureSrc]);
+
+    return (
+        <div ref={hostRef} className="relative h-full w-full bg-black" aria-label={title || "360场景"}>
+            {!textureSrc || loadError ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4 text-center text-xs text-white/70">
+                    {loadError || "正在准备360贴图"}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     const width = Math.round(node.metadata?.naturalWidth || node.width);
     const height = Math.round(node.metadata?.naturalHeight || node.height);
@@ -797,17 +1163,7 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchRoot = batchCount > 1;
     return (
-        <div
-            className="group/batch relative h-full w-full overflow-visible"
-            onDoubleClick={
-                isBatchRoot
-                    ? (event) => {
-                          event.stopPropagation();
-                          onToggleBatch?.();
-                      }
-                    : undefined
-            }
-        >
+        <div className="group/batch relative h-full w-full overflow-visible">
             {isBatchRoot ? (
                 <div className="pointer-events-none absolute inset-0 overflow-visible">
                     {Array.from({ length: Math.min(batchCount - 1, 5) }).map((_, index) => (

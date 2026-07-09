@@ -5,7 +5,7 @@ import { Check, CloudDownload, CloudUpload, Play, Save, Trash2, Upload, Workflow
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { runComfyWorkflow } from "@/services/api/comfyui";
-import { deleteRemoteWorkflow, fetchRemoteWorkflows, pushRemoteWorkflowConfig, uploadRemoteWorkflow } from "@/services/api/backend";
+import { deleteBackendWorkflow, fetchBackendWorkflows, pushBackendWorkflowConfig, uploadBackendWorkflow } from "@/services/api/backend";
 import {
     applyComfyWorkflowFields,
     createComfyWorkflow,
@@ -19,6 +19,7 @@ import {
     type ComfyWorkflowFieldType,
 } from "@/services/comfyui-workflows";
 import { useConfigStore } from "@/stores/use-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { cn } from "@/lib/utils";
 
 const fieldTypes: Array<{ label: string; value: ComfyWorkflowFieldType }> = [
@@ -38,7 +39,7 @@ export default function ComfyUiPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const comfyui = useConfigStore((state) => state.comfyui);
     const updateComfyUiConfig = useConfigStore((state) => state.updateComfyUiConfig);
-    const backend = useConfigStore((state) => state.backend);
+    const token = useUserStore((state) => state.token);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
@@ -57,16 +58,16 @@ export default function ComfyUiPage() {
         void refreshWorkflows();
     }, []);
 
-    const backendReady = backend.enabled && backend.url.trim() && backend.authCode.trim();
+    const backendReady = Boolean(token.trim());
 
     const syncFromBackend = async () => {
         if (!backendReady) {
-            message.warning("请先在设置中启用后端同步");
+            message.warning("请先登录后端账号");
             return;
         }
         setSyncing(true);
         try {
-            const remoteWorkflows = await fetchRemoteWorkflows(backend.url, backend.authCode);
+            const remoteWorkflows = await fetchBackendWorkflows(token);
             const localWorkflows = await listComfyWorkflows();
             const localMap = new Map(localWorkflows.map((w) => [w.id, w]));
             let changed = false;
@@ -98,25 +99,25 @@ export default function ComfyUiPage() {
 
     const syncToBackend = async () => {
         if (!backendReady) {
-            message.warning("请先在设置中启用后端同步");
+            message.warning("请先登录后端账号");
             return;
         }
         setSyncing(true);
         try {
             const localWorkflows = await listComfyWorkflows();
-            const remoteWorkflows = await fetchRemoteWorkflows(backend.url, backend.authCode);
+            const remoteWorkflows = await fetchBackendWorkflows(token);
             const remoteIds = new Set(remoteWorkflows.map((w) => w.id));
             for (const workflow of localWorkflows) {
                 if (remoteIds.has(workflow.id)) {
-                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, workflow.id, { title: workflow.title, fields: workflow.fields });
+                    await pushBackendWorkflowConfig(token, workflow.id, { title: workflow.title, fields: workflow.fields });
                 } else {
-                    await uploadRemoteWorkflow(backend.url, backend.authCode, workflow.id, workflow.workflow);
-                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, workflow.id, { title: workflow.title, fields: workflow.fields });
+                    await uploadBackendWorkflow(token, workflow.id, workflow.workflow);
+                    await pushBackendWorkflowConfig(token, workflow.id, { title: workflow.title, fields: workflow.fields });
                 }
                 remoteIds.delete(workflow.id);
             }
             for (const id of remoteIds) {
-                await deleteRemoteWorkflow(backend.url, backend.authCode, id);
+                await deleteBackendWorkflow(token, id);
             }
             message.success("本地工作流配置已同步到后端");
         } catch (error) {
@@ -167,7 +168,7 @@ export default function ComfyUiPage() {
             await refreshWorkflows(created.id);
             if (backendReady) {
                 try {
-                    await uploadRemoteWorkflow(backend.url, backend.authCode, created.id, workflow);
+                    await uploadBackendWorkflow(token, created.id, workflow);
                 } catch {
                     /* 静默 */
                 }
@@ -193,7 +194,7 @@ export default function ComfyUiPage() {
             await refreshWorkflows(saved.id);
             if (backendReady) {
                 try {
-                    await pushRemoteWorkflowConfig(backend.url, backend.authCode, saved.id, { title: saved.title, fields: saved.fields });
+                    await pushBackendWorkflowConfig(token, saved.id, { title: saved.title, fields: saved.fields });
                 } catch {
                     /* 静默 */
                 }
@@ -218,7 +219,7 @@ export default function ComfyUiPage() {
                 await deleteComfyWorkflow(selected.id);
                 if (backendReady) {
                     try {
-                        await deleteRemoteWorkflow(backend.url, backend.authCode, selected.id);
+                        await deleteBackendWorkflow(token, selected.id);
                     } catch {
                         /* 静默 */
                     }

@@ -24,6 +24,7 @@ type CanvasNodeHoverToolbarProps = {
     onToggleDialog: (node: CanvasNodeData) => void;
     onGenerateImage: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
+    onMarkPanorama360: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
@@ -61,6 +62,7 @@ export function CanvasNodeHoverToolbar({
     onToggleDialog,
     onGenerateImage,
     onUpload,
+    onMarkPanorama360,
     onDownload,
     onSaveAsset,
     onMaskEdit,
@@ -82,6 +84,8 @@ export function CanvasNodeHoverToolbar({
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
 
     useEffect(() => {
         try {
@@ -124,7 +128,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(currentNode, { onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
+    const imageTools = buildImageToolbarTools(currentNode, { onUpload, onMarkPanorama360, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
 
     function openImageToolSettings() {
         onKeep(currentNode.id);
@@ -180,8 +184,8 @@ export function CanvasNodeHoverToolbar({
     return (
         <>
             <div
-                className="absolute z-[70] flex h-12 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-[18px] border border-black/10 bg-white text-[15px] text-[#242529] shadow-[0_8px_28px_rgba(15,23,42,.12)]"
-                style={{ left, top }}
+                className="absolute z-[70] flex h-11 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border text-sm shadow-[0_14px_34px_rgba(0,0,0,.24)] backdrop-blur-xl"
+                style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
@@ -282,10 +286,11 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 
 function ToolbarAction({ title, label, icon, onClick, showLabel, active = false, danger = false }: ToolbarTool & { showLabel: boolean }) {
     const hasText = showLabel && Boolean(label);
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
-        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ container: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className={`group relative flex h-12 items-center whitespace-nowrap px-1.5 ${danger ? "text-[#ef4444]" : ""}`} onClick={onClick} aria-label={title}>
-                <span className={`flex h-9 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-lg transition group-hover:bg-[#f0f0f1] ${active ? "bg-[#eeeeef]" : ""}`}>
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color={theme.node.panel} styles={{ container: { color: theme.node.text, boxShadow: "0 8px 24px rgba(0,0,0,.24)", fontSize: 13, fontWeight: 500 } }}>
+            <button type="button" className="group relative flex h-11 items-center whitespace-nowrap px-1.5" style={{ color: danger ? "#f87171" : theme.node.text }} onClick={onClick} aria-label={title}>
+                <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-md transition group-hover:bg-black/5 dark:group-hover:bg-white/10`} style={{ background: active ? theme.toolbar.activeBg : undefined }}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}
                 </span>

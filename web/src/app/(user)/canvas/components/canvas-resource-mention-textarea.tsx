@@ -103,9 +103,17 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         ...(showOverlay ? { background: "transparent", backgroundColor: "transparent" } : {}),
     } as CSSProperties;
     const menu = mention && candidates.length && textareaRef.current ? <MentionMenu textarea={textareaRef.current} references={candidates} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null;
+    const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => {
+        event.stopPropagation();
+    };
 
     return (
-        <div className={`relative h-full w-full ${containerClassName || ""}`}>
+        <div
+            className={`nodrag nopan relative h-full w-full ${containerClassName || ""}`}
+            onPointerDownCapture={stopCanvasInteraction}
+            onMouseDownCapture={stopCanvasInteraction}
+            onClickCapture={(event) => event.stopPropagation()}
+        >
             {showOverlay ? (
                 <div ref={overlayRef} className={`${className || ""} pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words`} style={{ ...style, color: theme.node.text }}>
                     <MentionHighlightText value={value || props.placeholder?.toString() || ""} labels={activeLabels} placeholder={!value} />

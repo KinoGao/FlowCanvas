@@ -1,3 +1,4 @@
+import { apiUrl } from "@/constant/env";
 import axios from "axios";
 
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -18,7 +19,8 @@ import {
     SEEDANCE_REFERENCE_LIMITS,
 } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
-import { uploadImageToBackend, buildPublicImageUrl } from "@/services/api/backend";
+import { uploadImageToCurrentBackend } from "@/services/api/backend";
+import { useUserStore } from "@/stores/use-user-store";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -346,10 +348,10 @@ async function createAgnesVideoTask(config: AiConfig, model: string, prompt: str
 async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], imageError: string, options?: RequestOptions): Promise<VideoGenerationTask> {
     const errors: string[] = [`[本地图片准备] ${imageError}`];
 
-    const backend = useConfigStore.getState().backend;
-    if (backend.enabled && backend.url.trim() && backend.authCode.trim() && backend.publicBaseUrl.trim()) {
+    const token = useUserStore.getState().token;
+    if (token.trim()) {
         try {
-            const publicUrls = await uploadReferencesToBackend(references, backend.url, backend.authCode, backend.publicBaseUrl, options?.signal);
+            const publicUrls = await uploadReferencesToBackend(references, token, options?.signal);
             return await sendAgnesCreateRequest(config, model, prompt, publicUrls, options);
         } catch (backendError) {
             const message = backendError instanceof Error ? backendError.message : String(backendError);
@@ -407,14 +409,13 @@ async function uploadReferencesToPublicHost(references: ReferenceImage[], source
     return Promise.all(references.map((image) => uploadImageToHost(image, source, signal)));
 }
 
-async function uploadReferencesToBackend(references: ReferenceImage[], backendUrl: string, authCode: string, publicBaseUrl: string, signal?: AbortSignal): Promise<string[]> {
+async function uploadReferencesToBackend(references: ReferenceImage[], token: string, signal?: AbortSignal): Promise<string[]> {
     return Promise.all(
         references.map(async (image) => {
             const dataUrl = await imageToDataUrl(image);
             if (!dataUrl) throw new Error("读取本地参考图失败");
             const blob = await (await fetch(dataUrl)).blob();
-            const filename = await uploadImageToBackend(backendUrl, authCode, blob, image.name || "reference.png");
-            return buildPublicImageUrl(publicBaseUrl, filename);
+            return uploadImageToCurrentBackend(token, blob, image.name || "reference.png");
         }),
     );
 }
@@ -425,7 +426,7 @@ async function uploadImageToHost(image: ReferenceImage, source: "temp.sh" | "lit
     const blob = await (await fetch(dataUrl)).blob();
     const form = new FormData();
     form.append("file", blob, image.name || "reference.png");
-    const { data } = await axios.post<{ url?: string; source?: string; error?: string }>(`/api/upload-public?source=${source}`, form, { signal });
+    const { data } = await axios.post<{ url?: string; source?: string; error?: string }>(apiUrl(`/api/upload-public?source=${source}`), form, { signal });
     if (!data?.url) throw new Error(data?.error || "临时图床未返回公网 URL");
     return data.url;
 }

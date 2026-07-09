@@ -19,7 +19,7 @@ public class ApiResponse<T> {
         return new ApiResponse<>(0, null, "ok");
     }
 
-    public static ApiResponse<Void> fail(String msg) {
+    public static <T> ApiResponse<T> fail(String msg) {
         return new ApiResponse<>(1, null, msg);
     }
 

@@ -21,4 +21,4 @@ else
 fi
 
 echo "[Crow5] 预计启动命令：bun run dev"
-echo "[Crow5] 已登记端口：443, 4000"
+echo "[Crow5] 已登记端口：443, 9800"

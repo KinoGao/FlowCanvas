@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/constant/env";
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -53,8 +54,10 @@ export type AiConfig = {
     canvasImageCount: string;
 };
 
+export type ProxyMode = "direct" | "backend";
+
 export type WebdavSyncConfig = {
-    proxyMode: "direct" | "nextjs";
+    proxyMode: ProxyMode;
     url: string;
     username: string;
     password: string;
@@ -63,7 +66,7 @@ export type WebdavSyncConfig = {
 };
 
 export type ComfyUiConfig = {
-    proxyMode: "direct" | "nextjs";
+    proxyMode: ProxyMode;
     baseUrl: string;
     clientId: string;
     defaultWorkflowId: string;
@@ -136,7 +139,7 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
 };
 
 export const defaultComfyUiConfig: ComfyUiConfig = {
-    proxyMode: "nextjs",
+    proxyMode: "backend",
     baseUrl: "http://127.0.0.1:8188",
     clientId: "flow-canvas",
     defaultWorkflowId: "",
@@ -279,8 +282,8 @@ export const useConfigStore = create<ConfigStore>()(
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
-                    comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi },
+                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav, proxyMode: normalizeProxyMode(persistedWebdav.proxyMode) },
+                    comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi, proxyMode: normalizeProxyMode(persistedComfyUi.proxyMode) },
                     backend: normalizeBackendSyncConfig(persistedBackend),
                     config: {
                         ...config,
@@ -312,6 +315,10 @@ export const useConfigStore = create<ConfigStore>()(
         },
     ),
 );
+
+function normalizeProxyMode(value: unknown): ProxyMode {
+    return value === "backend" || value === "nextjs" ? "backend" : "direct";
+}
 
 function normalizeBackendSyncConfig(source: Partial<BackendSyncConfig>) {
     const backend = { ...defaultBackendSyncConfig, ...source };
@@ -464,7 +471,7 @@ export function buildApiUrl(baseUrl: string, path: string, useProxy = false) {
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     const apiBaseUrl = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") || lowerBaseUrl.endsWith("/api/plan/v3") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
     const finalUrl = `${apiBaseUrl}${path}`;
-    if (useProxy) return `/api/ai-proxy?target=${encodeURIComponent(finalUrl)}`;
+    if (useProxy) return apiUrl(`/api/ai-proxy?target=${encodeURIComponent(finalUrl)}`);
     return finalUrl;
 }
 

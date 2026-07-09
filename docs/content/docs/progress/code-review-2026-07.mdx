@@ -1,0 +1,313 @@
+---
+title: 画布代码审查 2026-07
+description: 画布前端代码 A+C 维度(架构+数据流 / 性能+稳定性)审查报告,产出三档修复清单
+---
+
+# 画布代码审查 2026-07
+
+**审查日期**: 2026-07-09
+**范围**: `web/src/app/(user)/canvas/` 全部 + `web/src/stores/` 画布相关 3 个 store
+**维度**: A 架构 + 数据流 / C 性能 + 稳定性
+**不含**: 3D / 360 / 导演台独立模块(单文件 2000+ 行,体量太大,本轮不深入)、后端 controller、canvas-agent 独立包
+
+## TL;DR
+
+| 维度 | 结论 |
+| --- | --- |
+| **数据流设计** | 双层防抖 + 分片持久化(meta + per-project detail),整体合理 |
+| **持久化失败处理** | `void localForageStorage.setItem(...)` 吞掉 Promise,无回滚无提示 |
+| **模块级单例** | 5 处 `let` 顶层状态(saveTimer / detailSaveTimers / cachedDirectorModel),多画布 tab 有串扰隐患(已部分记录在 `pending-test.mdx` 第 39 条) |
+| **巨型组件** | `canvas-client-page.tsx` 6622 行(60+ useState + 21 useEffect + 60+ useRef),拆分收益高但风险也高 |
+| **三个超大文件** | `canvas-assistant-panel` 1347 / `canvas-node` 1159 / `canvas-local-agent-panel` 1095,各自有清晰的拆分路径 |
+| **错误处理** | agent / assistant 面板覆盖较好;主画布主要靠 `message.error` 提示,无 try/catch 包关键操作 |
+| **可立即修的硬伤** | 3 项 |
+| **建议排期** | 6 项 |
+| **接受现状** | 5 项(都是"未来某天再处理"的债) |
+
+---
+
+## 关键发现(按严重度)
+
+### 🔴 F-1:持久化失败被静默吞掉,没有用户提示
+
+**位置**: `web/src/app/(user)\canvas\stores\use-canvas-store.ts:141`,`:150`,`:192`,`:195`
+
+```ts
+void localForageStorage.setItem(projectDetailKey(project.id), JSON.stringify(toProjectDetail(project)));
+// ...
+void localForageStorage.removeItem(projectDetailKey(id));
+// ...
+void localForageStorage.setItem(name, json);
+// ...
+removeItem: (name) => localForageStorage.removeItem(name),
+```
+
+**问题**: 4 处 `void` 丢掉 Promise rejection。`localForageStorage.setItem` 在以下场景会失败:
+- 浏览器 IndexedDB 配额满(QuotaExceededError)
+- 隐私模式下 Safari 限制 IndexedDB
+- localforage 序列化大对象时 OOM
+
+**影响**: 用户的"保存"在用户看来"成功了"(UI 没报错),但实际没落盘。重启浏览器后才发现画布丢了 1 小时改动。
+
+**建议**:
+- 至少包一层 try/catch + `message.error("保存失败:浏览器存储已满")`
+- 更彻底:加一个"持久化失败队列" + 重试 + 降级到 localStorage 兜底
+
+**严重度**: 高(数据是核心资产)
+**修起来**: 1-2 小时
+
+---
+
+### 🔴 F-2:模块级定时器和单例,多画布 tab 串扰
+
+**位置**:
+- `web/src/app/(user)\canvas\stores\use-canvas-store.ts:42-44`
+  ```ts
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let queuedProjectListJson: string | null = null;
+  const detailSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  ```
+- `web/src/app/(user)\canvas\[id]\canvas-client-page.tsx:20-24`
+  ```ts
+  let cachedDirectorModel: GLTF | null = null;
+  let cachedDirectorModelScale = 1;
+  let directorModelPromise: Promise<GLTF> | null = null;
+  ```
+
+**问题**:
+- 当前单画布 OK,但浏览器多 tab 同时打开 A 画布和 B 画布时:
+  - tab A 的 `detailSaveTimers.set(projectId-A, timer)` 和 tab B 的 `detailSaveTimers.set(projectId-B, timer)` 在**同一个 JS 模块单例**里
+  - 但 localforage 是浏览器全局的(per-origin),所以两 tab 都用同一个底层存储 — 写入不会错位
+  - 真正的风险:**两 tab 都有 setTimeout 写同一个 key,最后一个写赢,中间状态被覆盖**
+  - 同样,`saveTimer` 跨 tab 共享 — tab A 的 list 写到一半,tab B 触发 list 写,会把 tab A 的队列冲掉
+- `cachedDirectorModel` 跨 tab 共享:两个 tab 都引用同一个 GLTF 引用,正常但关闭 tab A 时不会清缓存(预期)
+
+**当前态**: 已知风险,`pending-test.mdx` 第 39 条"画布 drag store 多画布串扰隐患"已记类似问题。
+**为什么重要**: 这条审查触发升级 — 之前只记了"未来多画布再处理",但**现在 store 已经有同样模式**,根因是模块级单例。
+
+**建议**:
+- 把 saveTimer / detailSaveTimers / cachedDirectorModel 改成 `useRef` 持有,绑在组件实例或 store 实例上
+- 或者:把 store 改成 factory 模式,每个 store 实例独立 Map
+- **短期止血**: 加一个 `// TODO(multi-canvas):` 注释,把所有模块级状态标出
+
+**严重度**: 中(单 tab 不影响,多 tab 间歇性丢数据)
+**修起来**: 半天(把模块级状态挪到 useRef / 工厂模式)
+
+---
+
+### 🔴 F-3:`canvas-client-page.tsx` 6622 行巨型组件
+
+**位置**: `web/src/app/(user)\canvas\[id]\canvas-client-page.tsx`
+
+**问题**:
+- 单文件 6622 行,导出 1 个默认组件 `CanvasPage` + 内部 `ReactFlowCanvasPage` 实际工作
+- 同一个函数体内:
+  - 60+ `useState`(L442-492,横跨 50 行)
+  - 21 个 `useEffect`(L567-1599 散落)
+  - 60+ `useRef`(L409-506,横跨 100 行)
+  - 6 个 try/catch(L2059-3381,处理生成/工具调用/导演台)
+- 涵盖:画布状态机、节点 CRUD、连线、history undo/redo、生成请求、Agent bridge、键盘快捷键、Three.js 导演台、剪切板、缩放、resize、文件上传、资产生成
+
+**为什么这样写**: 早期需求简单,所有画布状态耦合在一个 component 里,搬出来会变成"用 5 层 props 透传"。
+
+**风险**:
+- 改一处要扫全文件,新人上手成本极高
+- `useEffect` 依赖经常踩坑(比如 `createHistoryEntry` 进了 useEffect 依赖,useCallback 每次重渲都新建函数引用,effect 频繁触发)
+- React DevTools 里基本没法调试
+
+**建议**:
+- **不重写**,但**先抽出"项目状态层"**:
+  - `useCanvasProjectState.ts` — `nodes / connections / chatSessions / activeChatId / backgroundMode / showImageInfo / viewport` + history
+  - `useCanvasInteractionState.ts` — `selectedNodeIds / selectedConnectionId / hoveredNodeId / dialogNodeId / ...`(所有 UI 临时态)
+  - `useCanvasGenerationState.ts` — `runningNodeId / generationRequestsRef / generationHistoryOpen`
+  - `useCanvasKeyboardShortcuts.ts` — 整个 `handleKeyDown` 抽成 hook
+- 主组件从 6622 行 → 2000 行,只负责 wire-up
+
+**严重度**: 中(不影响功能,影响开发速度)
+**修起来**: 2-3 天(纯 refactor,不改行为)
+**建议**: 跟 B-2 一起做(下面)
+
+---
+
+## 三档修复清单
+
+### 🔥 立即修(1-2 天)
+
+| # | 位置 | 工作量 | 阻塞性 |
+| --- | --- | --- | --- |
+| **F-1** | `use-canvas-store.ts` 持久化错误处理 | 1-2h | 防止数据静默丢失 |
+| **F-2** | 模块级状态全部加 `// TODO(multi-canvas):` 注释 | 0.5h | 不修代码,只是把债标清楚 |
+| **N-1** | `canvas-client-page.tsx:656-670` 双层防抖逻辑确认 | 0.5h | 写一行注释解释为什么 nodes 和 viewport 各自防抖 |
+
+### 🟡 排期修(本季度)
+
+| # | 位置 | 工作量 | 说明 |
+| --- | --- | --- | --- |
+| **B-1** | `canvas-assistant-panel.tsx` 1347 行 → 拆出 `agent-tools.ts` + `agent-loop.ts` + `agent-helpers.ts` | 1 天 | 拆完主组件从 1347 → 800 行 |
+| **B-2** | `canvas-node.tsx` 1159 行 → 拆出 `node-content/` 子目录(8-10 个内容渲染器独立) | 1-2 天 | 拆完主组件从 1159 → 500 行 |
+| **B-3** | `canvas-local-agent-panel.tsx` 1095 行 → 拆出 `local-agent/views/` + `local-agent/format.ts` | 1 天 | 拆完主组件从 1095 → 400 行 |
+| **R-1** | `canvas-client-page.tsx` 6622 行 → 抽出 `useCanvasProjectState` / `useCanvasInteractionState` / `useCanvasGenerationState` 三个 hook | 2-3 天 | 重构不重写,行为不变 |
+| **R-2** | store 模块级状态(2 处)→ 改 useRef 或工厂模式 | 半天 | 跟 F-2 的 TODO 配套,真解决多 tab |
+| **T-1** | `pending-test.mdx` 已经有 41 条,但**本审查独立发现 3 条新债**(F-1/F-2/R-2),按编号补进去 | 0.5h | 文档同步 |
+
+### ⚪ 接受现状(本季度不动,记下)
+
+| # | 位置 | 说明 |
+| --- | --- | --- |
+| **A-1** | `useCanvasStore` 不分 nodes / chatSessions detail | 当前 detail 是单片,如果未来 chat 历史膨胀(>1MB)再拆 |
+| **A-2** | `replaceProjects` 整片替换触发所有项目重写 detail | 一次操作成本可接受,等用户真"批量导入"再优化 |
+| **A-3** | `applyHistory` 用 setTimeout 异步重置 `applyingHistoryRef` | 快速 undo/redo 不会堆积(实际节流 180ms),理论债 |
+| **A-4** | `canvas-client-page.tsx` 的 21 个 useEffect | 行为正确,只是密度高,等 R-1 抽 hook 时一起梳理 |
+| **A-5** | 没有 Vitest / ESLint | `pending-test.mdx` 第 38 条已记,本审查不再重复 |
+
+---
+
+## 详细发现(按维度)
+
+### A 维度:架构 + 数据流
+
+#### 数据流闭环 ✅ 设计合理
+
+```
+组件 useState 变更
+  ↓
+canvas-client-page.tsx:656-670 useEffect (300ms 防抖)
+  ↓
+useCanvasStore.updateProject(id, patch)         (Zustand action)
+  ↓
+use-canvas-store.ts:136 queueProjectDetailSave  (300ms 再防抖)
+  ↓
+localForageStorage.setItem("infinite-canvas:canvas_project:<id>", ...)
+  ↓
+use-canvas-store.ts:171 canvasStorage.getItem
+  → hydrateStoredProject: 读 detail,合并到 project
+```
+
+**评估**: 整体设计有分片(meta vs detail)、有防抖(300ms)、有 hydration 流程,**比"全量 useState 序列化"健壮**。
+
+**已知问题**(已在文档):
+- `hydrated: false` 在 store 初始化时是 false,直到 rehydrate 完成
+- `openProject` 命名误导 — 只从内存找,真正 hydrate 已经在 `getItem` 里完成
+
+#### 双层防抖有意为之,但**应该写注释**
+
+```ts
+// canvas-client-page.tsx:663-670 — 保存 nodes/connections/chatSessions
+useEffect(() => {
+    if (!projectLoaded || historyPausedRef.current) return;
+    if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
+    projectSaveTimerRef.current = setTimeout(() => {
+        projectSaveTimerRef.current = null;
+        updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
+    }, 300);
+}, [...]);
+
+// canvas-client-page.tsx:676-686 — 单独保存 viewport
+useEffect(() => {
+    if (!projectLoaded) return;
+    if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
+    viewportSaveTimerRef.current = setTimeout(() => {
+        updateProject(projectId, { viewport: viewportRef.current });
+        viewportSaveTimerRef.current = null;
+    }, 500);
+}, [...]);
+```
+
+**评估**: viewport 单独防抖是为了避免拖动画布时频繁序列化整个 detail。**这是有意为之的优化**,但**没注释**,下一个改这段代码的人会想"为什么要两份?"。
+
+**建议**: 写一行注释说明 viewport 独立防抖的意图(已经在 N-1)。
+
+#### 节点生命周期 ✅ 边界处理得当
+
+- `deleteNodes` (L1128-1169) — 处理了 batch children、connections、UI 临时态(8 个 setXxx 清理)
+- `duplicateNode` (L1216-1232) — 简单深拷贝 + 偏移 36px
+- `copySelectedNodes` / `pasteCopiedNodes` (L1234-1307) — 完整支持 batch + connections 重映射
+
+**唯一可优化点**: `copySelectedNodes` 的 metadata 深拷贝只到一层,如果 metadata 含 `scriptBody: string`/`directorCaptures: Array<{ dataUrl: string }>` 等深层数据,粘贴后修改副本不会影响源。**当前场景下用户改副本不影响源,反而是想要的行为** — 接受现状。
+
+### C 维度:性能 + 稳定性
+
+#### `useEffect` 密度
+
+| 文件 | useEffect 数量 |
+| --- | --- |
+| `canvas-client-page.tsx` | **21** |
+| `canvas-node.tsx` | 9 |
+| `canvas-local-agent-panel.tsx` | 9 |
+| `react-flow-canvas.tsx` | 6 |
+| `canvas-config-node-panel.tsx` | 4 |
+| 其它 | < 4 |
+
+**评估**:
+- `canvas-client-page.tsx` 的 21 个 useEffect 全在一个组件里,**跟 60+ useState 配套** — 这是组件巨型的副作用密度
+- 单 effect 行为正确,但**集中在 L567-1599 横跨 1000 行**,改动时容易踩"加新 useState 忘了同步 effect 依赖"的坑
+
+#### `React.memo` + 自定义 comparator ✅ `canvas-node.tsx` 优化到位
+
+```ts
+// canvas-node.tsx:120-143
+function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
+    if (prev.data !== next.data) return false;
+    if (prev.isSelected !== next.isSelected) return false;
+    // ... 18 个字段手动比较,跳过 callback
+    return true;
+}
+
+export const CanvasNode = React.memo(function CanvasNode({...}) {
+    // ...
+}, canvasNodePropsEqual);
+```
+
+**评估**: 这个自定义 comparator 跳过了 callback prop(避免每次重渲都 new function),只比较 data 引用 + 关键 boolean/enum。**做得很细**,跟 `react-flow-canvas.tsx` 的 `useStableReactFlowNodes` 是同一套设计。
+
+#### `useStableReactFlowNodes` ✅ 拖动避免 re-render loop
+
+`react-flow-canvas.tsx:68-76` 用了 `useMemo` + `previousRef` 做 React Flow 节点的稳定引用,避免 StoreUpdater 内部循环。**这是上一个大改动的成果**,不重复评。
+
+#### 模块级单例 ⚠️ F-2 已详述
+
+#### 持久化失败吞错 ⚠️ F-1 已详述
+
+#### 错误处理覆盖率
+
+| 文件 | try/catch 数量 | 评估 |
+| --- | --- | --- |
+| `canvas-assistant-panel.tsx` | 5 | 覆盖好,关键调用都有 |
+| `canvas-local-agent-panel.tsx` | 8 | 覆盖好 |
+| `canvas-client-page.tsx` | 6 | **数量够,但集中在 Three.js 导演台(L2059-3381)**;节点 CRUD / 持久化 / store update 全靠 `message.error` 兜底 |
+
+**评估**: 主画布的非导演台路径靠 antd `App.useApp().message` 提示错误。**如果 message 失败(比如 antd 主题渲染挂),用户根本不知道生成失败了**。建议在 `applyAgentOps` / `deleteNodes` / `createImageFileNode` 等关键路径加 try/catch + console.error 双兜底。
+
+---
+
+## 不在本审查范围
+
+- `canvas-node-generation.ts` / `canvas-toolbar.tsx` / `canvas-config-composer.tsx` 等中等文件(150-540 行): 抽样看过,结构合理,无明显问题
+- Three.js 导演台代码(`canvas-client-page.tsx:2000-3400` 范围): 体量大,涉及 GLTF / SkinnedMesh / WebGL context,需要独立审查
+- 后端 `Workflow` controller / `Config` controller 跟画布的交互: 走的是配置同步,主流程不依赖
+- canvas-agent 独立 npm 包: 通过 HTTP 跟画布通信,有清晰的边界
+
+---
+
+## 跟 `pending-test.mdx` 的关系
+
+本审查**不重复**已记录的待测项(41 条),只**独立发现 3 条新债**:
+
+| 新债 | 对应 pending-test 条目 |
+| --- | --- |
+| F-1 持久化失败被吞 | (新) |
+| F-2 模块级状态多 tab 串扰 | 部分重叠第 39 条("画布 drag store 多画布串扰隐患")—— 升级:从 drag store 扩展到所有 store |
+| R-2 store 工厂模式重构 | 跟进第 39 条,本审查给出具体方案 |
+
+建议把这 3 条按"代码审查待办"格式加进 `pending-test.mdx` 末尾,标 `[review-2026-07]` 来源。
+
+---
+
+## Next Step
+
+按你的意思,本审查**只产报告,不改代码**。建议下一步:
+1. 把 F-1 / F-2 / N-1 三条加进 `pending-test.mdx`,等下次有空修
+2. 排 R-1 / B-1 / B-2 / B-3 四个重构到 v0.x "清理 + 文档同步" Phase 19-20,跟 3D 导演台独立审查配套
+3. 导演台独立审查(类似规模,2000+ 行)单开一份报告
+
+如果你只想动 F-1(数据丢失风险),我可以现在就出 1-2 小时的 hotfix patch,你看看。

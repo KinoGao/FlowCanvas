@@ -6,7 +6,9 @@ import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { isSeedreamImageModel, resolveSeedreamSize, seedreamEditError, seedreamGenerationError, seedreamSupportsOutputFormat } from "@/lib/seedream-image";
+import { uploadImageToCurrentBackend } from "@/services/api/backend";
 import { imageToDataUrl, imageToFile } from "@/services/image-storage";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -58,6 +60,20 @@ type ResponseApiPayload = {
     code?: number;
     msg?: string;
 };
+type ChatMessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+type ChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: ChatMessageContent; tool_call_id?: string; tool_calls?: ResponseToolCall[] };
+type ChatToolDefinition = ResponseFunctionTool;
+type ChatCompletionPayload = {
+    choices?: Array<{
+        delta?: { content?: string; tool_calls?: ChatDeltaToolCall[] };
+        message?: { content?: string | null; tool_calls?: ResponseToolCall[] };
+    }>;
+    error?: { message?: string };
+    code?: number;
+    msg?: string;
+};
+type ChatDeltaToolCall = { index?: number; id?: string; type?: "function"; function?: { name?: string; arguments?: string } };
+type ChatStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
 
 type ImageApiResponse = {
@@ -314,6 +330,43 @@ function toResponseTool(tool: ResponseFunctionTool): ResponseApiToolDefinition {
     };
 }
 
+function toChatMessages(messages: ResponseInputMessage[]): ChatMessage[] {
+    return messages.flatMap((message): ChatMessage[] => {
+        if ("type" in message) {
+            return [
+                {
+                    role: "assistant",
+                    tool_calls: [
+                        {
+                            id: message.call_id,
+                            type: "function",
+                            function: { name: message.name, arguments: message.arguments },
+                        },
+                    ],
+                },
+            ];
+        }
+        if (message.role === "tool") return [{ role: "tool", tool_call_id: message.tool_call_id, content: message.content }];
+        return [{ role: message.role, content: message.content }];
+    });
+}
+
+function toChatToolChoice(toolChoice: ToolChoice) {
+    if (typeof toolChoice === "object") return { type: "function", function: { name: toolChoice.name } };
+    return toolChoice;
+}
+
+function toChatTool(tool: ResponseFunctionTool): ChatToolDefinition {
+    return tool;
+}
+
+function parseChatToolResponse(payload: ChatCompletionPayload): ToolResponseResult {
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
+    if (payload.error?.message) throw new Error(payload.error.message);
+    const message = payload.choices?.[0]?.message;
+    return { content: message?.content || "", toolCalls: message?.tool_calls || [] };
+}
+
 function parseToolResponse(payload: ResponseApiPayload): ToolResponseResult {
     const output = payload.output || [];
     const content =
@@ -410,8 +463,54 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     }
 }
 
-async function requestStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(aiApiUrl(config, "/responses"), {
+function consumeChatStreamBlock(block: string, state: ChatStreamState, onDelta?: (text: string) => void) {
+    const data = block
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""))
+        .join("\n")
+        .trim();
+    if (!data || data === "[DONE]") return;
+    const payload = JSON.parse(data) as ChatCompletionPayload;
+    const errorMessage = responseErrorMessage(payload);
+    if (errorMessage) state.error = errorMessage;
+    const delta = payload.choices?.[0]?.delta;
+    if (delta?.content) {
+        state.text += delta.content;
+        onDelta?.(state.text);
+    }
+    delta?.tool_calls?.forEach((item) => mergeChatDeltaToolCall(state.toolCalls, item));
+}
+
+function consumeChatStreamText(state: ChatStreamState, text: string, onDelta?: (text: string) => void, flush = false) {
+    state.buffer += text;
+    for (;;) {
+        const match = state.buffer.match(/\r?\n\r?\n/);
+        if (!match) break;
+        consumeChatStreamBlock(state.buffer.slice(0, match.index!), state, onDelta);
+        state.buffer = state.buffer.slice(match.index! + match[0].length);
+    }
+    if (flush && state.buffer.trim()) {
+        consumeChatStreamBlock(state.buffer, state, onDelta);
+        state.buffer = "";
+    }
+}
+
+function mergeChatDeltaToolCall(toolCalls: ResponseToolCall[], delta: ChatDeltaToolCall) {
+    const index = delta.index ?? toolCalls.length;
+    const existing = toolCalls[index] || { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+    toolCalls[index] = {
+        id: delta.id || existing.id,
+        type: "function",
+        function: {
+            name: delta.function?.name || existing.function.name,
+            arguments: `${existing.function.arguments || ""}${delta.function?.arguments || ""}`,
+        },
+    };
+}
+
+async function requestStreamingChatCompletion(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
+    const response = await fetch(aiApiUrl(config, "/chat/completions"), {
         method: "POST",
         headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
         body: JSON.stringify({ ...body, stream: true }),
@@ -419,26 +518,21 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
     if (!response.body) {
-        const payload = (await response.json()) as ResponseApiPayload;
-        validateResponsePayload(payload);
-        return parseToolResponse(payload);
+        return parseChatToolResponse((await response.json()) as ChatCompletionPayload);
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const state: ResponseStreamState = { buffer: "", text: "" };
+    const state: ChatStreamState = { buffer: "", text: "", toolCalls: [] };
     for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        consumeResponseStreamText(state, decoder.decode(value, { stream: true }), onDelta);
+        consumeChatStreamText(state, decoder.decode(value, { stream: true }), onDelta);
         if (state.error) throw new Error(state.error);
     }
-    consumeResponseStreamText(state, decoder.decode(), onDelta, true);
+    consumeChatStreamText(state, decoder.decode(), onDelta, true);
     if (state.error) throw new Error(state.error);
-    if (!state.payload) return { content: state.text, toolCalls: [] };
-    validateResponsePayload(state.payload);
-    const result = parseToolResponse(state.payload);
-    return { ...result, content: state.text || result.content };
+    return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name) };
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {
@@ -720,22 +814,58 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 async function requestAgnesImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, size: string | undefined, options?: RequestOptions) {
     try {
-        const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const images = await Promise.all(references.map((image) => agnesReferenceImageInput(image, options?.signal)));
+        const responseFormat = agnesImageResponseFormat(config, config.model);
         const body: Record<string, unknown> = {
             model: config.model,
             prompt,
             n,
             ...(size ? { size } : {}),
-            extra_body: {
-                response_format: agnesImageResponseFormat(config, config.model),
-                ...(images.length ? { image: images } : {}),
-            },
         };
+        if (images.length) body.image = images.length === 1 ? images[0] : images;
+        if (responseFormat === "b64_json" || config.imageResponseFormat === "url") body.response_format = responseFormat;
         const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
         return parseImagePayload(response.data, config.useProxy);
     } catch (error) {
-        throw new Error(readAxiosError(error, "请求失败"));
+        throw new Error(readAgnesImageError(error, size));
     }
+}
+
+async function agnesReferenceImageInput(image: ReferenceImage, signal?: AbortSignal) {
+    const directUrl = image.url || "";
+    if (isPublicImageUrl(directUrl)) return directUrl;
+
+    const token = useUserStore.getState().token;
+    if (token.trim()) {
+        try {
+            const file = await imageToFile(image);
+            const publicUrl = await uploadImageToCurrentBackend(token, file, image.name || file.name || "reference.png");
+            if (isPublicImageUrl(publicUrl)) return publicUrl;
+        } catch {
+            // Agnes supports base64 for image-to-image, so backend public URL upload is only an optimization.
+        }
+    }
+
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    return imageToDataUrl(image);
+}
+
+function isPublicImageUrl(url: string) {
+    if (!/^https?:\/\//i.test(url)) return false;
+    try {
+        const host = new URL(url).hostname.toLowerCase();
+        return host !== "localhost" && host !== "127.0.0.1" && host !== "::1";
+    } catch {
+        return false;
+    }
+}
+
+function readAgnesImageError(error: unknown, size: string | undefined) {
+    const message = readAxiosError(error, "请求失败");
+    if (axios.isAxiosError(error) && error.response?.status === 500) {
+        return `${message}。Agnes 500 通常是请求参数异常；当前 size=${size || "auto"}，图生图参考图已按公网 URL/base64 传给 image 字段。`;
+    }
+    return message;
 }
 
 async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, quality: string, size: string, options?: RequestOptions) {
@@ -771,11 +901,11 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         }
         const answer =
             (
-                await requestStreamingResponse(
+                await requestStreamingChatCompletion(
                     requestConfig,
                     {
                         model: requestConfig.model,
-                        input: toResponseInput(withSystemMessage(requestConfig, messages)),
+                        messages: toChatMessages(withSystemMessage(requestConfig, messages)),
                     },
                     onDelta,
                     options,
@@ -794,13 +924,13 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
         if (requestConfig.apiFormat === "gemini") {
             return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
         }
-        return await requestStreamingResponse(
+        return await requestStreamingChatCompletion(
             requestConfig,
             {
                 model: requestConfig.model,
-                input: toResponseInput(withSystemMessage(requestConfig, messages)),
-                tools: tools.map(toResponseTool),
-                tool_choice: toolChoice,
+                messages: toChatMessages(withSystemMessage(requestConfig, messages)),
+                tools: tools.map(toChatTool),
+                tool_choice: toChatToolChoice(toolChoice),
                 parallel_tool_calls: false,
             },
             onDelta,

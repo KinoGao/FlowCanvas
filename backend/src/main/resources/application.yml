@@ -1,4 +1,9 @@
 spring:
+  config:
+    import:
+      - optional:file:./backend-config.yml
+      - optional:file:./backend/backend-config.yml
+      - optional:file:./data/backend-config.yml
   datasource:
     url: jdbc:sqlite:${DB_PATH:./data/app.db}
     driver-class-name: org.sqlite.JDBC
@@ -9,9 +14,12 @@ spring:
     show-sql: false
 
 server:
-  port: ${PORT:4001}
+  port: ${PORT:9801}
 
 app:
   auth-code: ${AUTH_CODE:gycode}
+  public-base-url: ${PUBLIC_BASE_URL:}
+  comfyui-base-url: ${COMFYUI_BASE_URL:}
   public-image-dir: ${PUBLIC_IMAGE_DIR:./data/public-images}
+  user-file-dir: ${USER_FILE_DIR:./data/user-files}
   workflow-dir: ${WORKFLOW_DIR:./data/workflows}

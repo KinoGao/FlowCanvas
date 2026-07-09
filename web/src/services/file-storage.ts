@@ -2,6 +2,8 @@
 
 import localforage from "localforage";
 import { nanoid } from "nanoid";
+import { backendFileUrl, uploadBackendFile } from "@/services/api/backend-storage";
+import { useUserStore } from "@/stores/use-user-store";
 import { createBlobStorage } from "./blob-storage";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
@@ -11,6 +13,13 @@ const mediaBlobs = createBlobStorage(store);
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const { saveMode, token } = useUserStore.getState();
+    if (saveMode === "backend" && token) {
+        const uploaded = await uploadBackendFile(token, blob, `${prefix}.${fileExtension(blob.type)}`);
+        const url = backendFileUrl(uploaded.storageKey, token);
+        const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
+        return { url, storageKey: uploaded.storageKey, bytes: uploaded.bytes, mimeType: uploaded.mimeType || blob.type || "application/octet-stream", ...meta };
+    }
     const storageKey = `${prefix}:${nanoid()}`;
     const url = await mediaBlobs.setBlob(storageKey, blob);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
@@ -19,18 +28,32 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
 
 /** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
 export function peekCachedMediaUrl(storageKey?: string): string | undefined {
+    if (storageKey?.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        return token ? backendFileUrl(storageKey, token) : undefined;
+    }
     return mediaBlobs.peekUrl(storageKey);
 }
 
 export function resolveMediaUrl(storageKey?: string, fallback = "") {
+    if (storageKey?.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        return Promise.resolve(token ? backendFileUrl(storageKey, token) : fallback);
+    }
     return mediaBlobs.resolveUrl(storageKey, fallback);
 }
 
 export function getMediaBlob(storageKey: string) {
+    if (storageKey.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        if (!token) return Promise.resolve(null);
+        return fetch(backendFileUrl(storageKey, token)).then((response) => (response.ok ? response.blob() : null));
+    }
     return mediaBlobs.getBlob(storageKey);
 }
 
 export function setMediaBlob(storageKey: string, blob: Blob) {
+    if (storageKey.startsWith("backend:")) return Promise.resolve(backendFileUrl(storageKey, useUserStore.getState().token));
     return mediaBlobs.setBlob(storageKey, blob);
 }
 
@@ -67,4 +90,12 @@ function readAudioMeta(url: string) {
         audio.onerror = done;
         audio.src = url;
     });
+}
+
+function fileExtension(mimeType: string) {
+    if (mimeType.includes("mp4")) return "mp4";
+    if (mimeType.includes("webm")) return "webm";
+    if (mimeType.includes("wav")) return "wav";
+    if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+    return "bin";
 }

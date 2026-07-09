@@ -3,13 +3,13 @@ services:
     image: ghcr.io/basketikun/infinite-canvas:latest
     container_name: infinite-canvas
     ports:
-      - "4000:4000"
+      - "9800:9800"
     restart: unless-stopped
   backend:
     image: ghcr.io/basketikun/infinite-canvas-backend:latest
     container_name: infinite-canvas-backend
     ports:
-      - "4001:4001"
+      - "9801:9801"
     restart: unless-stopped
     volumes:
       - ./data:/app/data

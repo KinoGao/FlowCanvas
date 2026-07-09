@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Empty, Input, Modal, Pagination, Tag } from "antd";
-import { Search } from "lucide-react";
+import { Music2, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
@@ -10,7 +10,8 @@ import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
     | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
-    | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number };
+    | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number }
+    | { kind: "audio"; url: string; title: string; storageKey?: string; mimeType?: string; durationMs?: number };
 
 type Props = {
     open: boolean;
@@ -33,6 +34,7 @@ const kindOptions = [
     { label: "文本", value: "text" },
     { label: "图片", value: "image" },
     { label: "视频", value: "video" },
+    { label: "音频", value: "audio" },
 ];
 
 function PickerCard({ title, kind, cover, onClick }: { title: string; kind: string; cover: string; onClick: () => void }) {
@@ -42,7 +44,12 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
             className="group relative cursor-pointer overflow-hidden rounded-lg border border-stone-200 bg-white text-left transition hover:border-stone-400 hover:shadow-md dark:border-stone-700 dark:bg-stone-900 dark:hover:border-stone-500"
             onClick={onClick}
         >
-            {cover ? (
+            {kind === "audio" ? (
+                <div className="flex aspect-[4/3] flex-col items-center justify-center gap-2 bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">
+                    <Music2 className="size-6" />
+                    <span className="line-clamp-2">{title}</span>
+                </div>
+            ) : cover ? (
                 <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" />
             ) : (
                 <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">{title}</div>
@@ -50,7 +57,7 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
             <div className="p-2.5">
                 <div className="flex items-center justify-between gap-2">
                     <span className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{title}</span>
-                    <Tag className="m-0 shrink-0 text-[10px]">{kind === "image" ? "图片" : kind === "video" ? "视频" : "文本"}</Tag>
+                    <Tag className="m-0 shrink-0 text-[10px]">{kind === "image" ? "图片" : kind === "video" ? "视频" : kind === "audio" ? "音频" : "文本"}</Tag>
                 </div>
             </div>
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">插入</div>
@@ -67,7 +74,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
         return assets
-            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video")
+            .filter((a) => a.kind === "text" || a.kind === "image" || a.kind === "video" || a.kind === "audio")
             .filter((a) => kindFilter === "all" || a.kind === kindFilter)
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
     }, [assets, keyword, kindFilter]);
@@ -82,6 +89,8 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
     const handleInsert = (asset: Asset) => {
         if (asset.kind === "text") {
             onInsert({ kind: "text", content: asset.data.content, title: asset.title });
+        } else if (asset.kind === "audio") {
+            onInsert({ kind: "audio", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, mimeType: asset.data.mimeType, durationMs: asset.data.durationMs });
         } else {
             onInsert(
                 asset.kind === "video"

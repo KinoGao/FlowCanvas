@@ -11,7 +11,7 @@
   <a href="VERSION"><img src="https://img.shields.io/badge/version-v0.2.0-2563eb?style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-f97316?style=flat-square" alt="License"></a>
   <a href="https://vercel.com/"><img src="https://img.shields.io/badge/Vercel-ready-000000?style=flat-square&logo=vercel" alt="Vercel ready"></a>
-  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-16.2-000000?style=flat-square&logo=nextdotjs" alt="Next.js"></a>
+  <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-React-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite React"></a>
 </p>
 
 无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
@@ -27,7 +27,7 @@
 - AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
 - 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
 - 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
-- 提示词库：Next.js route 抓取多个 GitHub 开源项目，并缓存在运行实例内存中。
+- 提示词库：Spring Boot 后端抓取多个 GitHub 开源项目，并缓存在运行实例内存中。
 
 完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
 
@@ -35,13 +35,13 @@
 
 ## 技术栈
 
-- 前端：Next.js、React、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
-- 少量 Next.js Route：第三方提示词内存缓存、WebDAV 可选代理。
+- 前端：Vite、React、React Flow、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
+- 后端：Spring Boot 提供配置同步、提示词缓存、WebDAV/ComfyUI/AI 可选代理。
 - 部署：Vercel 或 Docker。
 
 ## 快速开始
 
-推荐直接导入仓库到 Vercel，根目录已提供 `vercel.json`，会构建 `web/`。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
+推荐先启动后端，再进入 `web/` 启动 Vite 前端。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
 
 ```bash
 git clone git@github.com:basketikun/infinite-canvas.git
@@ -55,10 +55,10 @@ Docker 运行：
 
 ```bash
 docker build -t infinite-canvas .
-docker run --rm -p 4000:4000 infinite-canvas
+docker run --rm -p 9800:9800 infinite-canvas
 ```
 
-运行后默认端口4000，可访问 `http://localhost:4000`。
+运行后默认端口9800，可访问 `http://localhost:9800`。
 
 首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
 

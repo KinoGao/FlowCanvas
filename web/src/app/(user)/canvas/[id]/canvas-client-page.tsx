@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { Connection, Edge, EdgeTypes, NodeChange, NodeTypes, OnConnectEnd, OnConnectStart, OnNodeDrag, OnSelectionChangeFunc } from "@xyflow/react";
-import { useParams, useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
-import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { Connection, Edge, EdgeMouseHandler, EdgeTypes, NodeChange, NodeTypes, OnConnectEnd, OnConnectStart, OnNodeDrag, OnSelectionChangeFunc } from "@xyflow/react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Bot, Box, ChevronDown, FileText, FolderOpen, Home, ImageIcon, Images, Link2, List, Menu, Music2, Plus, Search, Settings2, Share2, Trash2, Upload, Video, X, Zap } from "lucide-react";
+import * as THREE from "three";
+
+const REACT_FLOW_NODE_TYPES: NodeTypes = { [CANVAS_NODE_TYPE]: ReactFlowCanvasNode };
+const REACT_FLOW_EDGE_TYPES: EdgeTypes = reactFlowCanvasEdgeTypes;
+
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -13,19 +17,17 @@ import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audi
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
-import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { imageToDataUrl, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
-import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
-import { App, Button, Dropdown, Modal } from "antd";
+import { App, Button, Dropdown, Modal, message } from "antd";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import type { CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -47,6 +49,7 @@ import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, nor
 import { CANVAS_EDGE_TYPE, CANVAS_NODE_TYPE, CANVAS_SOURCE_HANDLE, CANVAS_TARGET_HANDLE } from "../utils/react-flow-adapter";
 import { buildSpatialIndex, querySpatialIndex, type CanvasSpatialRect } from "../utils/canvas-spatial-index";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import { DirectorThreeStage } from "../director/director-three-stage";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
@@ -97,23 +100,147 @@ const VIDEO_NODE_MAX_HEIGHT = 420;
 const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const CANVAS_OVERVIEW_SCALE = 0.24;
 
-const CanvasConfigNodePanel = dynamic(() => import("../components/canvas-config-node-panel").then((mod) => mod.CanvasConfigNodePanel), { ssr: false });
-const CanvasAssistantPanel = dynamic(() => import("../components/canvas-assistant-panel").then((mod) => mod.CanvasAssistantPanel), { ssr: false });
-const CanvasNodeContextMenu = dynamic(() => import("../components/canvas-context-menu").then((mod) => mod.CanvasNodeContextMenu), { ssr: false });
-const CanvasNodeAngleDialog = dynamic(() => import("../components/canvas-node-angle-dialog").then((mod) => mod.CanvasNodeAngleDialog), { ssr: false });
-const CanvasNodeCropDialog = dynamic(() => import("../components/canvas-node-crop-dialog").then((mod) => mod.CanvasNodeCropDialog), { ssr: false });
-const CanvasNodeMaskEditDialog = dynamic(() => import("../components/canvas-node-mask-edit-dialog").then((mod) => mod.CanvasNodeMaskEditDialog), { ssr: false });
-const CanvasNodeSplitDialog = dynamic(() => import("../components/canvas-node-split-dialog").then((mod) => mod.CanvasNodeSplitDialog), { ssr: false });
-const CanvasNodeUpscaleDialog = dynamic(() => import("../components/canvas-node-upscale-dialog").then((mod) => mod.CanvasNodeUpscaleDialog), { ssr: false });
-const CanvasNodeHoverToolbar = dynamic(() => import("../components/canvas-node-hover-toolbar").then((mod) => mod.CanvasNodeHoverToolbar), { ssr: false });
-const CanvasNodeInfoModal = dynamic(() => import("../components/canvas-node-hover-toolbar").then((mod) => mod.CanvasNodeInfoModal), { ssr: false });
-const CanvasNodePromptPanel = dynamic(() => import("../components/canvas-node-prompt-panel").then((mod) => mod.CanvasNodePromptPanel), { ssr: false });
-const AssetPickerModal = dynamic(() => import("../components/asset-picker-modal").then((mod) => mod.AssetPickerModal), { ssr: false });
+const CanvasConfigNodePanel = lazy(() => import("../components/canvas-config-node-panel").then((mod) => ({ default: mod.CanvasConfigNodePanel })));
+const CanvasAssistantPanel = lazy(() => import("../components/canvas-assistant-panel").then((mod) => ({ default: mod.CanvasAssistantPanel })));
+const CanvasNodeContextMenu = lazy(() => import("../components/canvas-context-menu").then((mod) => ({ default: mod.CanvasNodeContextMenu })));
+const CanvasNodeAngleDialog = lazy(() => import("../components/canvas-node-angle-dialog").then((mod) => ({ default: mod.CanvasNodeAngleDialog })));
+const CanvasNodeCropDialog = lazy(() => import("../components/canvas-node-crop-dialog").then((mod) => ({ default: mod.CanvasNodeCropDialog })));
+const CanvasNodeMaskEditDialog = lazy(() => import("../components/canvas-node-mask-edit-dialog").then((mod) => ({ default: mod.CanvasNodeMaskEditDialog })));
+const CanvasNodeSplitDialog = lazy(() => import("../components/canvas-node-split-dialog").then((mod) => ({ default: mod.CanvasNodeSplitDialog })));
+const CanvasNodeUpscaleDialog = lazy(() => import("../components/canvas-node-upscale-dialog").then((mod) => ({ default: mod.CanvasNodeUpscaleDialog })));
+const CanvasNodeHoverToolbar = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeHoverToolbar })));
+const CanvasNodeInfoModal = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeInfoModal })));
+const CanvasNodePromptPanel = lazy(() => import("../components/canvas-node-prompt-panel").then((mod) => ({ default: mod.CanvasNodePromptPanel })));
+const AssetPickerModal = lazy(() => import("../components/asset-picker-modal").then((mod) => ({ default: mod.AssetPickerModal })));
+const LazyCanvasFallback = <div className="pointer-events-none absolute inset-0" />;
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
 const EMPTY_INPUT_SUMMARY = { textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 };
+const DEFAULT_DIRECTOR_SCENE_SETTINGS = {
+    scale: 300,
+    translate: { x: 0, y: 0, z: 0 },
+    rotate: { x: 0, y: 0, z: 0 },
+    skyColor: "#060608",
+    panoramaRotation: 0,
+    panoramaRadius: 60,
+    characterLabels: true,
+    gridSnap: false,
+    groundVisible: true,
+    groundOpacity: 0.4,
+    groundHeight: 0,
+};
+type DirectorCharacterData = NonNullable<CanvasNodeMetadata["directorCharacters"]>[number];
+type DirectorPoseData = NonNullable<DirectorCharacterData["pose"]>;
+
+const DEFAULT_DIRECTOR_POSE = {
+    headYaw: 0,
+    headPitch: 0,
+    headRoll: 0,
+    torsoTwist: 0,
+    torsoLean: 0,
+    torsoBend: 0,
+    leftArm: 0,
+    leftArmFwd: 0,
+    leftElbow: 0,
+    rightArm: 0,
+    rightArmFwd: 0,
+    rightElbow: 0,
+    leftLeg: 0,
+    leftHipSpread: 0,
+    leftKnee: 0,
+    rightLeg: 0,
+    rightHipSpread: 0,
+    rightKnee: 0,
+};
+// 20 个预设姿势（对标 LibTV 导演台）。角度符号基于 Xbot Mixamo 骨骼朝向推导，可能需可视化微调。
+const DIRECTOR_POSE_PRESETS: Array<{ id: string; name: string; pose: Partial<DirectorPoseData> }> = [
+    { id: "stand", name: "站立", pose: {} },
+    { id: "tpose", name: "T型", pose: { leftArm: 90, rightArm: 90 } },
+    { id: "walk", name: "行走", pose: { leftArm: 25, rightArm: -25, leftLeg: 20, rightLeg: -20, torsoTwist: 8 } },
+    { id: "run", name: "跑步", pose: { leftArm: 45, rightArm: -45, leftLeg: 35, rightLeg: -35, torsoLean: 10, torsoTwist: 12 } },
+    { id: "sit", name: "坐姿", pose: { leftLeg: 85, rightLeg: 85, leftKnee: 85, rightKnee: 85, torsoLean: -5 } },
+    { id: "squat", name: "蹲下", pose: { leftLeg: 70, rightLeg: 70, leftKnee: 90, rightKnee: 90, torsoLean: 20 } },
+    { id: "kneel1", name: "单膝跪", pose: { leftLeg: 80, leftKnee: 90, rightLeg: 30, rightKnee: 60, torsoLean: 10 } },
+    { id: "kneel2", name: "双膝跪", pose: { leftLeg: 90, rightLeg: 90, leftKnee: 90, rightKnee: 90, torsoLean: 25 } },
+    { id: "akimbo", name: "叉腰", pose: { leftArm: 35, rightArm: 35, leftElbow: -60, rightElbow: -60, leftArmFwd: 25, rightArmFwd: 25 } },
+    { id: "lean", name: "倚靠", pose: { torsoLean: -10, torsoBend: 8, leftArm: 10, rightArm: -5, headPitch: -5 } },
+    { id: "bow", name: "鞠躬", pose: { torsoLean: 35, headPitch: 10, leftArm: 5, rightArm: 5 } },
+    { id: "think", name: "思考", pose: { headRoll: 15, headPitch: -10, leftArm: 25, leftElbow: -80, leftArmFwd: 35 } },
+    { id: "fight", name: "格斗", pose: { leftArm: 50, rightArm: 40, leftElbow: -50, rightElbow: -50, leftArmFwd: 35, rightArmFwd: 35, torsoTwist: 15, leftLeg: 15, rightLeg: -10, torsoLean: 5 } },
+    { id: "kick", name: "踢球", pose: { rightLeg: 60, leftLeg: -5, torsoLean: -10, leftArm: -20, rightArm: 30, torsoTwist: -10 } },
+    { id: "throw", name: "投掷", pose: { rightArm: 80, rightElbow: -40, rightArmFwd: 45, torsoTwist: 20, leftArm: -15, leftLeg: 10, rightLeg: -15 } },
+    { id: "push", name: "推进", pose: { leftArm: 40, rightArm: 40, leftArmFwd: 55, rightArmFwd: 55, leftElbow: -30, rightElbow: -30, torsoLean: 10, leftLeg: 10, rightLeg: -10 } },
+    { id: "wave", name: "招手", pose: { rightArm: 70, rightElbow: -30, rightArmFwd: 25, headYaw: 10 } },
+    { id: "reach", name: "伸手", pose: { rightArm: 60, rightArmFwd: 65, rightElbow: -10, torsoLean: 5 } },
+    { id: "cross", name: "抱臂", pose: { leftArm: 40, rightArm: 40, leftElbow: -75, rightElbow: -75, leftArmFwd: 35, rightArmFwd: 35, torsoLean: -5 } },
+    { id: "phone", name: "看手机", pose: { headPitch: 25, leftArm: 30, leftElbow: -85, leftArmFwd: 45, rightArm: 10, rightElbow: -20 } },
+];
+
+const DIRECTOR_CHARACTER_COLORS = ["#4f8ef7", "#f472b6", "#34d399", "#fbbf24", "#a78bfa", "#fb7185", "#22d3ee", "#f97316"];
+const DIRECTOR_TYPE_LABELS: Record<NonNullable<DirectorCharacterData["type"]>, string> = { male: "男", female: "女", child: "儿童", tall: "高个", short: "矮个", heavy: "壮硕", slim: "苗条" };
+
+const DEFAULT_DIRECTOR_CHARACTERS: DirectorCharacterData[] = [{ id: "char-a", name: "角色A", color: "#4f8ef7", type: "male", position: { x: 0, y: 0, z: 0 }, rotation: 0, scale: 1, pose: { ...DEFAULT_DIRECTOR_POSE }, visible: true, locked: false }];
+
+function makeDirectorCharacter(index: number): DirectorCharacterData {
+    return {
+        id: `char-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+        name: `角色${String.fromCharCode(65 + (index % 26))}`,
+        color: DIRECTOR_CHARACTER_COLORS[index % DIRECTOR_CHARACTER_COLORS.length],
+        type: "male",
+        position: { x: (index - 1) * 1.8, y: 0, z: 0 },
+        rotation: 0,
+        scale: 1,
+        pose: { ...DEFAULT_DIRECTOR_POSE },
+        visible: true,
+        locked: false,
+    };
+}
+const DEFAULT_DIRECTOR_SHOTS = [
+    {
+        id: "camera-1",
+        name: "机位1",
+        camera: "35mm 标准镜头 / 平视横移",
+        prompt: "捕捉角色A在场景中的站位、动作和空间关系",
+        fov: 50,
+        position: { x: 0, y: 2.2, z: 10 },
+        target: { x: 0, y: 1.2, z: 0 },
+        targetMode: "manual" as const,
+        visible: true,
+        locked: false,
+    },
+    {
+        id: "camera-2",
+        name: "机位2",
+        camera: "50mm 标准镜头 / 正面构图",
+        prompt: "记录角色A的主体画面，保持画面稳定清晰",
+        fov: 45,
+        position: { x: 3, y: 2.4, z: 8 },
+        target: { x: 0, y: 1.2, z: 0 },
+        targetMode: "manual" as const,
+        visible: true,
+        locked: false,
+    },
+];
+const DEFAULT_SCRIPT_BODY = `第一幕：主角进入一个陌生空间，发现关键道具。
+第二幕：角色做出选择，环境开始发生变化。
+第三幕：情绪抵达高潮，画面停在最有记忆点的动作上。`;
+const DEFAULT_PANORAMA_360_PROMPT = `生成一张真实可用于 Three.js 球形内壁贴图的 360 度室内全景图。
+要求：2:1 equirectangular panorama，完整无缝环绕，左右边缘可无缝拼接，相机位于房间中心，超广角但不要鱼眼边框，水平视线，现代明亮室内空间，自然阳光，真实材质，高清细节。
+禁止：普通单向照片、透视断裂、文字、水印、人物、黑边、局部裁切。`;
+const MATERIAL_LIBRARY_PRESETS = {
+    styles: [
+        { title: "电影冷暖对比", prompt: "cinematic lighting, teal and warm contrast, realistic lens, rich shadows" },
+        { title: "日系清透广告", prompt: "bright japanese commercial style, soft daylight, clean composition, airy colors" },
+        { title: "暗黑科幻棚拍", prompt: "dark sci-fi studio, rim light, metal texture, controlled haze, dramatic mood" },
+    ],
+    effects: [
+        { title: "快速推进镜头", prompt: "fast dolly in, dynamic motion, strong parallax, energetic camera movement" },
+        { title: "产品环绕展示", prompt: "360 degree orbit shot, centered product, smooth turntable motion, premium lighting" },
+        { title: "手持纪录片感", prompt: "subtle handheld camera, documentary realism, natural imperfection, intimate framing" },
+    ],
+};
 const EMPTY_NODE_INPUTS: NodeGenerationInput[] = [];
 const EMPTY_MENTION_REFERENCES: ReturnType<typeof buildNodeMentionReferences> = [];
 const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
@@ -150,7 +277,11 @@ export default function CanvasPage() {
 
     if (!mounted) return <CanvasRefreshShell />;
 
-    return <ReactFlowCanvasPage />;
+    return (
+        <Suspense fallback={LazyCanvasFallback}>
+            <ReactFlowCanvasPage />
+        </Suspense>
+    );
 }
 
 function CanvasRefreshShell() {
@@ -260,8 +391,8 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
 function ReactFlowCanvasPage() {
     const { message, modal } = App.useApp();
     const params = useParams<{ id: string }>();
-    const router = useRouter();
-    const projectId = params.id;
+    const navigate = useNavigate();
+    const projectId = params.id ?? "";
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -310,11 +441,17 @@ function ReactFlowCanvasPage() {
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
-    const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
+    const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [canvasAssetPanelOpen, setCanvasAssetPanelOpen] = useState(false);
+    const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets">("canvas");
+    const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
+    const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
+    const [materialLibraryTab, setMaterialLibraryTab] = useState<"styles" | "effects" | "assets">("styles");
+    const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
@@ -415,16 +552,33 @@ function ReactFlowCanvasPage() {
     );
 
     useEffect(() => {
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (!generationRequestsRef.current.size) return;
+            event.preventDefault();
+            event.returnValue = "";
+        };
+
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }, []);
+
+    useEffect(() => {
         if (!hydrated) return;
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
-            router.replace("/canvas");
+            navigate("/canvas", { replace: true });
             return;
         }
 
         const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedGeneration(project.nodes));
+            const currentGenerationNodeIds = new Set<string>();
+            generationRequestsRef.current.forEach((request) => {
+                currentGenerationNodeIds.add(request.targetNodeId);
+                currentGenerationNodeIds.add(request.originNodeId);
+            });
+            const sourceNodes = currentGenerationNodeIds.size ? project.nodes : resetInterruptedGeneration(project.nodes);
+            const restoredNodes = await hydrateCanvasImages(sourceNodes).then((items) => (currentGenerationNodeIds.size ? mergeActiveGenerationNodes(items, nodesRef.current, currentGenerationNodeIds) : items));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             setNodes(restoredNodes);
             setConnections(project.connections);
@@ -450,7 +604,7 @@ function ReactFlowCanvasPage() {
             setProjectLoaded(true);
         };
         void restore();
-    }, [hydrated, openProject, projectId, router]);
+    }, [hydrated, navigate, openProject, projectId]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -709,7 +863,7 @@ function ReactFlowCanvasPage() {
             setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
-            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
+            setDialogNodeId(newNode.id);
             setPendingConnectionCreate(null);
             connectingParamsRef.current = null;
             setConnecting(null);
@@ -858,8 +1012,17 @@ function ReactFlowCanvasPage() {
         return { ...agentUndoSnapshot, projectId, title: projectTitle || "未命名画布" };
     }, [agentUndoSnapshot, projectTitle, projectId]);
     const createNode = useCallback(
-        (type: CanvasNodeType, position?: Position) => {
-            const targetPosition = position || getCanvasCenter();
+        (
+            type: CanvasNodeType,
+            options: {
+                position?: Position;
+                title?: string;
+                width?: number;
+                height?: number;
+                metadata?: CanvasNodeMetadata;
+            } = {},
+        ) => {
+            const targetPosition = options.position || getCanvasCenter();
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -868,15 +1031,86 @@ function ReactFlowCanvasPage() {
                           count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                       }
                     : undefined;
-            const newNode = createCanvasNode(type, targetPosition, configMetadata);
+            const newNode = {
+                ...createCanvasNode(type, targetPosition, { ...configMetadata, ...options.metadata }),
+                ...(options.title ? { title: options.title } : null),
+                ...(options.width ? { width: options.width } : null),
+                ...(options.height ? { height: options.height } : null),
+            };
 
             setNodes((prev) => [...prev, newNode]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
-            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
+            setDialogNodeId(newNode.id);
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
+
+    const createScriptNode = useCallback(() => {
+        createNode(CanvasNodeType.Text, {
+            title: "脚本",
+            width: 220,
+            height: 160,
+            metadata: {
+                canvasTool: "script",
+                content: DEFAULT_SCRIPT_BODY,
+                scriptTitle: "未命名脚本",
+                scriptLogline: "一句话描述故事目标、角色和转折",
+                scriptBody: DEFAULT_SCRIPT_BODY,
+                status: NODE_STATUS_SUCCESS,
+                fontSize: 13,
+                generationMode: "text",
+            },
+        });
+    }, [createNode]);
+
+    const createVideoCompositionNode = useCallback(() => {
+        createNode(CanvasNodeType.Config, {
+            title: "视频合成",
+            width: 220,
+            height: 132,
+            metadata: { canvasTool: "videoComposition", generationMode: "video", status: NODE_STATUS_IDLE, count: 1 },
+        });
+    }, [createNode]);
+
+    const createDirectorNode = useCallback(() => {
+        createNode(CanvasNodeType.Config, {
+            title: "导演台",
+            width: 220,
+            height: 160,
+            metadata: {
+                canvasTool: "director",
+                generationMode: "image",
+                status: NODE_STATUS_IDLE,
+                count: DEFAULT_DIRECTOR_SHOTS.length,
+                directorScene: "黑色摄影棚内，一位主角站在可移动布景中央，周围有可控灯光和关键道具。",
+                directorStyle: "电影感，低调布光，真实镜头语言",
+                directorCast: "主角、摄影助理",
+                directorProps: "主光灯、反光板、桌面道具",
+                directorSceneSettings: DEFAULT_DIRECTOR_SCENE_SETTINGS,
+                directorCharacters: DEFAULT_DIRECTOR_CHARACTERS,
+                directorShots: DEFAULT_DIRECTOR_SHOTS,
+            },
+        });
+    }, [createNode]);
+
+    const createPanorama360Node = useCallback(() => {
+        createNode(CanvasNodeType.Image, {
+            title: "360场景",
+            width: 320,
+            height: 180,
+            metadata: {
+                canvasTool: "panorama360",
+                prompt: DEFAULT_PANORAMA_360_PROMPT,
+                composerContent: DEFAULT_PANORAMA_360_PROMPT,
+                generationMode: "image",
+                status: NODE_STATUS_IDLE,
+                count: 1,
+                size: "2048x1024",
+                freeResize: true,
+            },
+        });
+    }, [createNode]);
 
     const deleteNodes = useCallback(
         (ids: Set<string>) => {
@@ -928,19 +1162,27 @@ function ReactFlowCanvasPage() {
     }, []);
 
     const selectConnection = useCallback((connectionId: string) => {
+        selectedNodeIdsRef.current = new Set();
+        selectedConnectionIdRef.current = connectionId;
         setSelectedConnectionId(connectionId);
         setSelectedNodeIds(new Set());
         setContextMenu(null);
+        setDialogNodeId(null);
     }, []);
 
     const openConnectionContextMenu = useCallback((event: ReactMouseEvent<Element>, connectionId: string) => {
+        selectedNodeIdsRef.current = new Set();
+        selectedConnectionIdRef.current = connectionId;
         setSelectedConnectionId(connectionId);
         setSelectedNodeIds(new Set());
+        setDialogNodeId(null);
         setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId });
     }, []);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
+        selectedNodeIdsRef.current = new Set();
+        selectedConnectionIdRef.current = null;
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
         setContextMenu(null);
@@ -1115,14 +1357,14 @@ function ReactFlowCanvasPage() {
 
     const createAndOpenProject = useCallback(() => {
         const id = createProject(`无限画布 ${useCanvasStore.getState().projects.length + 1}`);
-        router.push(`/canvas/${id}`);
-    }, [createProject, router]);
+        navigate(`/canvas/${id}`);
+    }, [createProject, navigate]);
 
     const deleteCurrentProject = useCallback(() => {
         deleteProjects([projectId]);
         cleanupAssetImages();
-        router.push("/canvas");
-    }, [cleanupAssetImages, deleteProjects, projectId, router]);
+        navigate("/canvas");
+    }, [cleanupAssetImages, deleteProjects, navigate, projectId]);
 
     const handleCanvasMouseDown = useCallback(
         (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1197,7 +1439,49 @@ function ReactFlowCanvasPage() {
         ]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
+        setDialogNodeId(id);
     }, []);
+
+    const createTextFileNode = useCallback(
+        async (file: File, position: Position) => {
+            const content = await file.text();
+            const trimmed = content.trim();
+            if (!trimmed) {
+                message.warning("文本文件为空");
+                return;
+            }
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+            const isScript = isScriptTextFile(file);
+            const id = `text-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const node: CanvasNodeData = {
+                id,
+                type: CanvasNodeType.Text,
+                title: file.name,
+                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
+                width: isScript ? 220 : spec.width,
+                height: isScript ? 160 : spec.height,
+                metadata: {
+                    content: trimmed,
+                    status: NODE_STATUS_SUCCESS,
+                    fontSize: isScript ? 13 : 14,
+                    generationMode: "text",
+                    ...(isScript
+                        ? {
+                              canvasTool: "script" as const,
+                              scriptTitle: file.name.replace(/\.[^.]+$/, ""),
+                              scriptLogline: "",
+                              scriptBody: trimmed,
+                          }
+                        : null),
+                },
+            };
+            setNodes((prev) => [...prev, node]);
+            setSelectedNodeIds(new Set([id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(id);
+        },
+        [message],
+    );
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -1389,11 +1673,30 @@ function ReactFlowCanvasPage() {
 
     const handleReactFlowSelectionChange = useCallback<OnSelectionChangeFunc<ReactFlowCanvasNodeType, Edge>>(({ nodes: selectedNodes, edges: selectedEdges }) => {
         const nextNodeIds = new Set(selectedNodes.map((node) => node.id));
-        if (!setsEqual(selectedNodeIdsRef.current, nextNodeIds)) setSelectedNodeIds(nextNodeIds);
+        if (!setsEqual(selectedNodeIdsRef.current, nextNodeIds)) {
+            selectedNodeIdsRef.current = nextNodeIds;
+            setSelectedNodeIds(nextNodeIds);
+        }
         const nextConnectionId = selectedEdges[0]?.id ?? null;
+        selectedConnectionIdRef.current = nextConnectionId;
         setSelectedConnectionId((current) => (current === nextConnectionId ? current : nextConnectionId));
         if (nextNodeIds.size || nextConnectionId) setContextMenu(null);
+        if (nextConnectionId || nextNodeIds.size > 1) {
+            setDialogNodeId(null);
+            return;
+        }
+        if (!nextNodeIds.size) return;
+        const nextDialogNodeId = selectedNodes[0]?.id ?? null;
+        setDialogNodeId((current) => (current === nextDialogNodeId ? current : nextDialogNodeId));
     }, []);
+
+    const handleReactFlowEdgeClick = useCallback<EdgeMouseHandler>(
+        (event, edge) => {
+            event.stopPropagation();
+            selectConnection(edge.id);
+        },
+        [selectConnection],
+    );
 
     const handleReactFlowNodeDragStop = useCallback<OnNodeDrag<ReactFlowCanvasNodeType>>(
         (_, node) => {
@@ -1424,7 +1727,16 @@ function ReactFlowCanvasPage() {
             nextSelected.add(nodeId);
         }
 
-        setSelectedNodeIds(nextSelected);
+        if (!setsEqual(currentSelected, nextSelected)) {
+            selectedNodeIdsRef.current = nextSelected;
+            setSelectedNodeIds(nextSelected);
+        }
+        if (nextSelected.size === 1) {
+            const nextDialogNodeId = nextSelected.values().next().value as string | undefined;
+            setDialogNodeId(nextDialogNodeId ?? null);
+        } else {
+            setDialogNodeId(null);
+        }
     }, []);
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
@@ -1453,6 +1765,31 @@ function ReactFlowCanvasPage() {
             }),
         );
     }, []);
+
+    const markNodeAsPanorama360 = useCallback(
+        (nodeId: string) => {
+            let changed = false;
+            setNodes((prev) =>
+                prev.map((node) => {
+                    if (node.id !== nodeId || node.type !== CanvasNodeType.Image) return node;
+                    if (node.metadata?.canvasTool === "panorama360") return node;
+                    changed = true;
+                    return {
+                        ...node,
+                        metadata: {
+                            ...node.metadata,
+                            canvasTool: "panorama360",
+                            generationMode: "image",
+                            size: node.metadata?.size || "2048x1024",
+                            freeResize: true,
+                        },
+                    };
+                }),
+            );
+            message.success(changed ? "已标记为360场景，三击图片可进入全景预览" : "当前图片已经是360场景");
+        },
+        [message],
+    );
 
     const handleNodeContentChange = useCallback((nodeId: string, content: string) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, content } } : node)));
@@ -1566,6 +1903,20 @@ function ReactFlowCanvasPage() {
                     tags: [],
                     source: "Canvas",
                     data: { url: node.metadata.content, storageKey: node.metadata.storageKey, width: node.width, height: node.height, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "video/mp4" },
+                    metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
+                });
+                message.success("已加入我的素材");
+                return;
+            }
+            if (node.type === CanvasNodeType.Audio) {
+                if (!node.metadata?.content) return message.error("没有可保存的音频");
+                addAsset({
+                    kind: "audio",
+                    title: node.metadata?.prompt?.slice(0, 24) || "画布音频",
+                    coverUrl: "",
+                    tags: [],
+                    source: "Canvas",
+                    data: { url: node.metadata.content, storageKey: node.metadata.storageKey, bytes: node.metadata.bytes || 0, mimeType: node.metadata.mimeType || "audio/mpeg", durationMs: node.metadata.durationMs },
                     metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt },
                 });
                 message.success("已加入我的素材");
@@ -1843,9 +2194,61 @@ function ReactFlowCanvasPage() {
         async (event: ReactChangeEvent<HTMLInputElement>) => {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
-            if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+            if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file) && !isTextFile(file))) return;
+            const targetNode = target?.nodeId ? nodesRef.current.find((node) => node.id === target.nodeId) : undefined;
+            if (targetNode?.metadata?.canvasTool === "panorama360" && !file.type.startsWith("image/")) {
+                message.warning("360场景只能上传图片文件");
+                uploadTargetRef.current = null;
+                event.target.value = "";
+                return;
+            }
 
             if (target?.nodeId) {
+                if (isTextFile(file)) {
+                    const content = (await file.text()).trim();
+                    if (!content) {
+                        message.warning("文本文件为空");
+                        uploadTargetRef.current = null;
+                        event.target.value = "";
+                        return;
+                    }
+                    const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+                    const script = isScriptTextFile(file);
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === target.nodeId
+                                ? {
+                                      ...node,
+                                      type: CanvasNodeType.Text,
+                                      title: file.name,
+                                      position: { x: node.position.x + node.width / 2 - (script ? 220 : spec.width) / 2, y: node.position.y + node.height / 2 - (script ? 160 : spec.height) / 2 },
+                                      width: script ? 220 : spec.width,
+                                      height: script ? 160 : spec.height,
+                                      metadata: {
+                                          ...node.metadata,
+                                          content,
+                                          status: NODE_STATUS_SUCCESS,
+                                          errorDetails: undefined,
+                                          generationMode: "text",
+                                          ...(script
+                                              ? {
+                                                    canvasTool: "script" as const,
+                                                    scriptTitle: file.name.replace(/\.[^.]+$/, ""),
+                                                    scriptBody: content,
+                                                }
+                                              : { canvasTool: undefined, scriptTitle: undefined, scriptBody: undefined }),
+                                      },
+                                  }
+                                : node,
+                        ),
+                    );
+                    setSelectedNodeIds(new Set([target.nodeId]));
+                    setSelectedConnectionId(null);
+                    setDialogNodeId(target.nodeId);
+                    uploadTargetRef.current = null;
+                    event.target.value = "";
+                    return;
+                }
                 if (isAudioFile(file)) {
                     const audio = await uploadMediaFile(file, "audio");
                     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
@@ -1917,7 +2320,7 @@ function ReactFlowCanvasPage() {
                                       batchUsesReferenceImages: undefined,
                                       generationType: undefined,
                                       model: undefined,
-                                      size: undefined,
+                                      size: node.metadata?.canvasTool === "panorama360" ? node.metadata.size : undefined,
                                       quality: undefined,
                                       count: undefined,
                                       references: undefined,
@@ -1933,25 +2336,25 @@ function ReactFlowCanvasPage() {
                 setDialogNodeId(target.nodeId);
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                void (isTextFile(file) ? createTextFileNode(file, position) : isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
             }
 
             uploadTargetRef.current = null;
             event.target.value = "";
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createTextFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
+            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item) || isTextFile(item));
             if (!file) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void (isTextFile(file) ? createTextFileNode(file, pos) : isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createTextFileNode, createVideoFileNode, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -1982,7 +2385,7 @@ function ReactFlowCanvasPage() {
     const preventCanvasContextMenu = useCallback((event: ReactMouseEvent) => {
         if ((event.target as HTMLElement).closest("[data-node-id]")) return;
         event.preventDefault();
-        setContextMenu(null);
+        setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY });
     }, []);
 
     const handleGenerateNode = useCallback(
@@ -2682,6 +3085,23 @@ function ReactFlowCanvasPage() {
                     },
                 ]);
                 setSelectedNodeIds(new Set([id]));
+            } else if (payload.kind === "audio") {
+                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+                const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+                const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                setNodes((prev) => [
+                    ...prev,
+                    {
+                        id,
+                        type: CanvasNodeType.Audio,
+                        title: payload.title,
+                        position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 },
+                        width: spec.width,
+                        height: spec.height,
+                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs },
+                    },
+                ]);
+                setSelectedNodeIds(new Set([id]));
             } else {
                 insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
             }
@@ -2690,9 +3110,222 @@ function ReactFlowCanvasPage() {
         [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
+    const openMaterialLibrary = useCallback((tab: "styles" | "effects" | "assets" = "styles") => {
+        setMaterialLibraryTab(tab);
+        setMaterialLibraryOpen(true);
+    }, []);
+
+    const insertMaterialPreset = useCallback(
+        (preset: { title: string; prompt: string }) => {
+            const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
+            const node = {
+                ...createCanvasNode(CanvasNodeType.Text, center, { content: preset.prompt, status: NODE_STATUS_SUCCESS, fontSize: 13, generationMode: "text", prompt: preset.prompt }),
+                title: preset.title,
+                width: 220,
+                height: 132,
+            };
+            setNodes((prev) => [...prev, node]);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(node.id);
+            setMaterialLibraryOpen(false);
+        },
+        [screenToCanvas, size.height, size.width],
+    );
+
+    const createDirectorStoryboard = useCallback(
+        (directorNode: CanvasNodeData) => {
+            const captures = directorNode.metadata?.directorCaptures?.length
+                ? directorNode.metadata.directorCaptures
+                : (directorNode.metadata?.directorShots?.length ? directorNode.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS).map((shot, index) => ({
+                      id: `capture-${Date.now()}-${index}`,
+                      cameraId: shot.id,
+                      name: `${shot.name}-shot-${String(index + 1).padStart(2, "0")}`,
+                      dataUrl: directorShotDataUrl(
+                          shot,
+                          directorNode.metadata?.directorSceneSettings || DEFAULT_DIRECTOR_SCENE_SETTINGS,
+                          directorNode.metadata?.directorCharacters?.length ? directorNode.metadata.directorCharacters : DEFAULT_DIRECTOR_CHARACTERS,
+                          index,
+                      ),
+                      createdAt: new Date().toISOString(),
+                  }));
+            const shots = directorNode.metadata?.directorShots?.length ? directorNode.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS;
+            const scene = directorNode.metadata?.directorScene?.trim() || "未命名场景";
+            const style = directorNode.metadata?.directorStyle?.trim() || "电影感";
+            const characters = directorNode.metadata?.directorCast?.trim() || "角色待定";
+            const props = directorNode.metadata?.directorProps?.trim() || "道具待定";
+            const gap = 44;
+            const startX = directorNode.position.x + directorNode.width + 120;
+            const startY = directorNode.position.y;
+            const outputIds: string[] = [];
+            const shotNodes = captures.map((capture, index) => {
+                const shot = shots.find((item) => item.id === capture.cameraId) || shots[index % shots.length] || DEFAULT_DIRECTOR_SHOTS[0];
+                const id = `director-shot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+                outputIds.push(id);
+                const shotPosition = shot.position ? `(${shot.position.x}, ${shot.position.y}, ${shot.position.z})` : "(0, 2.2, 10)";
+                const shotTarget = shot.target ? `(${shot.target.x}, ${shot.target.y}, ${shot.target.z})` : "(0, 1.2, 0)";
+                const prompt = [
+                    `来源：${directorNode.title} / ${capture.name}`,
+                    `场景：${scene}`,
+                    `角色：${characters}`,
+                    `道具：${props}`,
+                    `风格：${style}`,
+                    `机位：${shot.camera}`,
+                    `FOV：${shot.fov ?? 50}°`,
+                    `相机位置：${shotPosition}`,
+                    `注视坐标：${shotTarget}`,
+                    `镜头目标：${shot.prompt}`,
+                ].join("\n");
+                return {
+                    id,
+                    type: CanvasNodeType.Image,
+                    title: `${directorNode.title} ${capture.name}`,
+                    position: { x: startX + index * (300 + gap), y: startY + index * 34 },
+                    width: 300,
+                    height: 188,
+                    metadata: {
+                        content: capture.dataUrl,
+                        status: NODE_STATUS_SUCCESS,
+                        prompt,
+                        generationMode: "image",
+                        generationType: "generation",
+                        model: directorNode.metadata?.model,
+                        size: directorNode.metadata?.size,
+                        count: 1,
+                    },
+                } satisfies CanvasNodeData;
+            });
+            setNodes((prev) => [...prev.map((node) => (node.id === directorNode.id ? { ...node, metadata: { ...node.metadata, directorCaptures: captures, directorOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)), ...shotNodes]);
+            setConnections((prev) => [...prev, ...shotNodes.map((node) => ({ id: nanoid(), fromNodeId: directorNode.id, toNodeId: node.id }))]);
+            setSelectedNodeIds(new Set(outputIds));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setDirectorStudioNodeId(null);
+            message.success(`截图已添加到画布`);
+        },
+        [message],
+    );
+
+    const captureDirectorCamera = useCallback(
+        (directorNode: CanvasNodeData, cameraId: string) => {
+            const shots = directorNode.metadata?.directorShots?.length ? directorNode.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS;
+            const shot = shots.find((item) => item.id === cameraId) || shots[0] || DEFAULT_DIRECTOR_SHOTS[0];
+            const existing = directorNode.metadata?.directorCaptures || [];
+            const captureIndex = existing.filter((item) => item.cameraId === cameraId).length + 1;
+            const nextCapture = {
+                id: `capture-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                cameraId,
+                name: `${shot.name}-shot-${String(captureIndex).padStart(2, "0")}`,
+                dataUrl: directorShotDataUrl(
+                    shot,
+                    directorNode.metadata?.directorSceneSettings || DEFAULT_DIRECTOR_SCENE_SETTINGS,
+                    directorNode.metadata?.directorCharacters?.length ? directorNode.metadata.directorCharacters : DEFAULT_DIRECTOR_CHARACTERS,
+                    existing.length,
+                ),
+                createdAt: new Date().toISOString(),
+            };
+            handleConfigNodeChange(directorNode.id, { directorCaptures: [...existing, nextCapture], directorShots: shots, status: NODE_STATUS_SUCCESS });
+            message.success(`${nextCapture.name} 已截图`);
+        },
+        [handleConfigNodeChange, message],
+    );
+
+    const createScriptStoryboard = useCallback(
+        (scriptNode: CanvasNodeData) => {
+            const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
+            const beats = buildScriptBeats(body);
+            const gap = 36;
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const startX = scriptNode.position.x + scriptNode.width + 96;
+            const startY = scriptNode.position.y;
+            const outputIds: string[] = [];
+            const beatNodes = beats.map((beat, index) => {
+                const id = `script-shot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+                outputIds.push(id);
+                return {
+                    id,
+                    type: CanvasNodeType.Image,
+                    title: beat.title,
+                    position: { x: startX + index * (spec.width + gap), y: startY },
+                    width: spec.width,
+                    height: spec.height,
+                    metadata: {
+                        content: scriptStoryboardDataUrl(beat.title, index),
+                        status: NODE_STATUS_SUCCESS,
+                        prompt: beat.prompt,
+                        generationMode: "image",
+                        generationType: "generation",
+                    },
+                } satisfies CanvasNodeData;
+            });
+            setNodes((prev) => [
+                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: beats, scriptOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)),
+                ...beatNodes,
+            ]);
+            setConnections((prev) => [...prev, ...beatNodes.map((node) => ({ id: nanoid(), fromNodeId: scriptNode.id, toNodeId: node.id }))]);
+            setSelectedNodeIds(new Set(outputIds));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            message.success(`已拆出 ${beatNodes.length} 个分镜`);
+        },
+        [message],
+    );
+
+    const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
+        const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
+        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+        const id = `script-audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const node: CanvasNodeData = {
+            id,
+            type: CanvasNodeType.Audio,
+            title: "脚本旁白",
+            position: { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 196 },
+            width: spec.width,
+            height: spec.height,
+            metadata: { status: NODE_STATUS_IDLE, prompt: `请把下面脚本生成自然、有情绪层次的旁白音频：\n${body}`, generationMode: "audio" },
+        };
+        setNodes((prev) => [...prev.map((item) => (item.id === scriptNode.id ? { ...item, metadata: { ...item.metadata, content: body, scriptBody: body } } : item)), node]);
+        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: scriptNode.id, toNodeId: id }]);
+        setSelectedNodeIds(new Set([id]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(id);
+    }, []);
+
+    const createScriptVideoNode = useCallback((scriptNode: CanvasNodeData) => {
+        const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
+        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+        const id = `script-video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const node: CanvasNodeData = {
+            id,
+            type: CanvasNodeType.Video,
+            title: "脚本视频",
+            position: { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 320 },
+            width: spec.width,
+            height: spec.height,
+            metadata: { status: NODE_STATUS_IDLE, prompt: `请根据下面脚本生成连贯短视频，保留关键情节、角色动作和镜头节奏：\n${body}`, generationMode: "video" },
+        };
+        setNodes((prev) => [...prev.map((item) => (item.id === scriptNode.id ? { ...item, metadata: { ...item.metadata, content: body, scriptBody: body } } : item)), node]);
+        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: scriptNode.id, toNodeId: id }]);
+        setSelectedNodeIds(new Set([id]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(id);
+    }, []);
+
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
-            panelNode.type === CanvasNodeType.Config ? (
+            panelNode.metadata?.canvasTool === "director" ? (
+                <DirectorDeskPanel node={panelNode} theme={theme} onChange={(patch) => handleConfigNodeChange(panelNode.id, patch)} onCreateStoryboard={() => createDirectorStoryboard(panelNode)} onClose={() => setDialogNodeId(null)} />
+            ) : panelNode.metadata?.canvasTool === "script" ? (
+                <ScriptDeskPanel
+                    node={panelNode}
+                    theme={theme}
+                    onChange={(patch) => handleConfigNodeChange(panelNode.id, patch)}
+                    onCreateStoryboard={() => createScriptStoryboard(panelNode)}
+                    onCreateNarration={() => createScriptNarrationNode(panelNode)}
+                    onCreateVideo={() => createScriptVideoNode(panelNode)}
+                    onClose={() => setDialogNodeId(null)}
+                />
+            ) : panelNode.type === CanvasNodeType.Config ? (
                 <CanvasConfigComposer
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
@@ -2714,7 +3347,20 @@ function ReactFlowCanvasPage() {
                     }}
                 />
             ),
-        [configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferencesByNodeId, runningNodeId],
+        [
+            configInputsById,
+            confirmStopGeneration,
+            createDirectorStoryboard,
+            createScriptNarrationNode,
+            createScriptStoryboard,
+            createScriptVideoNode,
+            handleConfigNodeChange,
+            handleGenerateNode,
+            handleNodePromptChange,
+            mentionReferencesByNodeId,
+            runningNodeId,
+            theme,
+        ],
     );
 
     const renderCanvasConfigNodeContent = useCallback(
@@ -2731,7 +3377,8 @@ function ReactFlowCanvasPage() {
                 onStop={confirmStopGeneration}
                 onGenerate={(nodeId) => {
                     const target = nodesRef.current.find((item) => item.id === nodeId);
-                    void handleGenerateNode(nodeId, target?.metadata?.generationMode || defaultGenerationMode(target?.type), target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                    const mode = target?.metadata?.generationMode || defaultGenerationMode(target?.type);
+                    void handleGenerateNode(nodeId, mode, target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
                 }}
             />
         ),
@@ -2769,10 +3416,77 @@ function ReactFlowCanvasPage() {
         setContextMenu((current) => (current ? null : current));
     }, []);
 
+    const selectOnlyNode = useCallback((nodeId: string) => {
+        const next = new Set([nodeId]);
+        if (setsEqual(selectedNodeIdsRef.current, next)) return;
+        selectedNodeIdsRef.current = next;
+        setSelectedNodeIds(next);
+    }, []);
+
+    const selectSingleNode = useCallback(
+        (nodeId: string) => {
+            selectOnlyNode(nodeId);
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            setDialogNodeId(nodeId);
+        },
+        [selectOnlyNode],
+    );
+
     const handleRetryNodeAction = useCallback((node: CanvasNodeData) => void handleRetryNode(node), [handleRetryNode]);
     const handleViewNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
-    const reactFlowNodeTypes = useMemo<NodeTypes>(() => ({ [CANVAS_NODE_TYPE]: ReactFlowCanvasNode }), []);
-    const reactFlowEdgeTypes = useMemo<EdgeTypes>(() => reactFlowCanvasEdgeTypes, []);
+    const insertPanoramaSnapshot = useCallback(
+        async (sourceNode: CanvasNodeData, dataUrl: string) => {
+            try {
+                const image = await uploadImage(dataUrl);
+                const nextSize = fitNodeSize(image.width, image.height);
+                const nodeId = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const position = {
+                    x: sourceNode.position.x + sourceNode.width + 80,
+                    y: sourceNode.position.y + sourceNode.height / 2 - nextSize.height / 2,
+                };
+                const node: CanvasNodeData = {
+                    id: nodeId,
+                    type: CanvasNodeType.Image,
+                    title: `${sourceNode.title || "360场景"} 截图`,
+                    position,
+                    width: nextSize.width,
+                    height: nextSize.height,
+                    metadata: {
+                        ...imageMetadata(image),
+                        prompt: "360全景沉浸式预览截图",
+                        generationMode: "image",
+                        freeResize: true,
+                    },
+                };
+                setNodes((prev) => [...prev, node]);
+                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: node.id }]);
+                setSelectedNodeIds(new Set([node.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(node.id);
+                message.success("截图已插入画布");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "截图插入失败");
+            }
+        },
+        [message],
+    );
+    const openNodeComposer = useCallback(
+        (node: CanvasNodeData) => {
+            selectOnlyNode(node.id);
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            if (node.metadata?.canvasTool === "director") {
+                setDialogNodeId(null);
+                setDirectorStudioNodeId(node.id);
+                setEditingNodeId(null);
+                return;
+            }
+            setDialogNodeId(node.id);
+            setEditingNodeId(null);
+        },
+        [selectOnlyNode],
+    );
     const reactFlowConnections = useMemo(
         () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
         [batchVisibilityIndex.hiddenConnectionEndpointIds, connections],
@@ -2786,9 +3500,10 @@ function ReactFlowCanvasPage() {
                 target: connection.toNodeId,
                 sourceHandle: CANVAS_SOURCE_HANDLE,
                 targetHandle: CANVAS_TARGET_HANDLE,
-                selectable: false,
+                selectable: true,
                 data: {
                     connection,
+                    selected: selectedConnectionId === connection.id,
                     active: selectedConnectionId === connection.id || relatedHighlight.connectionIds.has(connection.id),
                     onSelect: selectConnection,
                     onDelete: deleteConnection,
@@ -2797,7 +3512,25 @@ function ReactFlowCanvasPage() {
             })),
         [deleteConnection, openConnectionContextMenu, reactFlowConnections, relatedHighlight.connectionIds, selectConnection, selectedConnectionId],
     );
-    const dialogNode = useMemo(() => (dialogNodeId ? visibleNodeItems.find((node) => node.id === dialogNodeId) || null : null), [dialogNodeId, visibleNodeItems]);
+    const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
+    const dialogNode = useMemo(() => {
+        const node = dialogNodeId ? visibleNodeItems.find((item) => item.id === dialogNodeId) || null : null;
+        return node?.metadata?.canvasTool === "director" ? null : node;
+    }, [dialogNodeId, visibleNodeItems]);
+    const composerWidth = dialogNode ? Math.min(dialogNode.type === CanvasNodeType.Config ? 500 : 760, Math.max(280, size.width - 48)) : 0;
+    const composerScale = dialogNode ? clampNumber(viewport.k, 0.7, 1) : 1;
+    const composerPosition = dialogNode
+        ? (() => {
+              const rawLeft = (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
+              const halfWidth = (composerWidth * composerScale) / 2;
+              const minLeft = halfWidth + 24;
+              const maxLeft = Math.max(minLeft, size.width - halfWidth - 24);
+              return {
+                  left: clampNumber(rawLeft, minLeft, maxLeft),
+                  top: (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y,
+              };
+          })()
+        : null;
 
     const reactFlowNodes = useMemo<ReactFlowCanvasNodeType[]>(
         () =>
@@ -2840,6 +3573,8 @@ function ReactFlowCanvasPage() {
                         onContentChange: handleNodeContentChange,
                         onToggleBatch: toggleBatchExpanded,
                         onSetBatchPrimary: setBatchPrimary,
+                        onOpenComposer: openNodeComposer,
+                        onUpload: (item) => handleUploadRequest(item.id),
                         onRetry: handleRetryNodeAction,
                         onGenerateImage: generateImageFromTextNode,
                         onViewImage: handleViewNodeImage,
@@ -2863,6 +3598,8 @@ function ReactFlowCanvasPage() {
             handleNodeHoverEnd,
             handleNodeHoverStart,
             handleNodeResize,
+            handleUploadRequest,
+            openNodeComposer,
             handleReactFlowNodeMouseDown,
             handleRetryNodeAction,
             handleViewNodeImage,
@@ -2894,15 +3631,10 @@ function ReactFlowCanvasPage() {
                     onStartTitleEditing={startTitleEditing}
                     onFinishTitleEditing={finishTitleEditing}
                     onCancelTitleEditing={() => setTitleEditing(false)}
-                    canUndo={historyState.canUndo}
-                    canRedo={historyState.canRedo}
-                    onHome={() => router.push("/")}
-                    onProjects={() => router.push("/canvas")}
+                    onHome={() => navigate("/")}
+                    onProjects={() => navigate("/canvas")}
                     onCreateProject={createAndOpenProject}
                     onDeleteProject={deleteCurrentProject}
-                    onImportImage={() => handleUploadRequest()}
-                    onUndo={undoCanvas}
-                    onRedo={redoCanvas}
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
                 />
@@ -2912,8 +3644,8 @@ function ReactFlowCanvasPage() {
                     viewport={viewport}
                     nodes={reactFlowNodes}
                     edges={reactFlowEdges}
-                    nodeTypes={reactFlowNodeTypes}
-                    edgeTypes={reactFlowEdgeTypes}
+                    nodeTypes={REACT_FLOW_NODE_TYPES}
+                    edgeTypes={REACT_FLOW_EDGE_TYPES}
                     backgroundMode={backgroundMode}
                     onViewportChange={handleReactFlowViewportChange}
                     onCanvasMouseDown={handleCanvasMouseDown}
@@ -2922,6 +3654,7 @@ function ReactFlowCanvasPage() {
                     onNodeDrag={handleReactFlowNodeDrag}
                     onNodeDragStop={handleReactFlowNodeDragStop}
                     onSelectionChange={handleReactFlowSelectionChange}
+                    onEdgeClick={handleReactFlowEdgeClick}
                     onConnect={handleReactFlowConnect}
                     onConnectStart={handleReactFlowConnectStart}
                     onConnectEnd={handleReactFlowConnectEnd}
@@ -2929,12 +3662,25 @@ function ReactFlowCanvasPage() {
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
                     miniMapOpen={isMiniMapOpen}
-                >
-                    {dialogNode ? (
+                />
+
+                {dialogNode && composerPosition ? (
+                    <div
+                        data-canvas-no-zoom
+                        className="pointer-events-none absolute z-[70] -translate-x-1/2 pt-4"
+                        style={{
+                            left: composerPosition.left,
+                            top: composerPosition.top,
+                        }}
+                    >
                         <div
-                            data-canvas-no-zoom
-                            className="absolute z-[70] w-[500px] max-h-[60vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar"
-                            style={{ left: dialogNode.position.x + dialogNode.width / 2, top: dialogNode.position.y + dialogNode.height }}
+                            className="pointer-events-auto max-h-[60vh] overflow-y-auto thin-scrollbar"
+                            style={{
+                                width: composerWidth,
+                                maxWidth: "calc(100vw - 48px)",
+                                transform: `scale(${composerScale})`,
+                                transformOrigin: "top center",
+                            }}
                             onWheel={(event) => {
                                 const el = event.currentTarget;
                                 if (el.scrollHeight <= el.clientHeight) return;
@@ -2944,10 +3690,32 @@ function ReactFlowCanvasPage() {
                                 event.stopPropagation();
                             }}
                         >
-                            {renderCanvasNodePanel(dialogNode)}
+                            <Suspense fallback={LazyCanvasFallback}>{renderCanvasNodePanel(dialogNode)}</Suspense>
                         </div>
-                    ) : null}
-                </ReactFlowCanvas>
+                    </div>
+                ) : null}
+
+                {directorStudioNode ? (
+                    <DirectorStudioOverlay
+                        node={directorStudioNode}
+                        theme={theme}
+                        onChange={(patch) => handleConfigNodeChange(directorStudioNode.id, patch)}
+                        onCapture={(cameraId) => captureDirectorCamera(directorStudioNode, cameraId)}
+                        onSendToCanvas={() => createDirectorStoryboard(directorStudioNode)}
+                        onClose={() => setDirectorStudioNodeId(null)}
+                    />
+                ) : null}
+
+                <CanvasAssetManagerPanel
+                    open={canvasAssetPanelOpen}
+                    initialTab={canvasAssetPanelInitialTab}
+                    nodes={nodes}
+                    selectedNodeIds={selectedNodeIds}
+                    onClose={() => setCanvasAssetPanelOpen(false)}
+                    onSelectNode={selectSingleNode}
+                    onOpenAssetPicker={() => setAssetPickerOpen(true)}
+                    onUpload={() => handleUploadRequest()}
+                />
 
                 {pendingConnectionCreate && pendingConnectionCreatePosition ? (
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
@@ -2966,6 +3734,7 @@ function ReactFlowCanvasPage() {
                         onToggleDialog={(node) => setDialogNodeId((current) => (current === node.id ? null : node.id))}
                         onGenerateImage={generateImageFromTextNode}
                         onUpload={(node) => handleUploadRequest(node.id)}
+                        onMarkPanorama360={(node) => markNodeAsPanorama360(node.id)}
                         onDownload={downloadNodeImage}
                         onSaveAsset={(node) => void saveNodeAsset(node)}
                         onMaskEdit={(node) => setMaskEditNodeId(node.id)}
@@ -3001,12 +3770,35 @@ function ReactFlowCanvasPage() {
                     onDeselect={deselectCanvas}
                     onBackgroundModeChange={setBackgroundMode}
                     onShowImageInfoChange={setShowImageInfo}
+                    assetPanelOpen={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
-                        setAssetPickerOpen(true);
+                        setCanvasAssetPanelInitialTab("assets");
+                        setCanvasAssetPanelOpen(true);
+                    }}
+                    onOpenMaterialLibrary={openMaterialLibrary}
+                    onOpenGenerationHistory={() => setGenerationHistoryOpen(true)}
+                    onAddScript={createScriptNode}
+                    onAddVideoComposition={createVideoCompositionNode}
+                    onAddDirector={createDirectorNode}
+                    onAddPanorama360={createPanorama360Node}
+                    onTutorialAction={(action) => {
+                        const labels = { guide: "使用教程", support: "联系客服", sales: "联系销售", wechat: "关注公众号" };
+                        message.info(`${labels[action]}已打开`);
                     }}
                 />
 
-                <CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)} />
+                <CanvasZoomControls
+                    scale={viewport.k}
+                    onScaleChange={setZoomScale}
+                    onReset={resetViewport}
+                    isMiniMapOpen={isMiniMapOpen}
+                    onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)}
+                    onOpenMyAssets={() => {
+                        setCanvasAssetPanelInitialTab("canvas");
+                        setCanvasAssetPanelOpen(true);
+                        setDialogNodeId(null);
+                    }}
+                />
 
                 {contextMenu ? (
                     <CanvasNodeContextMenu
@@ -3020,15 +3812,35 @@ function ReactFlowCanvasPage() {
                         onDelete={() => {
                             if (contextMenu.type === "node") {
                                 deleteNodes(new Set([contextMenu.nodeId]));
-                            } else {
+                            } else if (contextMenu.type === "connection") {
                                 deleteConnection(contextMenu.connectionId);
                             }
+                            setContextMenu(null);
+                        }}
+                        onAddImage={() => {
+                            createNode(CanvasNodeType.Image);
+                            setContextMenu(null);
+                        }}
+                        onAddVideo={() => {
+                            createNode(CanvasNodeType.Video);
+                            setContextMenu(null);
+                        }}
+                        onAddAudio={() => {
+                            createNode(CanvasNodeType.Audio);
+                            setContextMenu(null);
+                        }}
+                        onAddText={() => {
+                            createNode(CanvasNodeType.Text);
+                            setContextMenu(null);
+                        }}
+                        onAddConfig={() => {
+                            createNode(CanvasNodeType.Config);
                             setContextMenu(null);
                         }}
                     />
                 ) : null}
 
-                <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav,text/plain,text/markdown,.txt,.md,.markdown,.srt" className="hidden" onChange={handleImageInputChange} />
 
                 {infoNode ? <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} /> : null}
 
@@ -3051,15 +3863,15 @@ function ReactFlowCanvasPage() {
                 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
-                    title="图片详情"
+                    title={previewNode?.metadata?.canvasTool === "panorama360" ? "360全景预览" : "图片详情"}
                     open={Boolean(previewNode?.metadata?.content)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
                     footer={null}
-                    width="auto"
+                    width={previewNode?.metadata?.canvasTool === "panorama360" ? "96vw" : "auto"}
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
                 >
-                    {previewNode?.metadata?.content ? <PreviewImageContent node={previewNode} /> : null}
+                    {previewNode?.metadata?.content ? <PreviewImageContent node={previewNode} onCapturePanorama={(dataUrl) => insertPanoramaSnapshot(previewNode, dataUrl)} /> : null}
                 </Modal>
 
                 <Modal
@@ -3080,6 +3892,21 @@ function ReactFlowCanvasPage() {
                 </Modal>
 
                 {assetPickerOpen ? <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => setAssetPickerOpen(false)} /> : null}
+                <CanvasMaterialLibraryModal
+                    open={materialLibraryOpen}
+                    initialTab={materialLibraryTab}
+                    onClose={() => setMaterialLibraryOpen(false)}
+                    onUsePreset={insertMaterialPreset}
+                    onOpenAssetPicker={() => {
+                        setMaterialLibraryOpen(false);
+                        setAssetPickerOpen(true);
+                    }}
+                    onUpload={() => {
+                        setMaterialLibraryOpen(false);
+                        handleUploadRequest();
+                    }}
+                />
+                <CanvasGenerationHistoryModal open={generationHistoryOpen} nodes={nodes} onClose={() => setGenerationHistoryOpen(false)} onSelectNode={duplicateNode} />
             </section>
             {assistantMounted ? (
                 <CanvasAssistantPanel
@@ -3104,6 +3931,1578 @@ function ReactFlowCanvasPage() {
     );
 }
 
+function stopCanvasPanelInteraction(event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>) {
+    event.stopPropagation();
+}
+
+function ScriptDeskPanel({
+    node,
+    theme,
+    onChange,
+    onCreateStoryboard,
+    onCreateNarration,
+    onCreateVideo,
+    onClose,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onChange: (patch: Partial<CanvasNodeMetadata>) => void;
+    onCreateStoryboard: () => void;
+    onCreateNarration: () => void;
+    onCreateVideo: () => void;
+    onClose: () => void;
+}) {
+    const body = node.metadata?.scriptBody ?? node.metadata?.content ?? DEFAULT_SCRIPT_BODY;
+    const beats = node.metadata?.scriptBeats?.length ? node.metadata.scriptBeats : buildScriptBeats(body);
+    const fieldStyle = { background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text };
+    const updateBody = (scriptBody: string) => onChange({ scriptBody, content: scriptBody, status: scriptBody.trim() ? NODE_STATUS_SUCCESS : NODE_STATUS_IDLE });
+
+    return (
+        <div
+            className="nodrag nopan pointer-events-auto w-[720px] max-w-[calc(100vw-32px)] rounded-2xl border p-4 shadow-[0_18px_48px_rgba(0,0,0,.34)] backdrop-blur-xl"
+            style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            data-canvas-no-zoom
+        >
+            <div className="mb-4 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                    <div className="text-sm font-semibold">脚本</div>
+                    <div className="mt-1 text-xs opacity-55">编辑剧本正文，并生成分镜、旁白或视频节点</div>
+                </div>
+                <button type="button" className="grid size-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/10" onClick={onClose} aria-label="关闭脚本">
+                    <X className="size-4" />
+                </button>
+            </div>
+            <div className="grid grid-cols-[1fr_220px] gap-4">
+                <div className="min-w-0 space-y-3">
+                    <DirectorInput label="标题" value={node.metadata?.scriptTitle || node.title || ""} placeholder="短片标题 / 分镜脚本名" onChange={(scriptTitle) => onChange({ scriptTitle })} style={fieldStyle} />
+                    <DirectorInput label="一句话梗概" value={node.metadata?.scriptLogline || ""} placeholder="角色、目标、冲突和转折" onChange={(scriptLogline) => onChange({ scriptLogline })} style={fieldStyle} />
+                    <label className="nodrag nopan block min-w-0" onMouseDownCapture={stopCanvasPanelInteraction} onPointerDownCapture={stopCanvasPanelInteraction} onClickCapture={(event) => event.stopPropagation()}>
+                        <span className="mb-1 block text-xs opacity-55">脚本正文</span>
+                        <textarea
+                            className="thin-scrollbar h-56 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 outline-none placeholder:opacity-35"
+                            value={body}
+                            placeholder="按幕、段落或镜头写下脚本内容"
+                            onChange={(event) => updateBody(event.target.value)}
+                            style={fieldStyle}
+                        />
+                    </label>
+                </div>
+                <div className="min-w-0 rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
+                    <div className="mb-2 text-xs font-medium opacity-65">分镜预览</div>
+                    <div className="thin-scrollbar max-h-[312px] space-y-2 overflow-y-auto pr-1">
+                        {beats.map((beat, index) => (
+                            <div key={beat.id} className="rounded-lg border p-2" style={{ borderColor: theme.toolbar.border }}>
+                                <div className="text-xs font-medium">
+                                    {index + 1}. {beat.title}
+                                </div>
+                                <div className="mt-1 line-clamp-3 text-xs leading-5 opacity-55">{beat.content}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button onClick={onCreateStoryboard} disabled={!body.trim()}>
+                    拆成分镜
+                </Button>
+                <Button onClick={onCreateNarration} disabled={!body.trim()}>
+                    生成旁白节点
+                </Button>
+                <Button type="primary" onClick={onCreateVideo} disabled={!body.trim()}>
+                    脚本生视频
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+type DirectorAspectLabel = "16:9" | "9:16" | "1:1" | "4:3" | "2.39:1";
+
+const ASPECT_PRESETS: Array<{ label: DirectorAspectLabel; value: number }> = [
+    { label: "16:9", value: 16 / 9 },
+    { label: "9:16", value: 9 / 16 },
+    { label: "1:1", value: 1 },
+    { label: "4:3", value: 4 / 3 },
+    { label: "2.39:1", value: 2.39 },
+];
+
+function DirectorStudioOverlay({
+    node,
+    theme,
+    onChange,
+    onCapture,
+    onSendToCanvas,
+    onClose,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onChange: (patch: Partial<CanvasNodeMetadata>) => void;
+    onCapture: (cameraId: string) => void;
+    onSendToCanvas: () => void;
+    onClose: () => void;
+}) {
+    const shots = node.metadata?.directorShots?.length ? node.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS;
+    const captures = node.metadata?.directorCaptures || [];
+    const [viewMode, setViewMode] = useState<"director" | "camera">("director");
+    const [rightTab, setRightTab] = useState<"props" | "captures">("props");
+    const [activeCameraId, setActiveCameraId] = useState(shots[0]?.id || DEFAULT_DIRECTOR_SHOTS[0].id);
+    const [selectedObject, setSelectedObject] = useState<"scene" | "camera" | "character" | "prop">("scene");
+    const [selectedCharacterId, setSelectedCharacterId] = useState<string>(node.metadata?.directorCharacters?.[0]?.id || DEFAULT_DIRECTOR_CHARACTERS[0].id);
+    const [aspectLabel, setAspectLabel] = useState<DirectorAspectLabel>(node.metadata?.directorSceneSettings?.aspectRatio || "16:9");
+    const [panoramaEnabled, setPanoramaEnabled] = useState<boolean>(Boolean(node.metadata?.directorSceneSettings?.panoramaVisible));
+    const [resetSignal, setResetSignal] = useState<number>(0);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const activeShot = shots.find((shot) => shot.id === activeCameraId) || shots[0] || DEFAULT_DIRECTOR_SHOTS[0];
+    const activeCameraIndex = Math.max(
+        0,
+        shots.findIndex((shot) => shot.id === activeCameraId),
+    );
+    const sceneSettings = node.metadata?.directorSceneSettings || DEFAULT_DIRECTOR_SCENE_SETTINGS;
+    const characters = node.metadata?.directorCharacters?.length ? node.metadata.directorCharacters : DEFAULT_DIRECTOR_CHARACTERS;
+    const selectedCharacter = characters.find((item) => item.id === selectedCharacterId) || characters[0];
+    const panoramaUrl = node.metadata?.directorSceneSettings?.panoramaUrl;
+    const aspectValue = ASPECT_PRESETS.find((item) => item.label === aspectLabel)?.value ?? 16 / 9;
+    const fieldStyle = { background: "#343434", borderColor: "rgba(255,255,255,.08)", color: theme.node.text };
+
+    const selectScene = () => {
+        setViewMode("director");
+        setSelectedObject("scene");
+    };
+    const selectCamera = (id = activeCameraId) => {
+        setActiveCameraId(id);
+        setSelectedObject("camera");
+        setRightTab("props");
+    };
+    const selectCharacter = (id: string) => {
+        setSelectedCharacterId(id);
+        setSelectedObject("character");
+    };
+    const updateActiveShot = (patch: Partial<(typeof shots)[number]>) => {
+        onChange({ directorShots: shots.map((shot) => (shot.id === activeCameraId ? { ...shot, ...patch } : shot)) });
+    };
+    const updateSceneSettings = (patch: Partial<typeof sceneSettings>) => {
+        onChange({ directorSceneSettings: { ...sceneSettings, ...patch } });
+    };
+    const updateCharacter = (id: string, patch: Partial<DirectorCharacterData>) => {
+        onChange({ directorCharacters: characters.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
+    };
+    const addCharacter = () => {
+        const next = makeDirectorCharacter(characters.length);
+        onChange({ directorCharacters: [...characters, next] });
+        selectCharacter(next.id);
+    };
+    const removeCharacter = (id: string) => {
+        const nextCharacters = characters.filter((item) => item.id !== id);
+        onChange({ directorCharacters: nextCharacters });
+        if (selectedCharacterId === id) setSelectedCharacterId(nextCharacters[0]?.id || "");
+    };
+    const props = node.metadata?.directorPropItems || [];
+    const [selectedPropId, setSelectedPropId] = useState<string>("");
+    const selectedProp = props.find((item) => item.id === selectedPropId);
+    const updateProp = (id: string, patch: Partial<NonNullable<CanvasNodeMetadata["directorPropItems"]>[number]>) => {
+        onChange({ directorPropItems: props.map((item) => (item.id === id ? { ...item, ...patch } : item)) });
+    };
+    const addProp = (shape: "box" | "sphere" | "cylinder" | "cone" | "plane") => {
+        const labels: Record<string, string> = { box: "立方体", sphere: "球体", cylinder: "圆柱", cone: "圆锥", plane: "平面" };
+        const next = { id: `prop-${Date.now()}`, name: labels[shape], shape, position: { x: 0, y: 0.5, z: 0 }, rotation: 0, scale: 1, color: "#8a8a8a", visible: true };
+        onChange({ directorPropItems: [...props, next] });
+        setSelectedPropId(next.id);
+        setSelectedObject("prop");
+    };
+    const removeProp = (id: string) => {
+        onChange({ directorPropItems: props.filter((item) => item.id !== id) });
+        if (selectedPropId === id) setSelectedPropId("");
+    };
+    const selectProp = (id: string) => {
+        setSelectedPropId(id);
+        setSelectedObject("prop");
+    };
+    const addCamera = () => {
+        const index = shots.length + 1;
+        const id = `camera-${Date.now()}`;
+        onChange({
+            directorShots: [
+                ...shots,
+                {
+                    id,
+                    name: `机位${index}`,
+                    camera: index % 2 ? "35mm 标准镜头 / 平视横移" : "85mm 长焦 / 轻微手持",
+                    prompt: "捕捉角色动作、表情和空间关系",
+                    fov: index % 2 ? 50 : 42,
+                    position: { x: (index - 1) * 2, y: 2.2, z: 10 - index },
+                    target: { x: 0, y: 1.2, z: 0 },
+                    targetMode: "manual",
+                    visible: true,
+                    locked: false,
+                },
+            ],
+        });
+        selectCamera(id);
+    };
+    const captureActiveCamera = () => {
+        setSelectedObject("camera");
+        setRightTab("captures");
+        onCapture(activeCameraId);
+    };
+    const resetView = () => {
+        onChange({
+            directorShots: shots.map((shot) => (shot.id === activeCameraId ? { ...shot, position: { x: 0, y: 2.2, z: 10 }, target: { x: 0, y: 1.2, z: 0 }, fov: 50 } : shot)),
+        });
+        setResetSignal((v) => v + 1);
+    };
+    const cycleAspect = () => {
+        const index = ASPECT_PRESETS.findIndex((item) => item.label === aspectLabel);
+        const next = ASPECT_PRESETS[(index + 1) % ASPECT_PRESETS.length];
+        setAspectLabel(next.label);
+        onChange({ directorSceneSettings: { ...sceneSettings, aspectRatio: next.label } });
+    };
+    const togglePanorama = () => {
+        if (!panoramaEnabled && !panoramaUrl) {
+            message.info("请先点击「导入」加载一张全景图");
+            return;
+        }
+        const next = !panoramaEnabled;
+        setPanoramaEnabled(next);
+        onChange({ directorSceneSettings: { ...sceneSettings, panoramaVisible: next } });
+    };
+    const onImportPanorama = (event: ReactChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const url = String(reader.result);
+            onChange({ directorSceneSettings: { ...sceneSettings, panoramaUrl: url, panoramaVisible: true } });
+            setPanoramaEnabled(true);
+        };
+        reader.readAsDataURL(file);
+        event.target.value = "";
+    };
+    const toggleFullscreen = (event: ReactMouseEvent<HTMLButtonElement>) => {
+        const el = event.currentTarget.closest(".fixed.inset-0") as HTMLElement | null;
+        if (!el) return;
+        if (document.fullscreenElement) document.exitFullscreen();
+        else el.requestFullscreen?.();
+    };
+    const aiRecognize = () => message.info("AI 识图需要接入 AI 服务，将在后续版本上线");
+    const showHelp = () => message.info("拖动角色或机位调整构图；选中角色后拖拽关节手柄调整姿势；多机位截图可回画布作为生图参考。");
+
+    return (
+        <div className="fixed inset-0 z-[120] flex flex-col overflow-hidden bg-[#0b0b0b] text-white" data-canvas-no-zoom>
+            <div className="relative flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#1f1f1f] px-6">
+                <div className="text-base font-semibold">3D导演台</div>
+                <div className="absolute left-1/2 top-3 flex -translate-x-1/2 rounded-2xl border border-white/10 bg-black/35 p-1">
+                    <button type="button" className={`h-8 rounded-xl px-4 text-sm ${viewMode === "director" ? "bg-white/12" : "text-white/60"}`} onClick={selectScene}>
+                        导演视角
+                    </button>
+                    <button
+                        type="button"
+                        className={`h-8 rounded-xl px-4 text-sm ${viewMode === "camera" ? "bg-white/12" : "text-white/60"}`}
+                        onClick={() => {
+                            setViewMode("camera");
+                            selectCamera();
+                        }}
+                    >
+                        机位视角
+                    </button>
+                </div>
+                <div className="flex items-center gap-3">
+                    <button type="button" className="grid size-8 place-items-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-white" title="帮助" onClick={showHelp}>
+                        ?
+                    </button>
+                    <button type="button" className="grid size-8 place-items-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="关闭导演台">
+                        <X className="size-5" />
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-[230px_minmax(0,1fr)_280px]">
+                <aside className="border-r border-white/10 bg-[#202020] p-3">
+                    <div className="mb-5 text-sm font-semibold">场景</div>
+                    <label className="mb-5 flex h-8 items-center gap-2 rounded-lg bg-white/10 px-3 text-xs text-white/50">
+                        <span className="grow">请输入搜索内容</span>
+                        <Search className="size-4" />
+                    </label>
+                    <div className="space-y-1">
+                        {shots.map((shot, index) => (
+                            <div key={shot.id} className={`flex h-8 items-center gap-1 rounded-md px-2 text-sm ${activeCameraId === shot.id && selectedObject === "camera" ? "bg-white/12" : "text-white/72 hover:bg-white/8"}`}>
+                                <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => selectCamera(shot.id)}>
+                                    <Video className="size-3.5 shrink-0" />
+                                    <span className="truncate">{shot.name || `机位${index + 1}`}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className="grid size-5 place-items-center rounded text-[11px] text-white/50 hover:bg-white/10 hover:text-white"
+                                    title={shot.visible === false ? "显示" : "隐藏"}
+                                    onClick={() => onChange({ directorShots: shots.map((item) => (item.id === shot.id ? { ...item, visible: item.visible === false } : item)) })}
+                                >
+                                    {shot.visible === false ? "隐" : "显"}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="grid size-5 place-items-center rounded text-[11px] text-white/50 hover:bg-white/10 hover:text-white"
+                                    title={shot.locked ? "解锁" : "锁定"}
+                                    onClick={() => onChange({ directorShots: shots.map((item) => (item.id === shot.id ? { ...item, locked: !item.locked } : item)) })}
+                                >
+                                    {shot.locked ? "锁" : "开"}
+                                </button>
+                            </div>
+                        ))}
+                        <div className="mt-2 text-[11px] uppercase tracking-wide text-white/35">角色</div>
+                        {characters.map((char) => (
+                            <div key={char.id} className={`flex h-8 items-center gap-1 rounded-md px-2 text-sm ${selectedCharacterId === char.id && selectedObject === "character" ? "bg-white/12" : "text-white/72 hover:bg-white/8"}`}>
+                                <span className="size-3 shrink-0 rounded-full" style={{ background: char.color }} />
+                                <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => selectCharacter(char.id)}>
+                                    <span className="truncate">{char.name}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className="grid size-5 place-items-center rounded text-[11px] text-white/50 hover:bg-white/10 hover:text-white"
+                                    title={char.visible === false ? "显示" : "隐藏"}
+                                    onClick={() => updateCharacter(char.id, { visible: char.visible === false })}
+                                >
+                                    {char.visible === false ? "隐" : "显"}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="grid size-5 place-items-center rounded text-[11px] text-white/50 hover:bg-white/10 hover:text-white"
+                                    title={char.locked ? "解锁" : "锁定"}
+                                    onClick={() => updateCharacter(char.id, { locked: !char.locked })}
+                                >
+                                    {char.locked ? "锁" : "开"}
+                                </button>
+                                <button type="button" className="grid size-5 place-items-center rounded text-[11px] text-white/50 transition hover:bg-white/10 hover:text-white" title="删除角色" onClick={() => removeCharacter(char.id)}>
+                                    ×
+                                </button>
+                            </div>
+                        ))}
+                        <button type="button" className="flex h-8 w-full items-center gap-1 rounded-md px-2 text-sm text-white/55 transition hover:bg-white/8 hover:text-white" onClick={addCharacter}>
+                            <span className="grid size-3.5 place-items-center text-[14px] leading-none">+</span>
+                            <span>添加角色</span>
+                        </button>
+                        <div className="mt-2 text-[11px] uppercase tracking-wide text-white/35">道具</div>
+                        {props.map((prop) => (
+                            <div key={prop.id} className={`flex h-8 items-center gap-1 rounded-md px-2 text-sm ${selectedPropId === prop.id && selectedObject === "prop" ? "bg-white/12" : "text-white/72 hover:bg-white/8"}`}>
+                                <span className="size-3 shrink-0 rounded" style={{ background: prop.color }} />
+                                <button type="button" className="flex min-w-0 flex-1 text-left" onClick={() => selectProp(prop.id)}>
+                                    <span className="truncate">{prop.name}</span>
+                                </button>
+                                <button type="button" className="grid size-5 place-items-center rounded text-[11px] text-white/50 hover:bg-white/10 hover:text-white" title="删除" onClick={() => removeProp(prop.id)}>
+                                    ×
+                                </button>
+                            </div>
+                        ))}
+                        <div className="flex flex-wrap gap-1">
+                            {[
+                                ["box", "立方体"],
+                                ["sphere", "球体"],
+                                ["cylinder", "圆柱"],
+                                ["cone", "圆锥"],
+                                ["plane", "平面"],
+                            ].map(([shape, label]) => (
+                                <button key={shape} type="button" className="rounded bg-white/8 px-2 py-1 text-[11px] text-white/60 transition hover:bg-white/15" onClick={() => addProp(shape as "box" | "sphere" | "cylinder" | "cone" | "plane")}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </aside>
+
+                <main className="relative min-w-0 overflow-hidden bg-[#050505]">
+                    <DirectorThreeStage
+                        scene={sceneSettings}
+                        characters={characters}
+                        selectedCharacterId={selectedCharacterId}
+                        onCharacterChange={updateCharacter}
+                        onSelectCharacterId={selectCharacter}
+                        activeShot={activeShot}
+                        selectedObject={selectedObject}
+                        viewMode={viewMode}
+                        onSelectObject={setSelectedObject}
+                        onActiveShotChange={updateActiveShot}
+                        resetSignal={resetSignal}
+                        props={props}
+                        selectedPropId={selectedPropId}
+                        onPropChange={updateProp}
+                        onSelectPropId={selectProp}
+                    />
+                    <div className="absolute right-5 top-4 z-10 flex flex-col items-center gap-2">
+                        <div className="relative size-20 rounded-full bg-[#151922] shadow-[0_0_0_1px_rgba(255,255,255,.06)]">
+                            <span className="absolute left-1/2 top-2 size-2 -translate-x-1/2 rounded-full bg-cyan-400" />
+                            <span className="absolute bottom-2 left-1/2 size-2 -translate-x-1/2 rounded-full bg-white/20" />
+                            <span className="absolute left-2 top-1/2 size-2 -translate-y-1/2 rounded-full bg-white/20" />
+                            <span className="absolute right-2 top-1/2 size-2 -translate-y-1/2 rounded-full bg-rose-400" />
+                            <span className="absolute left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 bg-blue-400" />
+                            <span className="absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 bg-blue-400" />
+                        </div>
+                        <button type="button" className="rounded-md bg-white/10 px-3 py-1.5 text-xs text-white/75" onClick={resetView}>
+                            重置视角
+                        </button>
+                    </div>
+                    <div className="absolute bottom-5 left-1/2 flex h-14 -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-[#202020]/95 px-3 shadow-2xl">
+                        {[
+                            { label: "移动 (V)", icon: "↖" },
+                            { label: "添加角色", icon: "人" },
+                            { label: "全景图", icon: "720" },
+                            { label: "添加机位", icon: "▣" },
+                            { label: "选择画幅比例", icon: "▭" },
+                            { label: "截图", icon: "◎" },
+                            { label: "AI 识图", icon: "识" },
+                            { label: "导入", icon: "入" },
+                            { label: "全屏", icon: "⛶" },
+                        ].map(({ label, icon }) => (
+                            <button
+                                key={label}
+                                type="button"
+                                className="grid size-9 place-items-center rounded-lg text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                                title={label}
+                                onClick={(event) => {
+                                    switch (label) {
+                                        case "移动 (V)":
+                                            selectScene();
+                                            break;
+                                        case "添加角色":
+                                            addCharacter();
+                                            break;
+                                        case "全景图":
+                                            togglePanorama();
+                                            break;
+                                        case "添加机位":
+                                            addCamera();
+                                            break;
+                                        case "选择画幅比例":
+                                            cycleAspect();
+                                            break;
+                                        case "截图":
+                                            captureActiveCamera();
+                                            break;
+                                        case "AI 识图":
+                                            aiRecognize();
+                                            break;
+                                        case "导入":
+                                            fileInputRef.current?.click();
+                                            break;
+                                        case "全屏":
+                                            toggleFullscreen(event);
+                                            break;
+                                    }
+                                }}
+                            >
+                                {icon}
+                            </button>
+                        ))}
+                        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onImportPanorama} />
+                    </div>
+                </main>
+
+                <aside className="flex min-h-0 flex-col border-l border-white/10 bg-[#202020]">
+                    <div className="flex h-12 shrink-0 items-center border-b border-white/10 px-5 text-base font-semibold">
+                        {selectedObject === "camera" ? "摄像机" : selectedObject === "character" ? "角色" : selectedObject === "prop" ? "道具" : "3D场景"}
+                    </div>
+                    <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
+                        {selectedObject === "camera" ? (
+                            <>
+                                <div className="border-b border-white/10 px-4 py-3">
+                                    <div className="flex rounded-lg bg-white/5 p-1">
+                                        <button type="button" className={`h-8 rounded-md px-3 text-sm ${rightTab === "props" ? "bg-white/12" : "text-white/55"}`} onClick={() => setRightTab("props")}>
+                                            属性
+                                        </button>
+                                        <button type="button" className={`h-8 rounded-md px-3 text-sm ${rightTab === "captures" ? "bg-white/12" : "text-white/55"}`} onClick={() => setRightTab("captures")}>
+                                            摄像机截图
+                                        </button>
+                                    </div>
+                                </div>
+                                {rightTab === "props" ? (
+                                    <DirectorCameraPanel activeShot={activeShot} activeCameraIndex={activeCameraIndex} fieldStyle={fieldStyle} onChange={updateActiveShot} />
+                                ) : (
+                                    <DirectorCapturesPanel captures={captures} onClear={() => onChange({ directorCaptures: [] })} onSendToCanvas={onSendToCanvas} />
+                                )}
+                            </>
+                        ) : selectedObject === "prop" ? (
+                            selectedProp ? (
+                                <div className="space-y-4 p-4">
+                                    <DirectorInput label="名称" value={selectedProp.name} placeholder="道具名称" onChange={(name) => updateProp(selectedProp.id, { name })} style={fieldStyle} />
+                                    <DirectorPanelBlock title="位置">
+                                        <DirectorVectorEditor value={selectedProp.position} onChange={(position) => updateProp(selectedProp.id, { position })} />
+                                    </DirectorPanelBlock>
+                                    <DirectorPanelBlock title="形状">
+                                        <select
+                                            value={selectedProp.shape}
+                                            onChange={(event) => updateProp(selectedProp.id, { shape: event.target.value as "box" | "sphere" | "cylinder" | "cone" | "plane" })}
+                                            className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white/80 outline-none"
+                                        >
+                                            {(["box", "sphere", "cylinder", "cone", "plane"] as const).map((sh) => (
+                                                <option key={sh} value={sh}>
+                                                    {{ box: "立方体", sphere: "球体", cylinder: "圆柱", cone: "圆锥", plane: "平面" }[sh]}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </DirectorPanelBlock>
+                                    <div className="flex items-center gap-3">
+                                        <input type="color" value={selectedProp.color} className="size-7 border-0 bg-transparent p-0" onChange={(event) => updateProp(selectedProp.id, { color: event.target.value })} />
+                                        <DirectorRange label="缩放" value={selectedProp.scale} min={0.2} max={5} step={0.1} digits={1} onChange={(scale) => updateProp(selectedProp.id, { scale })} />
+                                    </div>
+                                    <DirectorRange label="旋转" value={selectedProp.rotation} min={-180} max={180} digits={0} onChange={(rotation) => updateProp(selectedProp.id, { rotation })} />
+                                    <DirectorSwitchRow label="显示" checked={selectedProp.visible} onChange={(visible) => updateProp(selectedProp.id, { visible })} />
+                                </div>
+                            ) : (
+                                <div className="p-5 text-sm text-white/50">先添加道具，再编辑其属性</div>
+                            )
+                        ) : selectedObject === "character" ? (
+                            selectedCharacter ? (
+                                <DirectorCharacterPanel character={selectedCharacter} fieldStyle={fieldStyle} onChange={(patch) => updateCharacter(selectedCharacter.id, patch)} />
+                            ) : (
+                                <div className="p-5 text-sm text-white/50">先添加角色，再编辑其属性</div>
+                            )
+                        ) : (
+                            <DirectorScenePanel scene={sceneSettings} onChange={updateSceneSettings} />
+                        )}
+                    </div>
+                </aside>
+            </div>
+        </div>
+    );
+}
+
+function clampNumber(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, Math.round(value * 10) / 10));
+}
+
+function DirectorScenePanel({ scene, onChange }: { scene: NonNullable<CanvasNodeMetadata["directorSceneSettings"]>; onChange: (patch: Partial<NonNullable<CanvasNodeMetadata["directorSceneSettings"]>>) => void }) {
+    return (
+        <div className="thin-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+            <DirectorRange label="场景缩放" value={scene.scale} min={80} max={500} suffix="%" onChange={(scale) => onChange({ scale })} />
+            <DirectorPanelBlock title="场景平移">
+                <DirectorVectorEditor value={scene.translate} onChange={(translate) => onChange({ translate })} />
+            </DirectorPanelBlock>
+            <DirectorPanelBlock title="场景旋转">
+                <DirectorVectorEditor value={scene.rotate} onChange={(rotate) => onChange({ rotate })} />
+            </DirectorPanelBlock>
+            <div className="space-y-3 border-t border-white/10 pt-4">
+                <div className="text-sm font-semibold">全景背景</div>
+                <div className="text-xs text-white/45">已连接全景图</div>
+                <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.04] px-3 py-3 text-xs text-white/45">请将图片节点连接到导演台左侧输入口</div>
+                <div>
+                    <div className="mb-2 text-xs text-white/55">天空颜色</div>
+                    <div className="flex h-8 items-center gap-2 rounded-lg bg-white/10 px-2">
+                        <input type="color" value={scene.skyColor} className="size-5 border-0 bg-transparent p-0" onChange={(event) => onChange({ skyColor: event.target.value })} />
+                        <input value={scene.skyColor} className="min-w-0 flex-1 bg-transparent text-sm text-white/75 outline-none" onChange={(event) => onChange({ skyColor: event.target.value })} />
+                    </div>
+                </div>
+            </div>
+            <div className="space-y-4 border-t border-white/10 pt-4">
+                <div className="text-sm font-semibold">全景球</div>
+                <DirectorRange label="水平旋转" value={scene.panoramaRotation} min={-180} max={180} suffix="°" onChange={(panoramaRotation) => onChange({ panoramaRotation })} />
+                <DirectorRange label="球形半径" value={scene.panoramaRadius} min={10} max={160} onChange={(panoramaRadius) => onChange({ panoramaRadius })} />
+            </div>
+            <DirectorSwitchRow label="角色标签" checked={scene.characterLabels} onChange={(characterLabels) => onChange({ characterLabels })} />
+            <DirectorSwitchRow label="网格吸附" checked={scene.gridSnap} onChange={(gridSnap) => onChange({ gridSnap })} />
+            <div className="space-y-4 border-t border-white/10 pt-4">
+                <DirectorSwitchRow label="地面" checked={scene.groundVisible} compact onChange={(groundVisible) => onChange({ groundVisible })} />
+                <DirectorRange label="透明度" value={scene.groundOpacity} min={0} max={1} step={0.01} digits={2} onChange={(groundOpacity) => onChange({ groundOpacity })} />
+                <DirectorRange label="高度" value={scene.groundHeight} min={-10} max={10} step={0.1} digits={1} onChange={(groundHeight) => onChange({ groundHeight })} />
+            </div>
+        </div>
+    );
+}
+
+function DirectorCameraPanel({
+    activeShot,
+    activeCameraIndex,
+    fieldStyle,
+    onChange,
+}: {
+    activeShot: NonNullable<CanvasNodeMetadata["directorShots"]>[number];
+    activeCameraIndex: number;
+    fieldStyle: CSSProperties;
+    onChange: (patch: Partial<NonNullable<CanvasNodeMetadata["directorShots"]>[number]>) => void;
+}) {
+    const position = activeShot.position || { x: 0, y: 2.2 + activeCameraIndex, z: 10 };
+    const target = activeShot.target || { x: 0, y: 1.2, z: 0 };
+    const fov = activeShot.fov ?? 50;
+    return (
+        <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+                <div className="absolute inset-x-0 bottom-0 h-1/2 bg-[#11161c]" />
+                <div className="absolute left-1/2 top-1/2 h-10 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#4f8ef7]" />
+                <div className="absolute left-3 top-3 text-xs text-white/70">FOV {fov}°</div>
+                <button type="button" className="absolute bottom-3 right-3 grid size-7 place-items-center rounded-md bg-white/10 text-xs text-white/70">
+                    ↗
+                </button>
+            </div>
+            <DirectorInput label="名称" value={activeShot.name} placeholder="机位名称" onChange={(name) => onChange({ name })} style={fieldStyle} />
+            <DirectorInput label="镜头说明" value={activeShot.camera} placeholder="镜头说明" onChange={(camera) => onChange({ camera })} style={fieldStyle} />
+            <DirectorPanelBlock title="位置">
+                <DirectorVectorEditor value={position} onChange={(next) => onChange({ position: next })} />
+            </DirectorPanelBlock>
+            <DirectorInput label="注视目标" value={activeShot.targetMode === "character" ? "角色A" : "手动坐标"} placeholder="注视目标" onChange={(value) => onChange({ targetMode: value.includes("角色") ? "character" : "manual" })} style={fieldStyle} />
+            <DirectorPanelBlock title="注视坐标">
+                <DirectorVectorEditor value={target} onChange={(next) => onChange({ target: next })} />
+            </DirectorPanelBlock>
+            <DirectorRange label="视野角度 (FOV)" value={fov} min={20} max={90} digits={1} onChange={(next) => onChange({ fov: next })} />
+            <DirectorInput label="截图提示词" value={activeShot.prompt} placeholder="这个机位要捕捉什么" onChange={(prompt) => onChange({ prompt })} style={fieldStyle} />
+            <DirectorSwitchRow label="显示机位" checked={activeShot.visible !== false} onChange={(visible) => onChange({ visible })} />
+            <DirectorSwitchRow label="锁定机位" checked={Boolean(activeShot.locked)} onChange={(locked) => onChange({ locked })} />
+            <div className="border-t border-white/10 pt-4">
+                <div className="text-sm font-semibold">相机截图</div>
+            </div>
+        </div>
+    );
+}
+
+function DirectorCapturesPanel({ captures, onClear, onSendToCanvas }: { captures: NonNullable<CanvasNodeMetadata["directorCaptures"]>; onClear: () => void; onSendToCanvas: () => void }) {
+    return (
+        <div className="flex min-h-0 flex-1 flex-col">
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+                {captures.length ? (
+                    <div className="grid gap-4">
+                        {captures.map((capture) => (
+                            <button key={capture.id} type="button" className="w-full text-left">
+                                <img src={capture.dataUrl} alt={capture.name} className="aspect-video w-24 rounded bg-black object-cover" />
+                                <div className="mt-1 text-xs text-white/60">{capture.name}</div>
+                            </button>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="grid h-full place-items-center text-sm text-white/45">暂无摄像机截图</div>
+                )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-white/10 p-4">
+                <Button onClick={onClear} disabled={!captures.length}>
+                    全部清空
+                </Button>
+                <Button type="primary" onClick={onSendToCanvas} disabled={!captures.length}>
+                    发送到画布
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function DirectorCharacterPanel({ character, fieldStyle, onChange }: { character: DirectorCharacterData; fieldStyle: CSSProperties; onChange: (patch: Partial<DirectorCharacterData>) => void }) {
+    const pose = character.pose || DEFAULT_DIRECTOR_POSE;
+    const updatePose = (patch: Partial<typeof pose>) => onChange({ pose: { ...pose, ...patch } });
+    return (
+        <div className="space-y-4 p-4">
+            <div className="flex rounded-lg bg-white/5 p-1">
+                <button className="h-8 rounded-md bg-white/12 px-3 text-sm" type="button">
+                    属性
+                </button>
+                <button className="h-8 rounded-md px-3 text-sm text-white/55" type="button">
+                    姿势
+                </button>
+            </div>
+            <DirectorInput label="名称" value={character.name} placeholder="角色名称" onChange={(name) => onChange({ name })} style={fieldStyle} />
+            <DirectorPanelBlock title="位置">
+                <DirectorVectorEditor value={character.position} onChange={(position) => onChange({ position })} />
+            </DirectorPanelBlock>
+            <div className="flex items-center gap-3">
+                <input type="color" value={character.color} className="size-7 border-0 bg-transparent p-0" onChange={(event) => onChange({ color: event.target.value })} />
+                <input value={character.color} className="min-w-0 rounded bg-white/10 px-3 py-1.5 text-sm outline-none" onChange={(event) => onChange({ color: event.target.value })} />
+                <DirectorPanelBlock title="体型">
+                    <select value={character.type || "male"} onChange={(event) => onChange({ type: event.target.value as DirectorCharacterData["type"] })} className="w-full rounded bg-white/10 px-3 py-2 text-sm text-white/80 outline-none">
+                        {(["male", "female", "child", "tall", "short", "heavy", "slim"] as const).map((t) => (
+                            <option key={t} value={t}>
+                                {DIRECTOR_TYPE_LABELS[t]}
+                            </option>
+                        ))}
+                    </select>
+                </DirectorPanelBlock>
+                <DirectorRange label="体型缩放" value={character.scale ?? 1} min={0.5} max={2} step={0.05} digits={2} onChange={(scale) => onChange({ scale })} />
+            </div>
+            <DirectorSwitchRow label="显示角色" checked={character.visible} onChange={(visible) => onChange({ visible })} />
+            <DirectorSwitchRow label="锁定角色" checked={character.locked} onChange={(locked) => onChange({ locked })} />
+            <div className="space-y-3 border-t border-white/10 pt-4">
+                <div className="text-sm font-semibold">预设姿势</div>
+                <div className="grid grid-cols-4 gap-1.5">
+                    {DIRECTOR_POSE_PRESETS.map((p) => (
+                        <button key={p.id} type="button" className="rounded bg-white/8 px-1 py-1.5 text-xs text-white/70 transition hover:bg-white/18" onClick={() => onChange({ pose: { ...DEFAULT_DIRECTOR_POSE, ...p.pose } })}>
+                            {p.name}
+                        </button>
+                    ))}
+                </div>
+                <div className="text-sm font-semibold pt-2">头部</div>
+                <DirectorRange label="左右转头" value={pose.headYaw} min={-60} max={60} digits={1} onChange={(headYaw) => updatePose({ headYaw })} />
+                <DirectorRange label="上下点头" value={pose.headPitch} min={-45} max={45} digits={1} onChange={(headPitch) => updatePose({ headPitch })} />
+                <DirectorRange label="歪头" value={pose.headRoll} min={-30} max={30} digits={1} onChange={(headRoll) => updatePose({ headRoll })} />
+                <div className="text-sm font-semibold pt-2">躯干</div>
+                <DirectorRange label="转身" value={pose.torsoTwist} min={-60} max={60} digits={1} onChange={(torsoTwist) => updatePose({ torsoTwist })} />
+                <DirectorRange label="前倾后仰" value={pose.torsoLean} min={-45} max={45} digits={1} onChange={(torsoLean) => updatePose({ torsoLean })} />
+                <DirectorRange label="侧弯" value={pose.torsoBend} min={-30} max={30} digits={1} onChange={(torsoBend) => updatePose({ torsoBend })} />
+                <div className="text-sm font-semibold pt-2">左臂</div>
+                <DirectorRange label="外展" value={pose.leftArm} min={-30} max={120} digits={1} onChange={(leftArm) => updatePose({ leftArm })} />
+                <DirectorRange label="前举" value={pose.leftArmFwd} min={-45} max={120} digits={1} onChange={(leftArmFwd) => updatePose({ leftArmFwd })} />
+                <DirectorRange label="肘弯曲" value={pose.leftElbow} min={-120} max={0} digits={1} onChange={(leftElbow) => updatePose({ leftElbow })} />
+                <div className="text-sm font-semibold pt-2">右臂</div>
+                <DirectorRange label="外展" value={pose.rightArm} min={-30} max={120} digits={1} onChange={(rightArm) => updatePose({ rightArm })} />
+                <DirectorRange label="前举" value={pose.rightArmFwd} min={-45} max={120} digits={1} onChange={(rightArmFwd) => updatePose({ rightArmFwd })} />
+                <DirectorRange label="肘弯曲" value={pose.rightElbow} min={-120} max={0} digits={1} onChange={(rightElbow) => updatePose({ rightElbow })} />
+                <div className="text-sm font-semibold pt-2">左腿</div>
+                <DirectorRange label="前抬后伸" value={pose.leftLeg} min={-45} max={90} digits={1} onChange={(leftLeg) => updatePose({ leftLeg })} />
+                <DirectorRange label="外展" value={pose.leftHipSpread} min={-30} max={45} digits={1} onChange={(leftHipSpread) => updatePose({ leftHipSpread })} />
+                <DirectorRange label="膝弯曲" value={pose.leftKnee} min={0} max={120} digits={1} onChange={(leftKnee) => updatePose({ leftKnee })} />
+                <div className="text-sm font-semibold pt-2">右腿</div>
+                <DirectorRange label="前抬后伸" value={pose.rightLeg} min={-45} max={90} digits={1} onChange={(rightLeg) => updatePose({ rightLeg })} />
+                <DirectorRange label="外展" value={pose.rightHipSpread} min={-30} max={45} digits={1} onChange={(rightHipSpread) => updatePose({ rightHipSpread })} />
+                <DirectorRange label="膝弯曲" value={pose.rightKnee} min={0} max={120} digits={1} onChange={(rightKnee) => updatePose({ rightKnee })} />
+            </div>
+        </div>
+    );
+}
+
+function DirectorPanelBlock({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <div>
+            <div className="mb-2 text-xs text-white/55">{title}</div>
+            {children}
+        </div>
+    );
+}
+
+function DirectorAxisTriplet({ values }: { values: string[] }) {
+    return (
+        <div className="grid grid-cols-3 gap-2">
+            {values.map((value) => (
+                <div key={value} className="h-8 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/75">
+                    {value}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function DirectorVectorEditor({ value, onChange }: { value: { x: number; y: number; z: number }; onChange: (value: { x: number; y: number; z: number }) => void }) {
+    return (
+        <div className="grid grid-cols-3 gap-2">
+            {(["x", "y", "z"] as const).map((axis) => (
+                <label key={axis} className="flex h-8 items-center gap-1 rounded-lg bg-white/10 px-2 text-sm text-white/75">
+                    <span className="uppercase text-white/35">{axis}</span>
+                    <input type="number" step="0.1" value={value[axis]} className="min-w-0 flex-1 bg-transparent text-white outline-none" onChange={(event) => onChange({ ...value, [axis]: Number(event.target.value) || 0 })} />
+                </label>
+            ))}
+        </div>
+    );
+}
+
+function DirectorRange({
+    label,
+    value,
+    min = 0,
+    max = 100,
+    step = 1,
+    suffix = "",
+    digits = 0,
+    onChange,
+}: {
+    label: string;
+    value: number | string;
+    min?: number;
+    max?: number;
+    step?: number;
+    suffix?: string;
+    digits?: number;
+    onChange?: (value: number) => void;
+}) {
+    const numericValue = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, "")) || 0;
+    const displayValue = `${numericValue.toFixed(digits)}${suffix}`;
+    return (
+        <div>
+            <div className="mb-2 text-xs text-white/55">{label}</div>
+            <div className="flex items-center gap-3">
+                <input type="range" min={min} max={max} step={step} value={numericValue} className="min-w-0 flex-1 accent-cyan-400" onChange={(event) => onChange?.(Number(event.target.value))} />
+                <input
+                    type="text"
+                    value={displayValue}
+                    className="h-8 w-16 rounded-lg bg-white/10 px-2 text-center text-sm text-white/75 outline-none"
+                    onChange={(event) => {
+                        const next = Number(event.target.value.replace(/[^\d.-]/g, ""));
+                        if (!Number.isNaN(next)) onChange?.(next);
+                    }}
+                />
+            </div>
+        </div>
+    );
+}
+
+function DirectorSwitchRow({ label, checked, compact, onChange }: { label: string; checked?: boolean; compact?: boolean; onChange?: (checked: boolean) => void }) {
+    return (
+        <button type="button" className={`flex w-full items-center justify-between text-left ${compact ? "" : "border-t border-white/10 pt-4"}`} onClick={() => onChange?.(!checked)}>
+            <span className="text-sm font-semibold">{label}</span>
+            <span className={`relative h-5 w-9 rounded-full ${checked ? "bg-white" : "bg-white/15"}`}>
+                <span className={`absolute top-1 size-3 rounded-full ${checked ? "right-1 bg-[#202020]" : "left-1 bg-white/55"}`} />
+            </span>
+        </button>
+    );
+}
+
+function LegacyDirectorStudioOverlay({
+    node,
+    theme,
+    onChange,
+    onCapture,
+    onSendToCanvas,
+    onClose,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onChange: (patch: Partial<CanvasNodeMetadata>) => void;
+    onCapture: (cameraId: string) => void;
+    onSendToCanvas: () => void;
+    onClose: () => void;
+}) {
+    const shots = node.metadata?.directorShots?.length ? node.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS;
+    const captures = node.metadata?.directorCaptures || [];
+    const [viewMode, setViewMode] = useState<"director" | "camera">("director");
+    const [rightTab, setRightTab] = useState<"props" | "captures">("props");
+    const [activeCameraId, setActiveCameraId] = useState(shots[0]?.id || DEFAULT_DIRECTOR_SHOTS[0].id);
+    const [selectedObject, setSelectedObject] = useState<"camera" | "character" | "scene">("camera");
+    const activeShot = shots.find((shot) => shot.id === activeCameraId) || shots[0] || DEFAULT_DIRECTOR_SHOTS[0];
+    const activeCameraIndex = Math.max(
+        0,
+        shots.findIndex((shot) => shot.id === activeCameraId),
+    );
+    const fieldStyle = { background: "#343434", borderColor: "rgba(255,255,255,.08)", color: theme.node.text };
+
+    const updateActiveShot = (patch: Partial<(typeof shots)[number]>) => {
+        onChange({ directorShots: shots.map((shot) => (shot.id === activeCameraId ? { ...shot, ...patch } : shot)) });
+    };
+    const addCamera = () => {
+        const index = shots.length + 1;
+        const id = `camera-${Date.now()}`;
+        onChange({
+            directorShots: [
+                ...shots,
+                {
+                    id,
+                    name: `机位${index}`,
+                    camera: index % 2 ? "35mm 标准镜头 / 平视横移" : "85mm 长焦 / 轻微手持",
+                    prompt: "捕捉角色动作、表情和空间关系",
+                },
+            ],
+        });
+        setActiveCameraId(id);
+        setSelectedObject("camera");
+    };
+    const clearCaptures = () => onChange({ directorCaptures: [] });
+    const captureActiveCamera = () => {
+        setRightTab("captures");
+        onCapture(activeCameraId);
+    };
+
+    return (
+        <div className="fixed inset-0 z-[120] flex flex-col overflow-hidden bg-[#0b0b0b] text-white" data-canvas-no-zoom>
+            <div className="relative flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#1f1f1f] px-6">
+                <div className="text-base font-semibold">3D导演台</div>
+                <div className="absolute left-1/2 top-3 flex -translate-x-1/2 rounded-2xl border border-white/10 bg-black/35 p-1">
+                    <button type="button" className={`h-8 rounded-xl px-4 text-sm ${viewMode === "director" ? "bg-white/12" : "text-white/60"}`} onClick={() => setViewMode("director")}>
+                        导演视角
+                    </button>
+                    <button type="button" className={`h-8 rounded-xl px-4 text-sm ${viewMode === "camera" ? "bg-white/12" : "text-white/60"}`} onClick={() => setViewMode("camera")}>
+                        机位视角
+                    </button>
+                </div>
+                <div className="flex items-center gap-3">
+                    <button type="button" className="grid size-8 place-items-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-white" title="帮助">
+                        ?
+                    </button>
+                    <button type="button" className="grid size-8 place-items-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="关闭导演台">
+                        <X className="size-5" />
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-[230px_minmax(0,1fr)_280px]">
+                <aside className="border-r border-white/10 bg-[#202020] p-3">
+                    <div className="mb-5 text-sm font-semibold">场景</div>
+                    <label className="mb-5 flex h-8 items-center gap-2 rounded-lg bg-white/10 px-3 text-xs text-white/50">
+                        <span className="grow">请输入搜索内容</span>
+                        <Search className="size-4" />
+                    </label>
+                    <div className="space-y-1">
+                        {shots.map((shot, index) => (
+                            <button
+                                key={shot.id}
+                                type="button"
+                                className={`flex h-8 w-full items-center gap-2 rounded-md px-3 text-left text-sm ${activeCameraId === shot.id && selectedObject === "camera" ? "bg-white/12" : "text-white/72 hover:bg-white/8"}`}
+                                onClick={() => {
+                                    setActiveCameraId(shot.id);
+                                    setSelectedObject("camera");
+                                    setRightTab("props");
+                                }}
+                            >
+                                <Video className="size-3.5" />
+                                <span className="truncate">{shot.name || `机位${index + 1}`}</span>
+                            </button>
+                        ))}
+                        <button
+                            type="button"
+                            className={`flex h-8 w-full items-center gap-2 rounded-md px-3 text-left text-sm ${selectedObject === "character" ? "bg-white/12" : "text-white/72 hover:bg-white/8"}`}
+                            onClick={() => setSelectedObject("character")}
+                        >
+                            <span className="grid size-3.5 place-items-center text-[11px]">人</span>
+                            <span>角色A</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <main className="relative min-w-0 overflow-hidden bg-[#050505]">
+                    <div className="absolute right-5 top-4 z-10 flex flex-col items-center gap-2">
+                        <div className="relative size-20 rounded-full bg-[#151922] shadow-[0_0_0_1px_rgba(255,255,255,.06)]">
+                            <span className="absolute left-1/2 top-2 size-2 -translate-x-1/2 rounded-full bg-cyan-400" />
+                            <span className="absolute bottom-2 left-1/2 size-2 -translate-x-1/2 rounded-full bg-white/20" />
+                            <span className="absolute left-2 top-1/2 size-2 -translate-y-1/2 rounded-full bg-white/20" />
+                            <span className="absolute right-2 top-1/2 size-2 -translate-y-1/2 rounded-full bg-rose-400" />
+                            <span className="absolute left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 bg-blue-400" />
+                            <span className="absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 bg-blue-400" />
+                        </div>
+                        <button type="button" className="rounded-md bg-white/10 px-3 py-1.5 text-xs text-white/75">
+                            重置视角
+                        </button>
+                    </div>
+
+                    <div className="absolute inset-x-0 bottom-0 h-[55%] bg-[#11161c]" />
+                    <div
+                        className="absolute inset-x-0 bottom-0 h-[56%] opacity-80"
+                        style={{
+                            backgroundImage: "linear-gradient(rgba(50,180,220,.22) 1px, transparent 1px), linear-gradient(90deg, rgba(50,180,220,.22) 1px, transparent 1px), linear-gradient(rgba(255,80,100,.18) 1px, transparent 1px)",
+                            backgroundSize: "48px 48px, 48px 48px, 240px 240px",
+                            transform: "perspective(520px) rotateX(62deg) translateY(120px) scale(1.45)",
+                            transformOrigin: "50% 100%",
+                        }}
+                    />
+                    <div className="absolute left-1/2 top-[27%] h-[46%] w-[58%] -translate-x-1/2 border border-cyan-300/28" style={{ transform: "translateX(-50%) perspective(800px) rotateX(0deg) skewX(-2deg)" }} />
+                    <div className="absolute left-1/2 top-[40%] h-[44%] w-px -translate-x-1/2 bg-blue-400/65" />
+                    <div className="absolute left-1/2 top-[39%] flex -translate-x-1/2 flex-col items-center">
+                        <div className="mb-2 rounded px-2 py-1 text-sm font-semibold text-white drop-shadow">角色A</div>
+                        <div className="relative h-56 w-28">
+                            <div className="absolute left-1/2 top-0 size-12 -translate-x-1/2 rounded-full bg-[#4f8ef7]" />
+                            <div className="absolute left-1/2 top-12 h-20 w-14 -translate-x-1/2 rounded-3xl bg-[#4f8ef7]" />
+                            <div className="absolute left-3 top-20 h-24 w-4 rounded-full bg-[#4f8ef7]" />
+                            <div className="absolute right-3 top-20 h-24 w-4 rounded-full bg-[#4f8ef7]" />
+                            <div className="absolute left-8 top-30 h-24 w-5 rounded-full bg-[#4f8ef7]" />
+                            <div className="absolute right-8 top-30 h-24 w-5 rounded-full bg-[#4f8ef7]" />
+                        </div>
+                    </div>
+                    {selectedObject === "character" ? (
+                        <div className="absolute left-1/2 top-[67%] h-36 w-36 -translate-x-1/2 rounded-full border-4 border-blue-400/70">
+                            <span className="absolute left-1/2 top-1/2 h-36 w-1 -translate-x-1/2 -translate-y-1/2 bg-green-400" />
+                            <span className="absolute left-0 top-1/2 h-1 w-36 -translate-y-1/2 bg-red-500" />
+                        </div>
+                    ) : null}
+
+                    <div className="absolute bottom-5 left-1/2 flex h-14 -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-[#202020]/95 px-3 shadow-2xl">
+                        {[
+                            ["移动 (V)", "↖"],
+                            ["添加角色", "人"],
+                            ["全景图", "720"],
+                            ["添加机位", "▣"],
+                            ["选择画幅比例", "□"],
+                            ["截图", "▣"],
+                            ["AI 识图", "✦"],
+                            ["导入", "⇱"],
+                        ].map(([label, icon]) => (
+                            <button
+                                key={label}
+                                type="button"
+                                className="grid size-9 place-items-center rounded-lg text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                                title={label}
+                                onClick={() => {
+                                    if (label === "添加机位") addCamera();
+                                    if (label === "截图") captureActiveCamera();
+                                }}
+                            >
+                                {icon}
+                            </button>
+                        ))}
+                    </div>
+                </main>
+
+                <aside className="flex min-h-0 flex-col border-l border-white/10 bg-[#202020]">
+                    <div className="flex h-12 shrink-0 items-center border-b border-white/10 px-5 text-base font-semibold">{selectedObject === "camera" ? "摄像机" : selectedObject === "character" ? "角色" : "3D场景"}</div>
+                    <div className="flex min-h-0 flex-1 flex-col">
+                        {selectedObject === "camera" ? (
+                            <>
+                                <div className="border-b border-white/10 px-4 py-3">
+                                    <div className="flex rounded-lg bg-white/5 p-1">
+                                        <button type="button" className={`h-8 rounded-md px-3 text-sm ${rightTab === "props" ? "bg-white/12" : "text-white/55"}`} onClick={() => setRightTab("props")}>
+                                            属性
+                                        </button>
+                                        <button type="button" className={`h-8 rounded-md px-3 text-sm ${rightTab === "captures" ? "bg-white/12" : "text-white/55"}`} onClick={() => setRightTab("captures")}>
+                                            摄像机截图
+                                        </button>
+                                    </div>
+                                </div>
+                                {rightTab === "props" ? (
+                                    <div className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                                        <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+                                            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-[#11161c]" />
+                                            <div className="absolute left-1/2 top-1/2 h-10 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#4f8ef7]" />
+                                            <div className="absolute left-3 top-3 text-xs text-white/70">FOV 50°</div>
+                                        </div>
+                                        <DirectorInput label="名称" value={activeShot.name} placeholder="机位名称" onChange={(name) => updateActiveShot({ name })} style={fieldStyle} />
+                                        <DirectorInput label="切换机位" value={activeShot.name} placeholder="机位" onChange={(name) => updateActiveShot({ name })} style={fieldStyle} />
+                                        <div>
+                                            <div className="mb-2 text-xs text-white/55">位置</div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {["X 0", `Y ${2.2 + activeCameraIndex}`, "Z 10"].map((value) => (
+                                                    <div key={value} className="h-8 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/75">
+                                                        {value}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <DirectorInput label="注视目标" value="角色A" placeholder="注视目标" onChange={() => undefined} style={fieldStyle} />
+                                        <div>
+                                            <div className="mb-2 text-xs text-white/55">视野角度 (FOV)</div>
+                                            <input type="range" min="20" max="90" defaultValue="50" className="w-full accent-cyan-400" />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex min-h-0 flex-1 flex-col">
+                                        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+                                            {captures.length ? (
+                                                <div className="grid gap-3">
+                                                    {captures.map((capture) => (
+                                                        <div key={capture.id}>
+                                                            <img src={capture.dataUrl} alt={capture.name} className="aspect-video w-24 rounded bg-black object-cover" />
+                                                            <div className="mt-1 text-xs text-white/60">{capture.name}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="grid h-full place-items-center text-sm text-white/45">暂无摄像机截图</div>
+                                            )}
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 border-t border-white/10 p-4">
+                                            <Button onClick={clearCaptures} disabled={!captures.length}>
+                                                全部清空
+                                            </Button>
+                                            <Button type="primary" onClick={onSendToCanvas} disabled={!captures.length}>
+                                                发送到画布
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : selectedObject === "character" ? (
+                            <div className="space-y-4 p-4">
+                                <div className="flex rounded-lg bg-white/5 p-1">
+                                    <button className="h-8 rounded-md bg-white/12 px-3 text-sm" type="button">
+                                        属性
+                                    </button>
+                                    <button className="h-8 rounded-md px-3 text-sm text-white/55" type="button">
+                                        姿势
+                                    </button>
+                                </div>
+                                <DirectorInput label="名称" value="角色A" placeholder="角色名称" onChange={() => undefined} style={fieldStyle} />
+                                <div className="grid grid-cols-3 gap-2">
+                                    {["X 0", "Y 0", "Z 0"].map((value) => (
+                                        <div key={value} className="h-8 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white/75">
+                                            {value}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="size-7 rounded-md bg-[#4f8ef7]" />
+                                    <span className="rounded bg-white/10 px-3 py-1.5 text-sm">#4F8EF7</span>
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
+                </aside>
+            </div>
+        </div>
+    );
+}
+
+function DirectorDeskPanel({
+    node,
+    theme,
+    onChange,
+    onCreateStoryboard,
+    onClose,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onChange: (patch: Partial<CanvasNodeMetadata>) => void;
+    onCreateStoryboard: () => void;
+    onClose: () => void;
+}) {
+    const shots = node.metadata?.directorShots?.length ? node.metadata.directorShots : DEFAULT_DIRECTOR_SHOTS;
+    const updateShot = (id: string, patch: Partial<(typeof shots)[number]>) => {
+        onChange({ directorShots: shots.map((shot) => (shot.id === id ? { ...shot, ...patch } : shot)) });
+    };
+    const addShot = () => {
+        const index = shots.length + 1;
+        onChange({
+            directorShots: [
+                ...shots,
+                {
+                    id: `shot-${Date.now()}`,
+                    name: `机位 ${index}`,
+                    camera: "50mm 标准镜头 / 平视跟拍",
+                    prompt: "补充这个视角要表达的动作、情绪和画面重点",
+                },
+            ],
+        });
+    };
+    const removeShot = (id: string) => {
+        onChange({ directorShots: shots.filter((shot) => shot.id !== id) });
+    };
+    const fieldStyle = { background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text };
+
+    return (
+        <div
+            className="pointer-events-auto w-[720px] max-w-[calc(100vw-32px)] rounded-2xl border p-4 shadow-[0_18px_48px_rgba(0,0,0,.34)] backdrop-blur-xl"
+            style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            data-canvas-no-zoom
+        >
+            <div className="mb-4 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                    <div className="text-sm font-semibold">导演台</div>
+                    <div className="mt-1 text-xs opacity-55">搭建场景、编排机位，并把多视角截图回写到画布</div>
+                </div>
+                <button type="button" className="grid size-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/10" onClick={onClose} aria-label="关闭导演台">
+                    <X className="size-4" />
+                </button>
+            </div>
+            <div className="grid grid-cols-[1fr_240px] gap-4">
+                <div className="min-w-0 space-y-3">
+                    <DirectorTextarea label="场景空间" value={node.metadata?.directorScene || ""} placeholder="描述空间、时间、氛围和角色站位" onChange={(directorScene) => onChange({ directorScene })} style={fieldStyle} />
+                    <div className="grid grid-cols-2 gap-3">
+                        <DirectorInput label="角色" value={node.metadata?.directorCast || ""} placeholder="主角、配角、群众" onChange={(directorCast) => onChange({ directorCast })} style={fieldStyle} />
+                        <DirectorInput label="道具" value={node.metadata?.directorProps || ""} placeholder="关键道具、布景、灯光" onChange={(directorProps) => onChange({ directorProps })} style={fieldStyle} />
+                    </div>
+                    <DirectorInput label="视觉风格" value={node.metadata?.directorStyle || ""} placeholder="电影感、写实、赛博、纪录片..." onChange={(directorStyle) => onChange({ directorStyle })} style={fieldStyle} />
+                </div>
+                <div className="rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
+                    <div className="mb-2 text-xs font-medium opacity-65">3D 场景预览</div>
+                    <div className="relative aspect-square overflow-hidden rounded-lg" style={{ background: "linear-gradient(145deg, #121212, #222 48%, #0b0b0b)" }}>
+                        <div className="absolute left-[18%] top-[18%] h-[58%] w-[64%] border border-white/12 bg-white/[0.03]" />
+                        <div className="absolute bottom-[22%] left-[36%] h-[34%] w-[18%] rounded-full bg-cyan-200/35 blur-sm" />
+                        <div className="absolute bottom-[24%] right-[18%] h-[16%] w-[34%] rounded bg-white/10" />
+                        <div className="absolute left-3 top-3 rounded bg-black/45 px-2 py-1 text-[10px] text-white/70">Scene</div>
+                    </div>
+                </div>
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+                <div className="text-xs font-medium opacity-65">机位截图</div>
+                <button type="button" className="h-8 rounded-lg px-3 text-xs transition hover:bg-white/10" onClick={addShot} style={{ color: theme.node.text }}>
+                    添加机位
+                </button>
+            </div>
+            <div className="mt-2 grid gap-2">
+                {shots.map((shot, index) => (
+                    <div key={shot.id} className="grid grid-cols-[92px_1fr_1fr_auto] items-center gap-2 rounded-xl border p-2" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
+                        <input className="h-8 rounded-lg border px-2 text-xs outline-none" value={shot.name} onChange={(event) => updateShot(shot.id, { name: event.target.value })} style={fieldStyle} aria-label={`机位 ${index + 1} 名称`} />
+                        <input className="h-8 rounded-lg border px-2 text-xs outline-none" value={shot.camera} onChange={(event) => updateShot(shot.id, { camera: event.target.value })} style={fieldStyle} aria-label={`机位 ${index + 1} 镜头`} />
+                        <input className="h-8 rounded-lg border px-2 text-xs outline-none" value={shot.prompt} onChange={(event) => updateShot(shot.id, { prompt: event.target.value })} style={fieldStyle} aria-label={`机位 ${index + 1} 目标`} />
+                        <button type="button" className="grid size-8 place-items-center rounded-lg text-xs opacity-65 transition hover:bg-white/10 hover:opacity-100" onClick={() => removeShot(shot.id)} aria-label={`删除 ${shot.name}`}>
+                            <X className="size-3.5" />
+                        </button>
+                    </div>
+                ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+                <Button onClick={onClose}>收起</Button>
+                <Button type="primary" onClick={onCreateStoryboard} disabled={!shots.length}>
+                    生成多视角截图
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function DirectorInput({ label, value, placeholder, onChange, style }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; style: CSSProperties }) {
+    return (
+        <label className="nodrag nopan block min-w-0" onMouseDownCapture={stopCanvasPanelInteraction} onPointerDownCapture={stopCanvasPanelInteraction} onClickCapture={(event) => event.stopPropagation()}>
+            <span className="mb-1 block text-xs opacity-55">{label}</span>
+            <input className="nodrag nopan h-9 w-full rounded-lg border px-3 text-sm outline-none placeholder:opacity-35 select-text" value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} style={style} />
+        </label>
+    );
+}
+
+function DirectorTextarea({ label, value, placeholder, onChange, style }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; style: CSSProperties }) {
+    return (
+        <label className="nodrag nopan block min-w-0" onMouseDownCapture={stopCanvasPanelInteraction} onPointerDownCapture={stopCanvasPanelInteraction} onClickCapture={(event) => event.stopPropagation()}>
+            <span className="mb-1 block text-xs opacity-55">{label}</span>
+            <textarea
+                className="nodrag nopan thin-scrollbar h-20 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none placeholder:opacity-35 select-text"
+                value={value}
+                placeholder={placeholder}
+                onChange={(event) => onChange(event.target.value)}
+                style={style}
+            />
+        </label>
+    );
+}
+
+function directorShotDataUrl(shot: NonNullable<CanvasNodeMetadata["directorShots"]>[number], scene: NonNullable<CanvasNodeMetadata["directorSceneSettings"]>, characters: DirectorCharacterData[], _index: number) {
+    const sky = scene.skyColor || "#060608";
+    const groundOpacity = Math.max(0.15, Math.min(1, scene.groundOpacity ?? 0.4));
+    const fov = shot.fov ?? 50;
+    const aspectValue = ASPECT_PRESETS.find((p) => p.label === (scene.aspectRatio || "16:9"))?.value ?? 16 / 9;
+    const frameHeight = 300;
+    const frameWidth = Math.max(150, Math.min(560, frameHeight * aspectValue));
+    const frameX = (640 - frameWidth) / 2;
+    const frameY = (640 - frameHeight) / 2;
+    const grid = scene.gridSnap ? "rgba(103,232,249,.34)" : "rgba(103,232,249,.18)";
+    const characterSvg = characters
+        .map((char, ci) => {
+            const cx = 320 + (char.position?.x || 0) * 18 - (shot.position?.x || 0) * 8 + ci * 8;
+            const cy = 360 - (char.position?.y || 0) * 16;
+            const color = char.color || "#4f8ef7";
+            return `<text x="${cx - 32}" y="${cy - 96}" fill="white" font-family="Arial, sans-serif" font-size="20" font-weight="700">${escapeSvgText(char.name || `角色${ci + 1}`)}</text><circle cx="${cx}" cy="${cy - 64}" r="28" fill="${escapeSvgText(color)}"/><rect x="${cx - 25}" y="${cy - 36}" width="50" height="86" rx="24" fill="${escapeSvgText(color)}"/><rect x="${cx - 52}" y="${cy - 18}" width="18" height="82" rx="9" fill="${escapeSvgText(color)}"/><rect x="${cx + 34}" y="${cy - 18}" width="18" height="82" rx="9" fill="${escapeSvgText(color)}"/><rect x="${cx - 23}" y="${cy + 44}" width="18" height="92" rx="9" fill="${escapeSvgText(color)}"/><rect x="${cx + 5}" y="${cy + 44}" width="18" height="92" rx="9" fill="${escapeSvgText(color)}"/>`;
+        })
+        .join("");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><rect width="640" height="640" fill="${escapeSvgText(sky)}"/><rect y="310" width="640" height="330" fill="#11161c" opacity="${groundOpacity}"/><g stroke="${grid}" stroke-width="1">${Array.from(
+        { length: 11 },
+    )
+        .map((_, i) => `<path d="M${80 + i * 48} 640 320 310"/>`)
+        .join("")}${Array.from({ length: 7 })
+        .map((_, i) => `<path d="M80 ${640 - i * 42} 560 ${640 - i * 42}"/>`)
+        .join(
+            "",
+        )}</g><rect x="${frameX}" y="${frameY}" width="${frameWidth}" height="${frameHeight}" fill="none" stroke="#67e8f9" stroke-opacity=".55" stroke-width="2"/>${characterSvg}<rect x="58" y="58" width="524" height="524" rx="28" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="2"/><text x="82" y="104" fill="white" font-family="Arial, sans-serif" font-size="28" font-weight="700">${escapeSvgText(shot.name)}</text><text x="82" y="140" fill="rgba(255,255,255,.68)" font-family="Arial, sans-serif" font-size="18">${escapeSvgText(shot.camera)}</text><text x="82" y="512" fill="rgba(255,255,255,.66)" font-family="Arial, sans-serif" font-size="16">FOV ${fov}° · ${escapeSvgText(scene.aspectRatio || "16:9")}</text><text x="82" y="548" fill="rgba(255,255,255,.5)" font-family="Arial, sans-serif" font-size="14">POS ${shot.position?.x ?? 0},${shot.position?.y ?? 0},${shot.position?.z ?? 0}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+function escapeSvgText(value: string) {
+    return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char] || char);
+}
+
+function buildScriptBeats(body: string) {
+    const lines = body
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const chunks = lines.length
+        ? lines
+        : body
+              .split(/[。！？.!?]+/)
+              .map((line) => line.trim())
+              .filter(Boolean);
+    const source = chunks.length ? chunks.slice(0, 6) : ["建立场景", "角色行动", "情绪高潮"];
+    return source.map((content, index) => {
+        const clean = content.replace(/^\d+[.、\s]*/, "");
+        const title = clean.match(/^([^：:]{2,18})[：:]/)?.[1] || `分镜 ${index + 1}`;
+        return {
+            id: `beat-${index + 1}`,
+            title,
+            content: clean,
+            prompt: `根据脚本分镜生成画面：${clean}。要求画面有清晰主体、镜头景别、动作和氛围，电影感构图。`,
+        };
+    });
+}
+
+function scriptStoryboardDataUrl(title: string, index: number) {
+    const palettes = [
+        ["#101010", "#374151", "#f9fafb"],
+        ["#111827", "#1d4ed8", "#bfdbfe"],
+        ["#18181b", "#9f1239", "#fecdd3"],
+        ["#172554", "#854d0e", "#fde68a"],
+    ];
+    const [bg, block, accent] = palettes[index % palettes.length];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><rect width="640" height="640" fill="${bg}"/><rect x="76" y="92" width="488" height="340" rx="24" fill="${block}" opacity=".78"/><path d="M126 382 240 244l92 104 62-76 120 110H126Z" fill="${accent}" opacity=".76"/><rect x="76" y="92" width="488" height="340" rx="24" fill="none" stroke="rgba(255,255,255,.20)" stroke-width="2"/><text x="92" y="506" fill="white" font-family="Arial, sans-serif" font-size="30" font-weight="700">${escapeSvgText(title)}</text><text x="92" y="544" fill="rgba(255,255,255,.58)" font-family="Arial, sans-serif" font-size="17">Script Storyboard ${index + 1}</text></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function materialPresetBackground(index: number, tab: "styles" | "effects" | "assets") {
+    const styles = ["linear-gradient(135deg,#111827,#0e7490,#f8fafc)", "linear-gradient(135deg,#1f2937,#f59e0b,#fef3c7)", "linear-gradient(135deg,#0a0a0a,#581c87,#22d3ee)"];
+    const effects = [
+        "radial-gradient(circle at 35% 35%,#f8fafc 0 8%,transparent 9%),linear-gradient(135deg,#111827,#1d4ed8)",
+        "conic-gradient(from 120deg,#111827,#16a34a,#f8fafc,#111827)",
+        "linear-gradient(120deg,#0f172a 0 35%,#f97316 36% 44%,#111827 45% 100%)",
+    ];
+    return (tab === "effects" ? effects : styles)[index % 3];
+}
+
+function CanvasMaterialLibraryModal({
+    open,
+    initialTab,
+    onClose,
+    onUsePreset,
+    onOpenAssetPicker,
+    onUpload,
+}: {
+    open: boolean;
+    initialTab: "styles" | "effects" | "assets";
+    onClose: () => void;
+    onUsePreset: (preset: { title: string; prompt: string }) => void;
+    onOpenAssetPicker: () => void;
+    onUpload: () => void;
+}) {
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
+    const [tab, setTab] = useState<"styles" | "effects" | "assets">("styles");
+
+    useEffect(() => {
+        if (open) setTab(initialTab);
+    }, [initialTab, open]);
+
+    const presets = tab === "effects" ? MATERIAL_LIBRARY_PRESETS.effects : MATERIAL_LIBRARY_PRESETS.styles;
+    return (
+        <Modal title="素材库" open={open} centered width={720} footer={null} onCancel={onClose} destroyOnHidden styles={{ body: { background: theme.node.panel, color: theme.node.text } }}>
+            <div className="mb-4 flex gap-1 rounded-lg p-1" style={{ background: theme.toolbar.itemHover }}>
+                {[
+                    ["styles", "风格库"],
+                    ["effects", "效果库"],
+                    ["assets", "我的素材"],
+                ].map(([value, label]) => (
+                    <button
+                        key={value}
+                        type="button"
+                        className="h-8 rounded-md px-3 text-sm transition"
+                        style={{ background: tab === value ? theme.toolbar.activeBg : "transparent", color: tab === value ? theme.toolbar.activeText : theme.node.text }}
+                        onClick={() => setTab(value as "styles" | "effects" | "assets")}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {tab === "assets" ? (
+                <div className="grid min-h-[260px] place-items-center rounded-xl border p-8 text-center" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
+                    <div>
+                        <FolderOpen className="mx-auto mb-3 size-8 opacity-55" />
+                        <div className="text-sm font-medium">从我的素材插入</div>
+                        <div className="mt-2 text-xs opacity-55">支持文本、图片、视频和音频素材回写到当前画布</div>
+                        <div className="mt-4 flex justify-center gap-2">
+                            <Button onClick={onUpload} icon={<Upload className="size-4" />}>
+                                上传
+                            </Button>
+                            <Button type="primary" onClick={onOpenAssetPicker} icon={<FolderOpen className="size-4" />}>
+                                选择素材
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="grid grid-cols-3 gap-3">
+                    {presets.map((preset, index) => (
+                        <button
+                            key={preset.title}
+                            type="button"
+                            className="group min-w-0 rounded-xl border p-3 text-left transition hover:bg-white/10"
+                            style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
+                            onClick={() => onUsePreset(preset)}
+                        >
+                            <div className="mb-3 aspect-square rounded-lg" style={{ background: materialPresetBackground(index, tab) }} />
+                            <div className="truncate text-sm font-medium">{preset.title}</div>
+                            <div className="mt-1 line-clamp-2 text-xs leading-5 opacity-55">{preset.prompt}</div>
+                            <div className="mt-3 text-xs opacity-0 transition group-hover:opacity-80">插入到画布</div>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </Modal>
+    );
+}
+
+function CanvasGenerationHistoryModal({ open, nodes, onClose, onSelectNode }: { open: boolean; nodes: CanvasNodeData[]; onClose: () => void; onSelectNode: (nodeId: string) => void }) {
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
+    const [tab, setTab] = useState<"image" | "video" | "audio">("image");
+    const items = nodes.filter((node) => {
+        const hasMedia = Boolean(node.metadata?.content || node.metadata?.storageKey);
+        if (!hasMedia) return false;
+        if (tab === "image") return node.type === CanvasNodeType.Image;
+        if (tab === "video") return node.type === CanvasNodeType.Video;
+        return node.type === CanvasNodeType.Audio;
+    });
+    const sourceLabels = ["FlowCanvas", "生成节点", "ComfyUI", "AI应用"];
+
+    return (
+        <Modal title="选择生成历史" open={open} centered width={760} footer={null} onCancel={onClose} styles={{ body: { background: theme.node.panel, color: theme.node.text } }}>
+            <div className="grid min-h-[360px] grid-cols-[132px_1fr] gap-4">
+                <div className="space-y-2 border-r pr-3" style={{ borderColor: theme.toolbar.border }}>
+                    {sourceLabels.map((label) => (
+                        <div key={label} className="rounded-lg px-3 py-2 text-sm" style={{ background: label === "FlowCanvas" ? theme.toolbar.activeBg : "transparent", color: label === "FlowCanvas" ? theme.toolbar.activeText : theme.node.text }}>
+                            {label}
+                        </div>
+                    ))}
+                </div>
+                <div className="min-w-0">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div className="flex gap-1 rounded-lg p-1" style={{ background: theme.toolbar.itemHover }}>
+                            {[
+                                ["image", "图片"],
+                                ["video", "视频"],
+                                ["audio", "音频"],
+                            ].map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    className="h-8 rounded-md px-3 text-sm transition"
+                                    style={{ background: tab === value ? theme.toolbar.activeBg : "transparent", color: tab === value ? theme.toolbar.activeText : theme.node.text }}
+                                    onClick={() => setTab(value as "image" | "video" | "audio")}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        <span className="text-xs opacity-55">已选 0/10 项</span>
+                    </div>
+                    {items.length ? (
+                        <div className="grid grid-cols-3 gap-3">
+                            {items.slice(0, 30).map((node) => (
+                                <button
+                                    key={node.id}
+                                    type="button"
+                                    className="group min-w-0 rounded-xl border p-2 text-left transition hover:bg-white/10"
+                                    style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
+                                    onClick={() => {
+                                        onSelectNode(node.id);
+                                        onClose();
+                                    }}
+                                >
+                                    <div className="mb-2 flex aspect-[4/3] items-center justify-center rounded-lg text-xs opacity-65" style={{ background: theme.toolbar.itemHover }}>
+                                        {tab === "image" ? <ImageIcon className="size-6" /> : tab === "video" ? <Video className="size-6" /> : <Music2 className="size-6" />}
+                                    </div>
+                                    <div className="truncate text-sm font-medium">{node.title}</div>
+                                    <div className="mt-1 truncate text-xs opacity-50">{node.metadata?.prompt || node.metadata?.requestPrompt || "画布生成结果"}</div>
+                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="grid min-h-[260px] place-items-center rounded-xl border text-center text-sm opacity-55" style={{ borderColor: theme.toolbar.border }}>
+                            当前画布还没有可选择的{tab === "image" ? "图片" : tab === "video" ? "视频" : "音频"}生成结果
+                        </div>
+                    )}
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function CanvasAssetManagerPanel({
+    open,
+    initialTab,
+    nodes,
+    selectedNodeIds,
+    onClose,
+    onSelectNode,
+    onOpenAssetPicker,
+    onUpload,
+}: {
+    open: boolean;
+    initialTab: "canvas" | "assets";
+    nodes: CanvasNodeData[];
+    selectedNodeIds: Set<string>;
+    onClose: () => void;
+    onSelectNode: (nodeId: string) => void;
+    onOpenAssetPicker: () => void;
+    onUpload: () => void;
+}) {
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
+    const assets = useAssetStore((state) => state.assets);
+    const [tab, setTab] = useState<"canvas" | "assets">("canvas");
+    const [query, setQuery] = useState("");
+    const filteredNodes = nodes.filter((node) => `${node.title} ${node.type}`.toLowerCase().includes(query.trim().toLowerCase()));
+    const filteredAssets = assets.filter((asset) => `${asset.title} ${(asset.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
+
+    useEffect(() => {
+        if (open) setTab(initialTab);
+    }, [initialTab, open]);
+
+    if (!open) return null;
+
+    return (
+        <aside className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
+            <div className="flex h-[92px] shrink-0 flex-col justify-end border-b px-4 pb-3" style={{ borderColor: theme.toolbar.border }}>
+                <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">资产管理</div>
+                        <div className="mt-1 truncate text-xs opacity-55">当前画布资源与项目素材</div>
+                    </div>
+                    <button type="button" className="grid size-8 place-items-center rounded-lg transition hover:bg-white/10" onClick={onClose} aria-label="关闭资产管理">
+                        <X className="size-4" />
+                    </button>
+                </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1 border-b p-2" style={{ borderColor: theme.toolbar.border }}>
+                <button
+                    type="button"
+                    className="h-8 rounded-lg px-3 text-sm font-medium transition"
+                    style={{ background: tab === "canvas" ? theme.toolbar.activeBg : "transparent", color: tab === "canvas" ? theme.toolbar.activeText : theme.node.text }}
+                    onClick={() => setTab("canvas")}
+                >
+                    画布
+                </button>
+                <button
+                    type="button"
+                    className="h-8 rounded-lg px-3 text-sm font-medium transition"
+                    style={{ background: tab === "assets" ? theme.toolbar.activeBg : "transparent", color: tab === "assets" ? theme.toolbar.activeText : theme.node.text }}
+                    onClick={() => setTab("assets")}
+                >
+                    资产
+                </button>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2" style={{ borderColor: theme.toolbar.border }}>
+                <Search className="size-4 opacity-45" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "canvas" ? "搜索画布元素" : "搜索素材"} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-45" />
+            </div>
+            {tab === "canvas" ? (
+                <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+                    <div className="mb-2 flex items-center justify-between text-xs opacity-55">
+                        <span>画布元素</span>
+                        <span>共 {nodes.length} 节点</span>
+                    </div>
+                    <div className="space-y-1.5">
+                        {filteredNodes.map((node) => (
+                            <button
+                                key={node.id}
+                                type="button"
+                                className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm transition"
+                                style={{ background: selectedNodeIds.has(node.id) ? theme.toolbar.activeBg : "transparent", color: selectedNodeIds.has(node.id) ? theme.toolbar.activeText : theme.node.text }}
+                                onClick={() => onSelectNode(node.id)}
+                            >
+                                <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
+                                    {nodeIcon(node.type)}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate">{node.title || node.type}</span>
+                            </button>
+                        ))}
+                        {!filteredNodes.length ? <div className="rounded-lg px-2 py-8 text-center text-sm opacity-50">没有匹配的画布元素</div> : null}
+                    </div>
+                </div>
+            ) : (
+                <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                        <Button className="!h-9" icon={<FolderOpen className="size-4" />} onClick={onOpenAssetPicker}>
+                            从素材插入
+                        </Button>
+                        <Button className="!h-9" icon={<Upload className="size-4" />} onClick={onUpload}>
+                            上传
+                        </Button>
+                    </div>
+                    <div className="mb-2 flex items-center justify-between text-xs opacity-55">
+                        <span>我的素材</span>
+                        <span>共 {assets.length} 项</span>
+                    </div>
+                    <div className="space-y-1.5">
+                        {filteredAssets.slice(0, 40).map((asset) => (
+                            <button key={asset.id} type="button" className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:bg-white/10" onClick={onOpenAssetPicker}>
+                                <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
+                                    {asset.kind === "text" ? <FileText className="size-4" /> : <ImageIcon className="size-4" />}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate">{asset.title}</span>
+                            </button>
+                        ))}
+                        {!filteredAssets.length ? <div className="rounded-lg px-2 py-8 text-center text-sm opacity-50">还没有素材，先上传或保存节点到素材库</div> : null}
+                    </div>
+                </div>
+            )}
+        </aside>
+    );
+}
+
+function nodeIcon(type: CanvasNodeType) {
+    if (type === CanvasNodeType.Text) return <FileText className="size-4" />;
+    if (type === CanvasNodeType.Image) return <ImageIcon className="size-4" />;
+    if (type === CanvasNodeType.Video) return <Video className="size-4" />;
+    if (type === CanvasNodeType.Audio) return <Music2 className="size-4" />;
+    return <Box className="size-4" />;
+}
+
 function CanvasTopBar({
     title,
     titleDraft,
@@ -3112,15 +5511,10 @@ function CanvasTopBar({
     onStartTitleEditing,
     onFinishTitleEditing,
     onCancelTitleEditing,
-    canUndo,
-    canRedo,
     onHome,
     onProjects,
     onCreateProject,
     onDeleteProject,
-    onImportImage,
-    onUndo,
-    onRedo,
     agentOpen,
     onToggleAgent,
 }: {
@@ -3131,22 +5525,16 @@ function CanvasTopBar({
     onStartTitleEditing: () => void;
     onFinishTitleEditing: () => void;
     onCancelTitleEditing: () => void;
-    canUndo: boolean;
-    canRedo: boolean;
     onHome: () => void;
     onProjects: () => void;
     onCreateProject: () => void;
     onDeleteProject: () => void;
-    onImportImage: () => void;
-    onUndo: () => void;
-    onRedo: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
-    const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
     useEffect(() => {
         if (!isTitleEditing) return;
@@ -3160,31 +5548,29 @@ function CanvasTopBar({
     return (
         <>
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
-                <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+                <div className="pointer-events-auto flex min-w-0 items-center overflow-hidden rounded-xl border backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                     <Dropdown
                         trigger={["click"]}
                         menu={{
                             items: [
-                                { key: "home", icon: <Home className="size-4" />, label: "主页", onClick: onHome },
-                                { key: "docs", icon: <BookOpen className="size-4" />, label: "文档", onClick: () => window.open(DOCS_URL, "_blank", "noopener,noreferrer") },
-                                { key: "projects", icon: <Images className="size-4" />, label: "我的画布", onClick: onProjects },
+                                { key: "home", icon: <Home className="size-4" />, label: "回到主页", onClick: onHome },
+                                { key: "projects", icon: <Images className="size-4" />, label: "全部项目", onClick: onProjects },
                                 { type: "divider" },
-                                { key: "new", icon: <Plus className="size-4" />, label: "新建画布", onClick: onCreateProject },
-                                { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除当前画布", onClick: onDeleteProject },
+                                { key: "new", icon: <Plus className="size-4" />, label: "创建新项目", onClick: onCreateProject },
                                 { type: "divider" },
-                                { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
-                                { type: "divider" },
-                                { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut="⌘ Z" />, onClick: onUndo },
-                                { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut="⌘ ⇧ Z / ⌘ Y" />, onClick: onRedo },
+                                { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除项目", onClick: onDeleteProject },
                             ],
                         }}
                     >
-                        <button type="button" className="grid size-9 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label="打开画布菜单">
-                            <Menu className="size-5" />
+                        <button type="button" className="flex h-10 items-center gap-2 px-3 transition hover:bg-white/10" aria-label="打开画布菜单">
+                            <Menu className="size-4" />
+                            <span className="font-semibold">FlowCanvas</span>
+                            <ChevronDown className="size-3 opacity-55" />
                         </button>
                     </Dropdown>
 
-                    <div ref={titleRef} className="flex min-w-0 items-center gap-2">
+                    <div className="h-6 w-px" style={{ background: theme.toolbar.border }} />
+                    <div ref={titleRef} className="flex h-10 min-w-0 items-center px-3">
                         {isTitleEditing ? (
                             <input
                                 autoFocus
@@ -3195,16 +5581,11 @@ function CanvasTopBar({
                                     if (event.key === "Enter") onFinishTitleEditing();
                                     if (event.key === "Escape") onCancelTitleEditing();
                                 }}
-                                className="max-w-[280px] bg-transparent p-0 text-left text-lg font-semibold tracking-normal outline-none"
+                                className="max-w-[180px] bg-transparent p-0 text-left text-sm font-semibold tracking-normal outline-none"
                                 style={{ color: theme.node.text }}
                             />
                         ) : (
-                            <button
-                                type="button"
-                                className="max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
-                                onDoubleClick={onStartTitleEditing}
-                                title="双击修改画布名称"
-                            >
+                            <button type="button" className="max-w-[180px] truncate text-left text-sm font-semibold tracking-normal transition hover:opacity-75" onDoubleClick={onStartTitleEditing} title="双击修改画布名称">
                                 {title}
                             </button>
                         )}
@@ -3212,12 +5593,56 @@ function CanvasTopBar({
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1.5">
-                    <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
-                    <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
+                    <Dropdown
+                        trigger={["click"]}
+                        menu={{
+                            items: [
+                                {
+                                    key: "publish",
+                                    icon: <Upload className="size-4" />,
+                                    label: (
+                                        <div>
+                                            <div className="font-medium">在 FlowCanvas 上发布</div>
+                                            <div className="text-xs opacity-55">发布当前作品和创作过程</div>
+                                        </div>
+                                    ),
+                                },
+                                {
+                                    key: "link",
+                                    icon: <Link2 className="size-4" />,
+                                    label: (
+                                        <div>
+                                            <div className="font-medium">分享链接</div>
+                                            <div className="text-xs opacity-55">复制当前画布地址</div>
+                                        </div>
+                                    ),
+                                    onClick: () => void navigator.clipboard?.writeText(window.location.href),
+                                },
+                            ],
+                        }}
+                    >
+                        <button
+                            type="button"
+                            className="grid size-10 place-items-center rounded-xl border backdrop-blur-xl transition hover:bg-white/10"
+                            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                            aria-label="发布与分享"
+                        >
+                            <Share2 className="size-4" />
+                        </button>
+                    </Dropdown>
+                    <button
+                        type="button"
+                        className="flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold backdrop-blur-xl transition hover:bg-white/10"
+                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                        aria-label="积分"
+                    >
+                        <Zap className="size-4 fill-current" />
+                        20
+                    </button>
                     <Button
                         type="text"
                         className="!h-10 !rounded-xl !px-3 !font-medium"
-                        style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+                        style={{ background: agentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                         icon={<Bot className="size-4" />}
                         onClick={onToggleAgent}
                     >
@@ -3225,54 +5650,7 @@ function CanvasTopBar({
                     </Button>
                 </div>
             </div>
-            <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
-                <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut keys={["拖动画布"]} value="平移视图" />
-                    <Shortcut keys={["滚轮"]} value="缩放画布" />
-                    <Shortcut keys={["缩放滑杆"]} value="精确调整缩放" />
-                    <Shortcut keys={["Ctrl / Cmd", "拖动"]} value="框选多个节点" />
-                    <Shortcut keys={["Shift / Ctrl / Cmd", "点击"]} value="追加选择节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "A"]} value="全选节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "C / V"]} value="复制 / 粘贴节点，或粘贴剪切板文本/图片" />
-                    <Shortcut keys={["Ctrl / Cmd", "Z"]} value="撤销" />
-                    <Shortcut keys={["Ctrl / Cmd", "Shift", "Z"]} value="重做" />
-                    <Shortcut keys={["Ctrl / Cmd", "Y"]} value="重做" />
-                    <Shortcut keys={["Delete / Backspace"]} value="删除选中" />
-                    <Shortcut keys={["Esc"]} value="取消选择并关闭浮层" />
-                    <Shortcut keys={["拖入图片/视频/音频"]} value="上传到画布" />
-                </div>
-            </Modal>
         </>
-    );
-}
-
-function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
-    return (
-        <span className="flex min-w-36 items-center justify-between gap-8">
-            <span>{text}</span>
-            <span className="text-xs opacity-45">{shortcut}</span>
-        </span>
-    );
-}
-
-function Shortcut({ keys, value }: { keys: string[]; value: string }) {
-    return (
-        <div className="grid grid-cols-[minmax(0,1fr)_120px] items-center gap-6 rounded-lg px-1 py-1.5">
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {keys.map((key, index) => (
-                    <span key={`${key}-${index}`} className="flex items-center gap-1.5">
-                        {index ? <span className="text-xs opacity-35">+</span> : null}
-                        <kbd
-                            className="min-w-9 rounded-md border px-2.5 py-1.5 text-center text-xs font-medium leading-none shadow-[inset_0_-1px_0_rgba(0,0,0,.08),0_1px_2px_rgba(0,0,0,.06)]"
-                            style={{ borderColor: "rgba(120,113,108,.28)", background: "linear-gradient(#fff, rgba(245,245,244,.92))", color: "rgb(68,64,60)" }}
-                        >
-                            {key}
-                        </kbd>
-                    </span>
-                ))}
-            </span>
-            <span className="text-right text-sm opacity-55">{value}</span>
-        </div>
     );
 }
 
@@ -3573,6 +5951,18 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     };
 }
 
+function mergeActiveGenerationNodes(restoredNodes: CanvasNodeData[], liveNodes: CanvasNodeData[], activeNodeIds: Set<string>) {
+    if (!activeNodeIds.size) return restoredNodes;
+    const liveById = new Map(liveNodes.map((node) => [node.id, node]));
+    const restoredIds = new Set(restoredNodes.map((node) => node.id));
+    const merged = restoredNodes.map((node) => (activeNodeIds.has(node.id) ? liveById.get(node.id) || node : node));
+    activeNodeIds.forEach((id) => {
+        const liveNode = liveById.get(id);
+        if (liveNode && !restoredIds.has(id)) merged.push(liveNode);
+    });
+    return merged;
+}
+
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
 }
@@ -3612,13 +6002,23 @@ function isAudioFile(file: File) {
     return file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
 }
 
+function isTextFile(file: File) {
+    return file.type.startsWith("text/") || /\.(txt|md|markdown|srt)$/i.test(file.name);
+}
+
+function isScriptTextFile(file: File) {
+    return /\.(md|markdown|srt)$/i.test(file.name) || /script|剧本|脚本|分镜/i.test(file.name);
+}
+
 function buildAngleLabel(params: CanvasImageAngleParams) {
     const horizontal = params.horizontalAngle === 0 ? "正面视角" : params.horizontalAngle > 0 ? `向右旋转 ${params.horizontalAngle} 度` : `向左旋转 ${Math.abs(params.horizontalAngle)} 度`;
     const pitch = params.pitchAngle === 0 ? "水平视角" : params.pitchAngle > 0 ? `俯视 ${params.pitchAngle} 度` : `仰视 ${Math.abs(params.pitchAngle)} 度`;
     return `AI 多角度：${horizontal}，${pitch}，镜头距离 ${params.cameraDistance.toFixed(1)}，${params.wideAngle ? "广角" : "标准"}镜头`;
 }
 
-function PreviewImageContent({ node }: { node: CanvasNodeData }) {
+function PreviewImageContent({ node, onCapturePanorama }: { node: CanvasNodeData; onCapturePanorama: (dataUrl: string) => void | Promise<void> }) {
+    if (node.metadata?.canvasTool === "panorama360") return <PreviewPanoramaContent node={node} onCapture={onCapturePanorama} />;
+
     const storageKey = node.metadata?.storageKey;
     const content = node.metadata?.content;
     const [src, setSrc] = useState<string | null>(null);
@@ -3651,6 +6051,219 @@ function PreviewImageContent({ node }: { node: CanvasNodeData }) {
     }
     if (!src) return <div className="flex min-h-[40vh] items-center justify-center p-8 text-sm opacity-60">加载中…</div>;
     return <img src={src} alt={node.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} onError={() => setError(true)} />;
+}
+
+function PreviewPanoramaContent({ node, onCapture }: { node: CanvasNodeData; onCapture: (dataUrl: string) => void | Promise<void> }) {
+    const storageKey = node.metadata?.storageKey;
+    const content = node.metadata?.content;
+    const [src, setSrc] = useState("");
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        let mounted = true;
+        setError("");
+        resolveImageUrl(storageKey, content ?? "")
+            .then((url) => {
+                if (!mounted) return;
+                if (url) setSrc(url);
+                else setError("全景图加载失败");
+            })
+            .catch((err) => {
+                if (mounted) setError(err instanceof Error ? err.message : "全景图加载失败");
+            });
+        return () => {
+            mounted = false;
+        };
+    }, [content, storageKey]);
+
+    if (error) {
+        return (
+            <div className="flex h-[76vh] w-[92vw] flex-col items-center justify-center gap-2 bg-black p-8 text-white">
+                <p className="text-sm font-medium">{error}</p>
+                <p className="text-xs text-white/55">请重新上传或重新生成 2:1 全景图</p>
+            </div>
+        );
+    }
+    if (!src) return <div className="flex h-[76vh] w-[92vw] items-center justify-center bg-black p-8 text-sm text-white/60">正在加载全景图…</div>;
+    return <PanoramaImmersivePreview src={src} title={node.title} onCapture={onCapture} />;
+}
+
+function PanoramaImmersivePreview({ src, title, onCapture }: { src: string; title: string; onCapture: (dataUrl: string) => void | Promise<void> }) {
+    const hostRef = useRef<HTMLDivElement | null>(null);
+    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const renderRef = useRef<() => void>(() => {});
+    const [textureSrc, setTextureSrc] = useState(src);
+    const [error, setError] = useState("");
+    const [capturing, setCapturing] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        setError("");
+        if (!/^https?:/i.test(src)) {
+            setTextureSrc(src);
+            return;
+        }
+        setTextureSrc("");
+        imageToDataUrl({ url: src })
+            .then((dataUrl) => {
+                if (!cancelled) setTextureSrc(dataUrl);
+            })
+            .catch((err) => {
+                if (!cancelled) setError(err instanceof Error ? err.message : "全景贴图加载失败");
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [src]);
+
+    useEffect(() => {
+        if (!textureSrc) return;
+        const host = hostRef.current;
+        if (!host) return;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+        rendererRef.current = renderer;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setClearColor(0x000000, 1);
+        host.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1100);
+        camera.position.set(0, 0, 0);
+        let disposed = false;
+        let dragging = false;
+        let yaw = 0;
+        let pitch = 0;
+
+        const geometry = new THREE.SphereGeometry(500, 96, 48);
+        geometry.scale(-1, 1, 1);
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin("anonymous");
+        const texture = loader.load(
+            textureSrc,
+            () => render(),
+            undefined,
+            () => {
+                if (!disposed) setError("全景贴图加载失败");
+            },
+        );
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+        scene.add(new THREE.Mesh(geometry, material));
+
+        const updateCameraDirection = () => {
+            const direction = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+            camera.lookAt(direction);
+        };
+        updateCameraDirection();
+
+        const resize = () => {
+            if (disposed) return;
+            const width = Math.max(1, host.clientWidth);
+            const height = Math.max(1, host.clientHeight);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height, false);
+            render();
+        };
+        function render() {
+            if (disposed) return;
+            renderer.render(scene, camera);
+        }
+        renderRef.current = render;
+        const handleWheel = (event: WheelEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            camera.fov = Math.max(35, Math.min(95, camera.fov + event.deltaY * 0.035));
+            camera.updateProjectionMatrix();
+            render();
+        };
+        const stopCanvasInteraction = (event: Event) => event.stopPropagation();
+        const handlePointerDown = (event: PointerEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            dragging = true;
+            renderer.domElement.setPointerCapture(event.pointerId);
+            renderer.domElement.style.cursor = "grabbing";
+        };
+        const handlePointerMove = (event: PointerEvent) => {
+            if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
+            yaw -= event.movementX * 0.004;
+            pitch += event.movementY * 0.004;
+            pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, pitch));
+            updateCameraDirection();
+            render();
+        };
+        const handlePointerUp = (event: PointerEvent) => {
+            if (!dragging) return;
+            event.preventDefault();
+            event.stopPropagation();
+            dragging = false;
+            renderer.domElement.releasePointerCapture(event.pointerId);
+            renderer.domElement.style.cursor = "grab";
+        };
+        const observer = new ResizeObserver(resize);
+        observer.observe(host);
+        renderer.domElement.className = "nodrag nopan block h-full w-full";
+        renderer.domElement.style.cursor = "grab";
+        host.addEventListener("wheel", handleWheel, { passive: false });
+        renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+        renderer.domElement.addEventListener("pointermove", handlePointerMove);
+        renderer.domElement.addEventListener("pointerup", handlePointerUp);
+        renderer.domElement.addEventListener("pointercancel", handlePointerUp);
+        host.addEventListener("mousedown", stopCanvasInteraction);
+        resize();
+
+        return () => {
+            disposed = true;
+            rendererRef.current = null;
+            renderRef.current = () => {};
+            observer.disconnect();
+            host.removeEventListener("wheel", handleWheel);
+            renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+            renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+            renderer.domElement.removeEventListener("pointerup", handlePointerUp);
+            renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
+            host.removeEventListener("mousedown", stopCanvasInteraction);
+            texture.dispose();
+            geometry.dispose();
+            material.dispose();
+            renderer.dispose();
+            renderer.domElement.remove();
+        };
+    }, [textureSrc]);
+
+    const capture = useCallback(async () => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        setCapturing(true);
+        try {
+            renderRef.current();
+            await onCapture(renderer.domElement.toDataURL("image/png"));
+        } finally {
+            setCapturing(false);
+        }
+    }, [onCapture]);
+
+    return (
+        <div className="nodrag nopan relative h-[76vh] w-[92vw] overflow-hidden bg-black text-white" data-canvas-no-zoom>
+            <div ref={hostRef} className="h-full w-full" aria-label={title || "360全景预览"} />
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent p-4">
+                <div className="min-w-0 pr-4">
+                    <div className="truncate text-sm font-medium">{title || "360全景预览"}</div>
+                    <div className="text-xs text-white/55">左键拖动旋转视角，滚轮缩放 FOV</div>
+                </div>
+                <Button className="pointer-events-auto" type="primary" loading={capturing} onClick={capture}>
+                    截图插入画布
+                </Button>
+            </div>
+            {!textureSrc || error ? <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-white/70">{error || "正在准备全景贴图"}</div> : null}
+        </div>
+    );
 }
 
 function buildAnglePrompt(params: CanvasImageAngleParams) {

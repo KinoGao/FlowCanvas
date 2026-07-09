@@ -1,8 +1,8 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
-import { Button, InputNumber, Segmented, Select, Switch } from "antd";
+import { Button, InputNumber, Segmented, Select, Switch, type SelectProps } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -35,6 +35,38 @@ type CanvasConfigNodePanelProps = {
 const COMFY_AUTO_EXPAND_BASE = 250;
 const COMFY_AUTO_EXPAND_PER_FIELD = 88;
 const COMFY_AUTO_EXPAND_MAX = 800;
+
+const stopCanvasSelectInteraction = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+};
+
+const renderCanvasSelectPopup = (menu: ReactNode) => (
+    <div className="canvas-no-zoom-popup" data-canvas-no-zoom onMouseDown={stopCanvasSelectInteraction} onPointerDown={stopCanvasSelectInteraction} onWheel={stopCanvasSelectInteraction} onWheelCapture={stopCanvasSelectInteraction}>
+        {menu}
+    </div>
+);
+
+function CanvasSafeSelect(props: SelectProps<string>) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="nodrag nopan" data-canvas-no-zoom onMouseDown={stopCanvasSelectInteraction} onPointerDown={stopCanvasSelectInteraction} onClick={() => setOpen(true)}>
+            <Select
+                {...props}
+                open={open}
+                classNames={{ popup: { root: "canvas-no-zoom-popup" }, ...props.classNames }}
+                popupRender={props.popupRender || renderCanvasSelectPopup}
+                onOpenChange={(next) => {
+                    setOpen(next);
+                    props.onOpenChange?.(next);
+                }}
+                onChange={(value, option) => {
+                    setOpen(false);
+                    props.onChange?.(value, option);
+                }}
+            />
+        </div>
+    );
+}
 
 export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, mentionReferences = [], onConfigChange, onHeightChange, onGenerate, onStop, onComposerToggle }: CanvasConfigNodePanelProps) {
     const globalConfig = useEffectiveConfig();
@@ -154,8 +186,9 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
             </div>
 
             <div
-                className={`mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
+                className={`nodrag nopan mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
                 onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
             >
                 {mode === "comfyui" ? (
                     <ComfyWorkflowControls node={node} workflows={workflows} selectedWorkflow={selectedWorkflow} inputs={inputs} mentionReferences={mentionReferences} onConfigChange={onConfigChange} />
@@ -246,14 +279,13 @@ function ComfyWorkflowControls({
 
     return (
         <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
-            <Select
+            <CanvasSafeSelect
                 className="canvas-compact-control h-10"
                 popupMatchSelectWidth={false}
                 placeholder="选择 ComfyUI 工作流"
                 value={selectedWorkflow?.id}
                 options={workflows.map((workflow) => ({ label: workflow.title, value: workflow.id }))}
                 onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
-                classNames={{ popup: { root: "canvas-no-zoom-popup" } }}
             />
             {selectedWorkflow?.fields.length ? (
                 <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
@@ -281,7 +313,14 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
     if (field.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
     if (field.type === "number") return <InputNumber className="w-full" value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
     if (field.type === "slider") return <InputNumber className="w-full" min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} value={Number(value) || 0} onChange={(next) => onChange(Number(next) || 0)} />;
-    if (field.type === "dropdown") return <Select value={String(value ?? "")} options={(field.options || []).map((option) => ({ label: option, value: option }))} onChange={onChange} />;
+    if (field.type === "dropdown")
+        return (
+            <CanvasSafeSelect
+                value={String(value ?? "")}
+                options={(field.options || []).map((option) => ({ label: option, value: option }))}
+                onChange={onChange}
+            />
+        );
     if (field.type === "textarea") {
         return (
             <CanvasResourceMentionTextarea
@@ -302,7 +341,7 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
         const currentValue = String(value ?? "");
         const isNodeRef = currentValue.startsWith("@[node:");
         return (
-            <Select
+            <CanvasSafeSelect
                 className="w-full"
                 placeholder={matched.length ? "选择上游节点" : `没有可用的上游${fieldType === "image" ? "图片" : fieldType === "video" ? "视频" : "音频"}节点`}
                 value={isNodeRef ? currentValue : undefined}
@@ -312,7 +351,6 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
                     return { label, value: `@[node:${input.nodeId}]` };
                 })}
                 allowClear
-                classNames={{ popup: { root: "canvas-no-zoom-popup" } }}
                 onChange={(next) => onChange(next ?? "")}
             />
         );

@@ -7,16 +7,17 @@ import { getImageBlob, resolveImageUrl, setImageBlob } from "@/services/image-st
 import { downloadWebdavFile, uploadWebdavFile, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import type { Asset } from "@/stores/use-asset-store";
 import { useAssetStore } from "@/stores/use-asset-store";
-import type { WebdavSyncConfig } from "@/stores/use-config-store";
+import { useConfigStore, type AiConfig, type WebdavSyncConfig } from "@/stores/use-config-store";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
 
 type StoredLog = Record<string, unknown> & { id?: string };
-export type AppSyncDomainKey = "canvas" | "assets" | "image-workbench" | "video-workbench";
+export type AppSyncDomainKey = "config" | "canvas" | "assets" | "image-workbench" | "video-workbench";
 type DomainKey = AppSyncDomainKey;
 type CanvasDomainData = { projects: CanvasProject[] };
 type AssetDomainData = { assets: Asset[] };
 type LogDomainData = { logs: StoredLog[] };
+type ConfigDomainData = { config: AiConfig };
 
 type AppSyncFile = {
     storageKey: string;
@@ -57,6 +58,7 @@ export type AppSyncResult = {
     mergedRemote: boolean;
     projects: number;
     assets: number;
+    configs: number;
     imageLogs: number;
     videoLogs: number;
     files: number;
@@ -86,7 +88,18 @@ export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?:
     emitProgress(onProgress, { stage: "等待本地数据加载" });
     await Promise.all([waitForHydration(useCanvasStore), waitForHydration(useAssetStore)]);
 
-    const [canvas, assets, imageLogs, videoLogs] = await Promise.all([
+    const [configSync, canvas, assets, imageLogs, videoLogs] = await Promise.all([
+        syncDomain<ConfigDomainData>(config, onProgress, {
+            key: "config",
+            label: "配置",
+            emptyData: { config: useConfigStore.getState().config },
+            localData: async () => ({ config: useConfigStore.getState().config }),
+            mergeData: (local, remote) => ({ config: { ...local.config, ...remote.config } }),
+            applyData: async (data) => {
+                const updateConfig = useConfigStore.getState().updateConfig;
+                (Object.keys(data.config) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, data.config[key]));
+            },
+        }),
         syncDomain<CanvasDomainData>(config, onProgress, {
             key: "canvas",
             label: "画布",
@@ -123,15 +136,16 @@ export async function syncAppDataToWebdav(config: WebdavSyncConfig, onProgress?:
 
     const result = {
         syncedAt: new Date().toISOString(),
-        mergedRemote: [canvas, assets, imageLogs, videoLogs].some((item) => item.mergedRemote),
+        mergedRemote: [configSync, canvas, assets, imageLogs, videoLogs].some((item) => item.mergedRemote),
+        configs: 1,
         projects: canvas.data.projects.length,
         assets: assets.data.assets.length,
         imageLogs: imageLogs.data.logs.length,
         videoLogs: videoLogs.data.logs.length,
-        files: canvas.files + assets.files + imageLogs.files + videoLogs.files,
-        manifestBytes: canvas.manifestBytes + assets.manifestBytes + imageLogs.manifestBytes + videoLogs.manifestBytes,
-        uploadedFiles: canvas.uploadedFiles + assets.uploadedFiles + imageLogs.uploadedFiles + videoLogs.uploadedFiles,
-        uploadedBytes: canvas.uploadedBytes + assets.uploadedBytes + imageLogs.uploadedBytes + videoLogs.uploadedBytes,
+        files: configSync.files + canvas.files + assets.files + imageLogs.files + videoLogs.files,
+        manifestBytes: configSync.manifestBytes + canvas.manifestBytes + assets.manifestBytes + imageLogs.manifestBytes + videoLogs.manifestBytes,
+        uploadedFiles: configSync.uploadedFiles + canvas.uploadedFiles + assets.uploadedFiles + imageLogs.uploadedFiles + videoLogs.uploadedFiles,
+        uploadedBytes: configSync.uploadedBytes + canvas.uploadedBytes + assets.uploadedBytes + imageLogs.uploadedBytes + videoLogs.uploadedBytes,
     };
     emitProgress(onProgress, { stage: "同步完成", status: "success" });
     return result;
@@ -324,6 +338,7 @@ function domainPath(domain: DomainKey, path: string) {
 }
 
 function domainLabel(domain: DomainKey) {
+    if (domain === "config") return "配置";
     if (domain === "canvas") return "画布";
     if (domain === "assets") return "我的素材";
     if (domain === "image-workbench") return "生图工作台";

@@ -2,13 +2,33 @@
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Image as ImageIcon, Video, Music, FileText, SlidersHorizontal } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ContextMenuState } from "../types";
 
-export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete }: { menu: ContextMenuState; onClose: () => void; onDuplicate: () => void; onDelete: () => void }) {
+export function CanvasNodeContextMenu({
+    menu,
+    onClose,
+    onDuplicate,
+    onDelete,
+    onAddImage,
+    onAddVideo,
+    onAddAudio,
+    onAddText,
+    onAddConfig,
+}: {
+    menu: ContextMenuState;
+    onClose: () => void;
+    onDuplicate: () => void;
+    onDelete: () => void;
+    onAddImage?: () => void;
+    onAddVideo?: () => void;
+    onAddAudio?: () => void;
+    onAddText?: () => void;
+    onAddConfig?: () => void;
+}) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     useEffect(() => {
@@ -27,8 +47,20 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete }: 
             style={{ left: menu.x, top: menu.y, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
-            <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />
+            {menu.type === "canvas" ? (
+                <>
+                    <MenuButton icon={<ImageIcon className="size-4" />} label="添加图片" onClick={onAddImage} />
+                    <MenuButton icon={<Video className="size-4" />} label="添加视频" onClick={onAddVideo} />
+                    <MenuButton icon={<Music className="size-4" />} label="添加音频" onClick={onAddAudio} />
+                    <MenuButton icon={<FileText className="size-4" />} label="添加文本" onClick={onAddText} />
+                    <MenuButton icon={<SlidersHorizontal className="size-4" />} label="添加配置节点" onClick={onAddConfig} />
+                </>
+            ) : (
+                <>
+                    {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
+                    <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />
+                </>
+            )}
         </div>
     );
 }

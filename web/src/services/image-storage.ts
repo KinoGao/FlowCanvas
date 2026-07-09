@@ -4,6 +4,9 @@ import localforage from "localforage";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
+import { apiUrl } from "@/constant/env";
+import { useUserStore } from "@/stores/use-user-store";
+import { backendFileUrl, uploadBackendFile } from "@/services/api/backend-storage";
 import { createBlobStorage } from "./blob-storage";
 
 export type UploadedImage = {
@@ -20,6 +23,13 @@ const imageBlobs = createBlobStorage(store);
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await fetchImageBlob(input) : input;
+    const { saveMode, token } = useUserStore.getState();
+    if (saveMode === "backend" && token) {
+        const uploaded = await uploadBackendFile(token, blob, "image.png");
+        const url = backendFileUrl(uploaded.storageKey, token);
+        const meta = await readImageMeta(url);
+        return { url, storageKey: uploaded.storageKey, width: meta.width, height: meta.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType || blob.type || meta.mimeType };
+    }
     const storageKey = `image:${nanoid()}`;
     const url = await imageBlobs.setBlob(storageKey, blob);
     const meta = await readImageMeta(url);
@@ -28,18 +38,32 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
 
 /** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
 export function peekCachedImageUrl(storageKey?: string): string | undefined {
+    if (storageKey?.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        return token ? backendFileUrl(storageKey, token) : undefined;
+    }
     return imageBlobs.peekUrl(storageKey);
 }
 
 export function resolveImageUrl(storageKey?: string, fallback = "") {
+    if (storageKey?.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        return Promise.resolve(token ? backendFileUrl(storageKey, token) : fallback);
+    }
     return imageBlobs.resolveUrl(storageKey, fallback);
 }
 
 export function getImageBlob(storageKey: string) {
+    if (storageKey.startsWith("backend:")) {
+        const token = useUserStore.getState().token;
+        if (!token) return Promise.resolve(null);
+        return fetch(backendFileUrl(storageKey, token)).then((response) => (response.ok ? response.blob() : null));
+    }
     return imageBlobs.getBlob(storageKey);
 }
 
 export function setImageBlob(storageKey: string, blob: Blob) {
+    if (storageKey.startsWith("backend:")) return Promise.resolve(backendFileUrl(storageKey, useUserStore.getState().token));
     return imageBlobs.setBlob(storageKey, blob);
 }
 
@@ -79,6 +103,8 @@ export function collectImageStorageKeys(value: unknown, keys = new Set<string>()
 }
 
 async function fetchImageBlob(url: string): Promise<Blob> {
+    if (shouldPreferImageProxy(url)) return fetchImageBlobThroughProxy(url);
+
     try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`下载图片失败：HTTP ${response.status}`);
@@ -86,12 +112,69 @@ async function fetchImageBlob(url: string): Promise<Blob> {
     } catch (error) {
         // data: URL 和同源 URL 不需要 fallback；CORS / 网络错误时才尝试走服务端代理
         if (error instanceof TypeError && /^https?:/i.test(url)) {
-            const proxiedUrl = `/api/ai-proxy?target=${encodeURIComponent(url)}`;
-            const response = await fetch(proxiedUrl);
-            if (!response.ok) throw new Error(`下载图片失败：HTTP ${response.status}`);
-            return await response.blob();
+            return fetchImageBlobThroughProxy(url);
         }
         throw error;
+    }
+}
+
+async function fetchImageBlobThroughProxy(url: string): Promise<Blob> {
+    const errors: string[] = [];
+    for (const proxiedUrl of imageProxyCandidates(url)) {
+        try {
+            const response = await fetch(proxiedUrl);
+            if (!response.ok) {
+                errors.push(`${proxyOriginLabel(proxiedUrl)} HTTP ${response.status}`);
+                continue;
+            }
+            const blob = await response.blob();
+            if (!blob.type.startsWith("image/")) {
+                errors.push(`${proxyOriginLabel(proxiedUrl)} 返回 ${blob.type || "未知类型"}`);
+                continue;
+            }
+            return blob;
+        } catch (proxyError) {
+            errors.push(`${proxyOriginLabel(proxiedUrl)} ${proxyError instanceof Error ? proxyError.message : String(proxyError)}`);
+        }
+    }
+    throw new Error(`下载图片失败：代理不可用${errors.length ? `（${errors.join("；")}）` : ""}`);
+}
+
+function imageProxyCandidates(url: string) {
+    const path = `/api/ai-proxy?target=${encodeURIComponent(url)}`;
+    const candidates = new Set<string>();
+
+    if (typeof window !== "undefined" && isLocalDevHost(window.location.hostname)) {
+        const protocol = window.location.protocol;
+        candidates.add(`${protocol}//127.0.0.1:9811${path}`);
+        candidates.add(`${protocol}//localhost:9811${path}`);
+        candidates.add(`${protocol}//127.0.0.1:9801${path}`);
+        candidates.add(`${protocol}//localhost:9801${path}`);
+    }
+    candidates.add(apiUrl(path));
+    return Array.from(candidates);
+}
+
+function shouldPreferImageProxy(url: string) {
+    if (!/^https?:/i.test(url)) return false;
+    try {
+        const { hostname } = new URL(url);
+        return hostname === "platform-outputs.agnes-ai.space";
+    } catch {
+        return false;
+    }
+}
+
+function isLocalDevHost(hostname: string) {
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function proxyOriginLabel(value: string) {
+    try {
+        const url = new URL(value, typeof window !== "undefined" ? window.location.href : undefined);
+        return url.origin;
+    } catch {
+        return value;
     }
 }
 

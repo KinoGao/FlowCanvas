@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Cpu } from "lucide-react";
+import { Select } from "antd";
 
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
@@ -24,6 +24,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
     const selectValue = current && options.includes(current) ? current : "";
+    const selectOptions: Array<{ value: string; label: ReactNode; title?: string; disabled?: boolean }> = options.length
+        ? options.map((model) => ({ value: model, label: <ModelLabel config={config} model={model} />, title: modelOptionLabel(config, model) }))
+        : [{ value: "__empty__", label: emptyModelLabel(config, capability), disabled: true }];
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -36,51 +39,37 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     return (
         <Select
             open={open}
-            value={selectValue}
+            value={selectValue || undefined}
+            placeholder={
+                <span className="inline-flex min-w-0 items-center gap-2">
+                    <ModelIcon model="" />
+                    <span className="truncate">{placeholder}</span>
+                </span>
+            }
+            options={selectOptions}
+            popupMatchSelectWidth={false}
+            placement="bottomLeft"
+            className={cn(
+                "canvas-composer-model-picker h-8 max-w-full",
+                fullWidth ? "w-full min-w-0" : "w-fit min-w-[9rem]",
+                className,
+            )}
+            popupRender={(menu) => (
+                <div data-canvas-no-zoom className="canvas-no-zoom-popup w-80 max-w-[calc(100vw-24px)]" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                    {menu}
+                </div>
+            )}
+            title={current ? modelOptionLabel(config, current) : placeholder}
             onOpenChange={(nextOpen) => {
                 if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
-            onValueChange={onChange}
-        >
-            <SelectTrigger
-                className={cn(
-                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
-                    fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
-                    "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
-                    className,
-                )}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : placeholder}
-            >
-                <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
-            </SelectTrigger>
-            <SelectContent
-                data-canvas-no-zoom
-                className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
-                position="popper"
-                align="start"
-                side="bottom"
-                sideOffset={6}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-            >
-                {options.length ? (
-                    options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} />
-                        </SelectItem>
-                    ))
-                ) : (
-                    <SelectItem value="__empty__" disabled>
-                        {emptyModelLabel(config, capability)}
-                    </SelectItem>
-                )}
-            </SelectContent>
-        </Select>
+            onChange={(next) => {
+                if (next && next !== "__empty__") onChange(next);
+            }}
+            onMouseDown={(event: ReactMouseEvent) => event.stopPropagation()}
+        />
     );
 }
 

@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { apiUrl } from "@/constant/env";
 import type { ComfyUiConfig } from "@/stores/use-config-store";
 import type { ComfyWorkflowJson } from "@/services/comfyui-workflows";
 
@@ -10,7 +11,7 @@ export type ComfyPromptResponse = {
 };
 
 export type ComfyHistoryItem = {
-    outputs?: Record<string, { images?: ComfyOutputFile[]; videos?: ComfyOutputFile[]; gifs?: ComfyOutputFile[]; audio?: ComfyOutputFile[] }>;
+    outputs?: Record<string, Record<string, unknown>>;
     status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
 };
 
@@ -59,22 +60,22 @@ export async function waitForComfyHistory(config: ComfyUiConfig, promptId: strin
     while (Date.now() - startedAt < timeoutMs) {
         const history = await getComfyHistory(config, promptId, signal);
         const item = history[promptId];
-        if (item) return item;
+        if (item?.outputs || item?.status?.completed) return item;
         await sleep(intervalMs, signal);
     }
     throw new Error("ComfyUI 任务等待超时");
 }
 
 export function extractComfyOutputImages(history: ComfyHistoryItem) {
-    return Object.values(history.outputs || {}).flatMap((output) => output.images || []);
+    return extractComfyOutputFiles(history, ["images", "image"]);
 }
 
 export function extractComfyOutputVideos(history: ComfyHistoryItem) {
-    return Object.values(history.outputs || {}).flatMap((output) => [...(output.videos || []), ...(output.gifs || [])]);
+    return extractComfyOutputFiles(history, ["videos", "video", "gifs", "gif", "animated"]);
 }
 
 export function extractComfyOutputAudios(history: ComfyHistoryItem) {
-    return Object.values(history.outputs || {}).flatMap((output) => output.audio || []);
+    return extractComfyOutputFiles(history, ["audio", "audios"]);
 }
 
 export type ComfyUploadResult = {
@@ -87,9 +88,9 @@ export async function uploadComfyFile(config: ComfyUiConfig, blob: Blob, filenam
     const formData = new FormData();
     formData.append("image", blob, filename);
     let response: Response;
-    if (config.proxyMode === "nextjs") {
+    if (config.proxyMode === "backend") {
         formData.append("baseUrl", normalizeComfyBaseUrl(config.baseUrl));
-        response = await fetch("/api/comfyui-proxy", { method: "POST", body: formData, signal });
+        response = await fetch(apiUrl("/api/comfyui-proxy"), { method: "POST", body: formData, signal });
     } else {
         const baseUrl = normalizeComfyBaseUrl(config.baseUrl);
         response = await fetch(`${baseUrl}/upload/image`, { method: "POST", body: formData, signal });
@@ -105,11 +106,8 @@ export function buildComfyViewUrl(config: ComfyUiConfig, file: ComfyOutputFile) 
     });
     if (file.subfolder) params.set("subfolder", file.subfolder);
     const path = `/view?${params}`;
-    if (config.proxyMode === "nextjs") {
-        const proxyParams = new URLSearchParams({ baseUrl: normalizeComfyBaseUrl(config.baseUrl), path });
-        return `/api/comfyui-proxy?${proxyParams}`;
-    }
-    return `${normalizeComfyBaseUrl(config.baseUrl)}${path}`;
+    const proxyParams = new URLSearchParams({ baseUrl: normalizeComfyBaseUrl(config.baseUrl), path });
+    return apiUrl(`/api/comfyui-proxy?${proxyParams}`);
 }
 
 export async function runComfyWorkflow(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
@@ -131,8 +129,8 @@ async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: Com
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
     };
     const response =
-        config.proxyMode === "nextjs"
-            ? await fetch("/api/comfyui-proxy", {
+        config.proxyMode === "backend"
+            ? await fetch(apiUrl("/api/comfyui-proxy"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ baseUrl, path, method, body: options.body }),
@@ -141,6 +139,20 @@ async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: Com
             : await fetch(`${baseUrl}${path}`, init);
     if (!response.ok) throw new Error(await readComfyError(response));
     return response.json() as Promise<T>;
+}
+
+function extractComfyOutputFiles(history: ComfyHistoryItem, keys: string[]) {
+    return Object.values(history.outputs || {}).flatMap((output) =>
+        keys.flatMap((key) => {
+            const value = output[key];
+            if (Array.isArray(value)) return value.filter(isComfyOutputFile);
+            return isComfyOutputFile(value) ? [value] : [];
+        }),
+    );
+}
+
+function isComfyOutputFile(value: unknown): value is ComfyOutputFile {
+    return Boolean(value && typeof value === "object" && "filename" in value && typeof (value as ComfyOutputFile).filename === "string");
 }
 
 export function normalizeComfyBaseUrl(baseUrl: string) {

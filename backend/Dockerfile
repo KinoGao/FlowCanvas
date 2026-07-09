@@ -12,7 +12,7 @@ WORKDIR /app
 COPY --from=build /app/backend/target/*.jar /app/backend.jar
 
 ENV DB_PATH=/app/data/app.db
-ENV PORT=4001
-EXPOSE 4001
+ENV PORT=9801
+EXPOSE 9801
 
 CMD ["sh", "-c", "java -jar /app/backend.jar"]
