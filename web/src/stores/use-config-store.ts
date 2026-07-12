@@ -16,6 +16,7 @@ export type ModelChannel = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     models: string[];
+    modelLabels?: Record<string, string>;
     useProxy?: boolean;
 };
 
@@ -41,6 +42,7 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoDraft: string;
     useProxy?: boolean;
     systemPrompt: string;
     models: string[];
@@ -117,6 +119,7 @@ export const defaultConfig: AiConfig = {
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoDraft: "false",
     systemPrompt: "",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     imageModels: ["default::gpt-image-2"],
@@ -304,6 +307,7 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoDraft: config.videoDraft || "false",
                         canvasImageCount: config.canvasImageCount || "3",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
@@ -356,6 +360,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         apiKey: channel?.apiKey || "",
         apiFormat,
         models: uniqueRawModels(channel?.models || []),
+        modelLabels: channel?.modelLabels || {},
         useProxy: Boolean(channel?.useProxy),
     };
 }
@@ -382,7 +387,8 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
-    return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
+    const modelLabel = channel?.modelLabels?.[decoded.model] || decoded.model;
+    return channel ? modelLabel + "（" + channel.name + "）" : modelLabel;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
@@ -467,6 +473,10 @@ function uniqueModelOptions(models: string[]) {
 
 export function buildApiUrl(baseUrl: string, path: string, useProxy = false) {
     let normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+    if (normalizedBaseUrl.includes("/api/model-runtime/providers/") || normalizedBaseUrl.includes("/api/model-runtime/models/")) {
+        const finalUrl = normalizedBaseUrl + path;
+        return useProxy ? apiUrl("/api/ai-proxy?target=" + encodeURIComponent(finalUrl)) : finalUrl;
+    }
     normalizedBaseUrl = normalizeArkPlanBaseUrl(normalizedBaseUrl);
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     const apiBaseUrl = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") || lowerBaseUrl.endsWith("/api/plan/v3") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;

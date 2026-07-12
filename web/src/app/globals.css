@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@xyflow/react/dist/style.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -436,6 +435,278 @@
         top: 21px;
     }
 
+    .creative-os-shell {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", sans-serif;
+        isolation: isolate;
+        letter-spacing: 0;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .creative-os-canvas {
+        background: inherit;
+        overscroll-behavior: none;
+    }
+
+    .creative-os-topbar {
+        color: var(--creative-text);
+    }
+
+    .creative-os-icon-button,
+    .creative-os-title-control,
+    .creative-os-agent-button,
+    .creative-os-dock-button,
+    .creative-os-zoom-value,
+    .creative-os-primary-action {
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 220ms ease, opacity 180ms ease;
+    }
+
+    .creative-os-icon-button {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: inherit;
+        display: inline-flex;
+        height: 36px;
+        justify-content: center;
+        padding: 0;
+        width: 36px;
+    }
+
+    .creative-os-icon-button:hover,
+    .creative-os-title-control:hover,
+    .creative-os-agent-button:hover {
+        background: var(--creative-control-fill) !important;
+    }
+
+    .creative-os-icon-button:active,
+    .creative-os-agent-button:active,
+    .creative-os-dock-button:active,
+    .creative-os-primary-action:active {
+        transform: scale(.96);
+    }
+
+    .creative-os-icon-button:focus-visible,
+    .creative-os-title-control:focus-visible,
+    .creative-os-agent-button:focus-visible,
+    .creative-os-dock-button:focus-visible,
+    .creative-os-primary-action:focus-visible {
+        box-shadow: 0 0 0 3px var(--creative-accent-soft) !important;
+        outline: 1px solid var(--creative-accent);
+        outline-offset: 1px;
+    }
+
+    .creative-os-title-control {
+        border: 1px solid transparent;
+        border-radius: 9px;
+        color: inherit;
+        min-height: 32px;
+    }
+
+    .creative-os-agent-button.ant-btn {
+        align-items: center;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: inherit;
+        display: inline-flex;
+        height: 36px;
+        padding-inline: 10px;
+    }
+
+    .creative-os-agent-button.is-active.ant-btn {
+        background: var(--creative-accent-soft) !important;
+        color: var(--creative-accent) !important;
+    }
+
+    .creative-os-dock,
+    .creative-os-panel,
+    .creative-os-zoom-cluster,
+    .creative-os-composer {
+        background: var(--creative-material);
+        border-color: var(--creative-hairline) !important;
+        box-shadow: var(--creative-shadow);
+        -webkit-backdrop-filter: saturate(1.35) blur(24px);
+        backdrop-filter: saturate(1.35) blur(24px);
+    }
+
+    .creative-os-dock {
+        border-radius: 16px;
+        padding: 5px;
+    }
+
+    .creative-os-dock-button {
+        border-radius: 11px;
+        position: relative;
+    }
+
+    .creative-os-dock-button:hover {
+        transform: translateY(-2px) scale(1.04);
+    }
+
+    .creative-os-panel {
+        border-radius: 8px !important;
+        transform-origin: bottom center;
+    }
+
+    .creative-os-menu-item {
+        border-radius: 7px;
+        transition: background-color 160ms ease, color 160ms ease, transform 160ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .creative-os-menu-item:hover {
+        background: var(--creative-control-fill) !important;
+        transform: translateX(1px);
+    }
+    .creative-os-zoom-cluster {
+        border-radius: 12px;
+        padding: 4px;
+    }
+
+    .creative-os-zoom-value {
+        border-radius: 8px;
+        color: var(--creative-text);
+        font-variant-numeric: tabular-nums;
+        min-width: 58px;
+    }
+
+    .creative-os-node {
+        border-radius: 8px !important;
+        transition: border-color 180ms ease, box-shadow 220ms ease, filter 220ms ease;
+    }
+
+    .creative-os-node:hover {
+        filter: brightness(1.015);
+    }
+
+    .creative-os-composer {
+        border-radius: 8px;
+        transform-origin: top center;
+    }
+
+    .creative-os-composer textarea,
+    .creative-os-composer input {
+        caret-color: var(--creative-accent);
+    }
+
+    .creative-os-composer .ant-btn:not(.creative-os-primary-action),
+    .creative-os-composer .canvas-composer-mode-button,
+    .creative-os-composer .canvas-composer-model-picker {
+        background: var(--creative-control-fill) !important;
+        border-color: transparent !important;
+        color: var(--creative-text) !important;
+    }
+
+    .creative-os-composer .ant-btn:not(.creative-os-primary-action):hover,
+    .creative-os-composer .canvas-composer-mode-button:hover,
+    .creative-os-composer .canvas-composer-model-picker:hover {
+        background: color-mix(in srgb, var(--creative-control-fill) 72%, var(--creative-text) 8%) !important;
+    }
+
+    .creative-os-composer-actions {
+        border-color: var(--creative-hairline) !important;
+    }
+
+    .creative-os-composer-scroll,
+    .creative-os-hidden-scroll {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .creative-os-composer-scroll::-webkit-scrollbar,
+    .creative-os-hidden-scroll::-webkit-scrollbar {
+        display: none;
+        height: 0;
+        width: 0;
+    }
+
+    .creative-os-config-panel {
+        background: var(--creative-material-elevated) !important;
+        border-radius: 8px;
+        color: var(--creative-text);
+    }
+
+    .creative-os-config-panel .ant-segmented,
+    .creative-os-config-panel .ant-select-selector,
+    .creative-os-config-panel .ant-input-number,
+    .creative-os-config-panel .ant-input {
+        background: var(--creative-control-fill) !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+    }
+
+    .creative-os-config-panel .ant-segmented-item-selected {
+        background: var(--creative-material-elevated) !important;
+        box-shadow: 0 1px 4px color-mix(in srgb, var(--creative-text) 14%, transparent) !important;
+    }
+
+    .creative-os-primary-action.ant-btn,
+    .creative-os-primary-action {
+        background: var(--creative-accent) !important;
+        border-color: transparent !important;
+        box-shadow: 0 5px 16px color-mix(in srgb, var(--creative-accent) 30%, transparent) !important;
+        color: white !important;
+        font-weight: 600;
+    }
+
+    .creative-os-primary-action.ant-btn:hover,
+    .creative-os-primary-action:hover {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+    }
+
+    .creative-os-primary-action.ant-btn-dangerous,
+    .creative-os-primary-action.ant-btn-dangerous:hover {
+        background: var(--creative-danger) !important;
+    }
+    .creative-os-shortcuts {
+        max-height: min(70vh, 620px);
+        overflow: auto;
+        scrollbar-width: none;
+    }
+
+    .creative-os-shortcuts::-webkit-scrollbar {
+        display: none;
+    }
+
+    @media (max-width: 760px) {
+        .creative-os-topbar {
+            height: 56px;
+            padding-inline: 8px;
+        }
+
+        .creative-os-dock {
+            max-width: calc(100vw - 24px);
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .creative-os-dock::-webkit-scrollbar {
+            display: none;
+        }
+
+        .creative-os-panel {
+            max-width: calc(100vw - 24px);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .creative-os-shell *,
+        .creative-os-shell *::before,
+        .creative-os-shell *::after {
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+            scroll-behavior: auto !important;
+            transition-duration: .01ms !important;
+        }
+
+        .creative-os-dock-button:hover,
+        .creative-os-menu-item:hover,
+        .creative-os-primary-action:hover {
+            transform: none;
+        }
+    }
     @keyframes canvas-batch-child-in {
         from {
             opacity: 0;
@@ -464,6 +735,21 @@
             transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
         }
     }
+
+    .canvas-flow-edge {
+        animation: canvas-flow-edge 900ms linear infinite;
+    }
+
+    .canvas-flow-edge-hover {
+        animation-duration: 700ms;
+        animation-iteration-count: 2;
+    }
+
+    @keyframes canvas-flow-edge {
+        to {
+            stroke-dashoffset: -28;
+        }
+    }
 }
 
 @keyframes shimmer-sweep {
@@ -472,6 +758,124 @@
     }
     100% {
         transform: translateX(100%);
+    }
+}
+
+.canvas-generation-loading {
+    isolation: isolate;
+    background: color-mix(in srgb, var(--canvas-generation-base) 62%, black);
+}
+
+.canvas-generation-loading-dots,
+.canvas-generation-loading-dot-mask,
+.canvas-generation-loading-shimmer {
+    pointer-events: none;
+}
+
+.canvas-generation-loading-dots,
+.canvas-generation-loading-dot-mask {
+    background-position: 9px 9px;
+    background-size: 18px 18px;
+}
+
+.canvas-generation-loading-dots {
+    background-image: radial-gradient(circle, var(--canvas-generation-dot) 1.2px, transparent 1.6px);
+    opacity: 0.42;
+}
+
+.canvas-generation-loading-shimmer {
+    z-index: 2;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--canvas-generation-glow) 8%, transparent) 45%,
+        color-mix(in srgb, var(--canvas-generation-glow) 22%, transparent) 50%,
+        color-mix(in srgb, var(--canvas-generation-glow) 8%, transparent) 55%,
+        transparent 100%
+    );
+    background-position: -100% 0;
+    background-size: 200% 100%;
+    mix-blend-mode: screen;
+    animation:
+        canvas-generation-shimmer-slide 2s linear infinite alternate,
+        canvas-generation-shimmer-fade 2s linear infinite alternate;
+    backface-visibility: hidden;
+    will-change: background-position, opacity;
+}
+
+.canvas-generation-loading-dot-mask {
+    z-index: 1;
+    background-image: radial-gradient(circle, var(--canvas-generation-glow) 1.2px, transparent 1.6px);
+    opacity: 0;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 55%, transparent 100%);
+    -webkit-mask-position: -100% 0;
+    -webkit-mask-size: 200% 100%;
+    mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 55%, transparent 100%);
+    mask-position: -100% 0;
+    mask-size: 200% 100%;
+    animation:
+        canvas-generation-mask-slide 2s linear infinite alternate,
+        canvas-generation-mask-fade 2s linear infinite alternate;
+    will-change: opacity;
+}
+
+@keyframes canvas-generation-shimmer-slide {
+    from {
+        background-position: -100% 0;
+    }
+
+    to {
+        background-position: 100% 0;
+    }
+}
+
+@keyframes canvas-generation-shimmer-fade {
+    0% {
+        opacity: 0;
+    }
+
+    20%,
+    80% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
+
+@keyframes canvas-generation-mask-slide {
+    from {
+        -webkit-mask-position: -100% 0;
+        mask-position: -100% 0;
+    }
+
+    to {
+        -webkit-mask-position: 100% 0;
+        mask-position: 100% 0;
+    }
+}
+
+@keyframes canvas-generation-mask-fade {
+    0% {
+        opacity: 0;
+    }
+
+    20%,
+    80% {
+        opacity: 0.95;
+    }
+
+    100% {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .canvas-generation-loading-shimmer,
+    .canvas-generation-loading-dot-mask {
+        animation: none;
+        opacity: 0;
     }
 }
 

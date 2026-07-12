@@ -49,8 +49,20 @@ public class AuthService {
 
     @Transactional
     public LoginResult login(String username, String password) {
-        User user = users.findByUsername(normalizeUsername(username)).orElseThrow(() -> new IllegalArgumentException("用户名或密码错误"));
-        if (!passwordService.verify(password, user.getPasswordHash())) throw new IllegalArgumentException("用户名或密码错误");
+        User user = verifyCredentials(username, password);
+        return createSession(user);
+    }
+
+    @Transactional
+    public LoginResult adminLogin(String username, String password) {
+        User user = verifyCredentials(username, password);
+        if (!users.existsByRole("ADMIN")) {
+            user.setRole("ADMIN");
+            user.setUpdatedAt(Instant.now());
+            users.save(user);
+        } else if (!"ADMIN".equals(user.getRole())) {
+            throw new IllegalArgumentException("该账号不是管理员");
+        }
         return createSession(user);
     }
 
@@ -89,6 +101,15 @@ public class AuthService {
         session.setExpiresAt(Instant.now().plus(30, ChronoUnit.DAYS));
         sessions.save(session);
         return new LoginResult(token, user);
+    }
+
+    private User verifyCredentials(String username, String password) {
+        User user = users.findByUsername(normalizeUsername(username))
+                .orElseThrow(() -> new IllegalArgumentException("用户名或密码错误"));
+        if (!passwordService.verify(password, user.getPasswordHash())) {
+            throw new IllegalArgumentException("用户名或密码错误");
+        }
+        return user;
     }
 
     private String normalizeUsername(String username) {

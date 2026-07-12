@@ -2,27 +2,43 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Settings2 } from "lucide-react";
+import { ChevronDown, Settings2 } from "lucide-react";
 import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
+export function CanvasVideoSettingsPopover({ config, onConfigChange, open: controlledOpen, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
-    const [open, setOpen] = useState(false);
+    const [internalOpen, setInternalOpen] = useState(false);
+    const open = controlledOpen ?? internalOpen;
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const { capability } = useVideoModelCapability(config.model || config.videoModel);
+    const summary = [
+        videoSizeLabel(config.size),
+        videoResolutionLabel(config.vquality),
+        videoSecondsLabel(config.videoSeconds),
+        capability?.counts && capability.counts.length > 1 ? `${config.count || "1"}个` : null,
+        capability?.generateAudio ? (config.videoGenerateAudio === "false" ? "静音" : "有声") : null,
+    ].filter(Boolean).join(" · ");
+    const setOpen = (next: boolean) => {
+        if (controlledOpen === undefined) setInternalOpen(next);
+        onOpenChange?.(next);
+    };
 
     useEffect(() => {
         if (!open) return;
@@ -56,18 +72,15 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
                     className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"}
                     style={{ background: theme.node.fill, color: theme.node.text }}
                     icon={<Settings2 className="size-3.5" />}
-                    onClick={() => setOpen((current) => !current)}
+                    onClick={() => setOpen(!open)}
                 >
-                    <span className="truncate">
-                        {videoResolutionLabel(config.vquality)} · {videoSizeLabel(config.size)} · {videoSecondsLabel(config.videoSeconds)}
-                    </span>
+                    <span className="flex min-w-0 items-center gap-1 truncate"><span className="truncate">{summary}</span><ChevronDown className="size-3 shrink-0 opacity-70" /></span>
                 </Button>
             </span>
             {panel}
         </>
     );
 }
-
 function VideoSettingsPortal({
     buttonRect,
     panelRef,
@@ -89,13 +102,18 @@ function VideoSettingsPortal({
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
     const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
-    const topPlacement = placement?.startsWith("top");
+    const prefersTop = placement?.startsWith("top");
+    const availableAbove = buttonRect.top - gap - margin;
+    const availableBelow = window.innerHeight - buttonRect.bottom - gap - margin;
+    const topPlacement = prefersTop ? availableAbove >= 360 || availableAbove >= availableBelow : availableBelow < 360 && availableAbove > availableBelow;
+    const availableHeight = topPlacement ? availableAbove : availableBelow;
     const style = {
         position: "fixed",
         zIndex: 1200,
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
-        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
+        ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap } : { top: buttonRect.bottom + gap }),
+        maxHeight: Math.max(180, Math.min(560, availableHeight)),
         background: theme.toolbar.panel,
         borderRadius: 18,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
@@ -105,8 +123,8 @@ function VideoSettingsPortal({
     } as const;
 
     return createPortal(
-        <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+        <div ref={panelRef} className="canvas-image-settings-popover [&::-webkit-scrollbar]:hidden" style={{ ...style, scrollbarWidth: "none" }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" variant="composer" />
         </div>,
         document.body,
     );

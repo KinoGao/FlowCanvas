@@ -26,6 +26,9 @@ public class CanvasProjectEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public User getUser() { return user; }
@@ -38,4 +41,6 @@ public class CanvasProjectEntity {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant deletedAt) { this.deletedAt = deletedAt; }
 }

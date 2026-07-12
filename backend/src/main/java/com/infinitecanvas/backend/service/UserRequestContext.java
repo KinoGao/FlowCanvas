@@ -10,12 +10,23 @@ public final class UserRequestContext {
     private UserRequestContext() {}
 
     public static User requireUser(HttpServletRequest request) {
+        User user = currentUser(request);
+        if (user != null) return user;
+        throw new IllegalArgumentException("登录状态无效");
+    }
+
+    public static User currentUser(HttpServletRequest request) {
         Object value = request.getAttribute(USER_ATTR);
-        if (value instanceof User user) return user;
-        throw new IllegalArgumentException("请先登录");
+        return value instanceof User user ? user : null;
     }
 
     public static boolean isLegacyAuth(HttpServletRequest request) {
         return Boolean.TRUE.equals(request.getAttribute(LEGACY_AUTH_ATTR));
+    }
+
+    public static boolean isAdmin(HttpServletRequest request) {
+        if (isLegacyAuth(request)) return true;
+        User user = currentUser(request);
+        return user != null && "ADMIN".equals(user.getRole());
     }
 }

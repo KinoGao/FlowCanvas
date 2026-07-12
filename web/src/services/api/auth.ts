@@ -6,6 +6,16 @@ export type AuthResponse = {
     user: LocalUser;
 };
 
+export class ApiError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+    }
+}
+
 function authHeaders(token?: string): HeadersInit {
     return {
         "Content-Type": "application/json",
@@ -14,8 +24,13 @@ function authHeaders(token?: string): HeadersInit {
 }
 
 async function readApi<T>(response: Response): Promise<T> {
-    const body = await response.json();
-    if (!response.ok || body.code !== 0) throw new Error(body.msg || `请求失败：${response.status}`);
+    let body: { code?: number; data?: unknown; msg?: string } | null = null;
+    try {
+        body = (await response.json()) as { code?: number; data?: unknown; msg?: string };
+    } catch {
+        body = null;
+    }
+    if (!response.ok || body?.code !== 0) throw new ApiError(body?.msg || `请求失败：${response.status}`, response.status);
     return body.data as T;
 }
 
@@ -32,6 +47,16 @@ export async function registerUser(input: { username: string; password: string; 
 export async function loginUser(input: { username: string; password: string }): Promise<AuthResponse> {
     return readApi<AuthResponse>(
         await fetch(apiUrl("/api/auth/login"), {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify(input),
+        }),
+    );
+}
+
+export async function adminLogin(input: { username: string; password: string; adminCode: string }): Promise<AuthResponse> {
+    return readApi<AuthResponse>(
+        await fetch(apiUrl("/api/auth/admin-login"), {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify(input),

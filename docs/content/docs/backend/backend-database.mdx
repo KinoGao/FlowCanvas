@@ -25,13 +25,58 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 
 ### 安全说明
 
-- `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境
-- 旧 `/api/config` 等兼容/管理接口仍需携带 `Authorization: Bearer <AUTH_CODE>` 头（`/api/health` 除外）
-- `AUTH_CODE` 通过环境变量传入，未设置时后端启动会自动生成随机码并打印到控制台；注册本地后端账号时也需要填写该鉴权码
+- `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境。
+- 旧 `/api/config` 等兼容接口仍可使用实例级 `AUTH_CODE`；新账号注册使用独立的 `REGISTRATION_CODE`，默认值为 `gycode`。
+- 管理后台不再直接使用共享 `AUTH_CODE` 作为身份，而是要求管理员账号、密码和 `ADMIN_CODE`（默认值为 `admincode`）换取带 `ADMIN` 角色的 Bearer 会话。
+
+## platform_config 表
+
+单行存储，固定 `id = 1`。用于后台管理统一保存厂家、后端托管 API Key、模型能力、ComfyUI 地址和工作流运行参数。创作端通过 `/api/runtime-config` 读取脱敏后的发布模型和 ComfyUI 基础能力，不直接读取该表中的密钥。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | BIGINT (PK) | 固定值 `1`，单行存储 |
+| `data` | TEXT | `PlatformConfigDocument` JSON 字符串，包含 providers、models、comfyui 配置 |
+| `updated_at` | TIMESTAMP | 最后一次保存时间 |
+
+### 为什么使用 JSON 文档存储
+
+`data` 是后端的持久化和原子发布格式，不是管理员的编辑界面。模型厂商的鉴权方式、图片/视频/音频模型能力和 ComfyUI 工作流字段差异较大，如果把每一种能力拆成固定数据库列，会频繁改表且难以扩展。保存为一个版本化文档可以一次发布完整配置，避免厂商、模型和默认工作流处于互不匹配的中间状态。
+
+管理员在 `/admin` 中按“厂商连接 -> 拉取模型 -> 分类并配置能力 -> 发布”的顺序维护：
+
+- 厂商连接：填写厂商名称、真实服务地址、API Key、协议、模型列表路径和启用状态。OpenAI 兼容协议默认从 `/models` 读取 `data[].id`，Gemini 协议默认从 `/v1beta/models` 读取 `models[].name`。
+- 模型发现：拉取结果只是上游模型候选，不会自动发布。管理员为候选模型设置稳定内部 ID、显示名称、私有 `requestModel`、所属厂商和发布状态。
+- 模型分类：每个模型必须归入 `text`、`image`、`video` 之一；同一厂商可以同时拥有三类模型。
+- 文本能力：分别配置纯文本和识图/多模态输入能力。
+- 图像能力：分别配置文生图、图生图、图像编辑，以及低/标准/高画质、1K/2K/4K、支持比例和 1/2/4 张生成数量。
+- 视频能力：分别配置文生视频、全能参考、图生视频、首尾帧、图片参考、智能多帧，以及有声、水印、草稿、时长、分辨率、生成数量和图片/视频/音频引用上限。
+- ComfyUI：全局地址、客户端 ID、超时、轮询间隔和默认工作流。
+- 工作流：上传原始 ComfyUI API workflow JSON，后台识别输入候选后用表单配置可暴露字段，不要求管理员手写能力 JSON。
+
+该配置是实例级全局配置，对所有登录账号生效。用户账号只保存各自画布、素材、媒体文件和创作偏好，不复制厂商密钥或模型能力配置。
+
+### 使用入口
+
+- `/api/admin/platform-config` 需要带 `ADMIN` 角色的 Bearer 会话，用于后台管理读取和保存完整配置。
+- `POST /api/admin/providers/{providerId}/discover-models` 按厂商的协议、`baseUrl`、API Key 和 `modelsPath` 拉取上游模型名；管理员随后逐个分类并映射为稳定内部 ID，发现操作本身不会发布模型。
+- `/api/runtime-config` 对创作端开放，只返回满足发布条件的稳定模型 ID、显示信息、模型能力和脱敏后的 ComfyUI 参数，不返回 API Key、真实厂商地址或 `requestModel`。
+- `/api/model-runtime/models/{stableModelId}/...` 根据稳定模型 ID 查找厂商和私有 `requestModel`，校验模式、比例、分辨率、时长、数量、音频、水印、样片及引用数量后再转发。
+- 普通账号 Bearer token 不能访问 `/api/admin/**`；管理接口只接受管理员会话。
+
+### 账号工作区管理
+
+后台的账号工作区页面用于检查各账号同步状态，不承担画布编辑：
+
+- `GET /api/admin/workspaces` 返回账号、画布标题和更新时间、软删除状态、素材数量、媒体文件数量与总字节数。
+- `GET /api/admin/workspaces/{userId}/projects/{projectId}` 只在管理员明确点击查看时返回该画布的完整 JSON。
+- `PUT /api/admin/users/{userId}` 可修改用户名、显示名称和角色；`PUT /api/admin/users/{userId}/password` 重置密码并注销该账号的旧会话。
+- `DELETE /api/admin/users/{userId}/projects/{projectId}` 删除指定账号画布；`DELETE /api/admin/users/{userId}` 删除账号及其工作区数据，当前管理员不能删除自己。
+- 摘要接口使用数据库投影和聚合查询，不加载 `project_json`、`asset_json` 或文件实体列表，避免账号和画布增长后后台首页占用大量内存。
 
 ## 账号保存相关表
 
-账号保存模式用于“本地后端账号”保存通道。登录态使用后端签发的 Bearer token；注册账号需要提交后端配置中的 `AUTH_CODE`；旧的 `AUTH_CODE` 仍保留给管理、旧配置接口和开发兼容入口，不再作为用户画布、素材、配置和文件数据的共享身份。
+账号保存模式用于“本地后端账号”保存通道。登录态使用后端签发的 Bearer token；注册账号需要提交 `REGISTRATION_CODE`（默认 `gycode`）。管理员登录额外提交 `ADMIN_CODE`（默认 `admincode`），并且账号必须拥有 `ADMIN` 角色；实例中尚无管理员时，首个通过管理员授权码登录的有效账号会初始化为管理员。旧 `AUTH_CODE` 仅保留给旧配置接口和开发兼容入口，不再作为用户数据或后台管理的共享身份。
 
 ### users 表
 
@@ -41,6 +86,7 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `username` | VARCHAR (unique) | 登录用户名，按小写归一化 |
 | `password_hash` | VARCHAR | PBKDF2 哈希后的密码，不保存明文 |
 | `display_name` | VARCHAR | 显示名称 |
+| `role` | VARCHAR | `USER` 或 `ADMIN`，默认 `USER` |
 | `created_at` | TIMESTAMP | 创建时间 |
 | `updated_at` | TIMESTAMP | 更新时间 |
 
@@ -77,6 +123,7 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `project_json` | TEXT | 项目完整 JSON |
 | `created_at` | TIMESTAMP | 项目创建时间 |
 | `updated_at` | TIMESTAMP | 项目更新时间 |
+| `deleted_at` | TIMESTAMP nullable | 软删除时间；账号同步删除画布时写入，接口默认不返回已软删除项目 |
 
 ### assets 表
 

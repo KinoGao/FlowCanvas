@@ -30,6 +30,7 @@ public class UserDataController {
         Map<String, Object> data = new HashMap<>();
         data.put("config", config == null ? null : new ConfigResponse(config.getData(), config.getUpdatedAt().toString()));
         data.put("projects", dataService.getProjects(user));
+        data.put("projectTombstones", dataService.getProjectTombstones(user));
         data.put("assets", dataService.getAssets(user));
         return ApiResponse.ok(data);
     }
@@ -54,7 +55,7 @@ public class UserDataController {
 
     @PutMapping("/projects")
     public ApiResponse<Void> saveProjects(HttpServletRequest request, @RequestBody Map<String, Object> body) {
-        dataService.replaceProjects(UserRequestContext.requireUser(request), list(body.get("projects")));
+        dataService.replaceProjects(UserRequestContext.requireUser(request), list(body.get("projects")), stringMap(body.get("projectTombstones")));
         return ApiResponse.ok();
     }
 
@@ -73,5 +74,15 @@ public class UserDataController {
     private List<Object> list(Object value) {
         if (value instanceof List<?> list) return (List<Object>) list;
         return Collections.emptyList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> stringMap(Object value) {
+        if (!(value instanceof Map<?, ?> map)) return Collections.emptyMap();
+        Map<String, String> result = new HashMap<>();
+        ((Map<Object, Object>) map).forEach((key, item) -> {
+            if (key instanceof String k && item instanceof String v) result.put(k, v);
+        });
+        return result;
     }
 }

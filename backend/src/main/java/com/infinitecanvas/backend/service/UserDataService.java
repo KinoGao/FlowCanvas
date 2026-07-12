@@ -1,8 +1,13 @@
 package com.infinitecanvas.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infinitecanvas.backend.entity.*;
-import com.infinitecanvas.backend.repository.*;
+import com.infinitecanvas.backend.entity.CanvasProjectEntity;
+import com.infinitecanvas.backend.entity.User;
+import com.infinitecanvas.backend.entity.UserAsset;
+import com.infinitecanvas.backend.entity.UserConfig;
+import com.infinitecanvas.backend.repository.CanvasProjectRepository;
+import com.infinitecanvas.backend.repository.UserAssetRepository;
+import com.infinitecanvas.backend.repository.UserConfigRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,32 +47,74 @@ public class UserDataService {
 
     @Transactional(readOnly = true)
     public List<Object> getProjects(User user) {
-        return projects.findByUserIdOrderByUpdatedAtDesc(user.getId()).stream().map(item -> readJson(item.getProjectJson())).toList();
+        return projects.findByUserIdOrderByUpdatedAtDesc(user.getId()).stream()
+                .filter(item -> item.getDeletedAt() == null)
+                .map(item -> readJson(item.getProjectJson()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, String> getProjectTombstones(User user) {
+        Map<String, String> tombstones = new HashMap<>();
+        projects.findByUserIdOrderByUpdatedAtDesc(user.getId()).forEach(item -> {
+            if (item.getDeletedAt() != null) tombstones.put(projectDataId(item), item.getDeletedAt().toString());
+        });
+        return tombstones;
     }
 
     @Transactional
     public void replaceProjects(User user, List<Object> items) {
+        replaceProjects(user, items, Collections.emptyMap());
+    }
+
+    @Transactional
+    public void replaceProjects(User user, List<Object> items, Map<String, String> tombstones) {
         Map<String, CanvasProjectEntity> existing = new HashMap<>();
         projects.findByUserIdOrderByUpdatedAtDesc(user.getId()).forEach(item -> existing.put(projectDataId(item), item));
-        Set<String> nextRecordIds = new HashSet<>();
+
         for (Object item : items) {
             Map<String, Object> project = asMap(item);
             String id = string(project.get("id"));
             if (id.isBlank()) id = UUID.randomUUID().toString().replace("-", "");
+            Instant projectUpdatedAt = parseInstant(project.get("updatedAt"), Instant.now());
+            Instant deletedAt = parseInstant(tombstones.get(id), null);
+            if (deletedAt != null && !projectUpdatedAt.isAfter(deletedAt)) continue;
+
             CanvasProjectEntity entity = existing.get(id);
             if (entity == null) {
                 entity = new CanvasProjectEntity();
                 entity.setId(recordId(user.getId(), id));
             }
-            nextRecordIds.add(entity.getId());
             entity.setUser(user);
             entity.setTitle(defaultString(project.get("title"), "未命名画布"));
             entity.setCreatedAt(parseInstant(project.get("createdAt"), Instant.now()));
-            entity.setUpdatedAt(parseInstant(project.get("updatedAt"), Instant.now()));
+            entity.setUpdatedAt(projectUpdatedAt);
+            entity.setDeletedAt(null);
             entity.setProjectJson(writeJson(withId(project, id)));
             projects.save(entity);
+            existing.put(id, entity);
         }
-        existing.values().stream().filter(item -> !nextRecordIds.contains(item.getId())).forEach(item -> projects.deleteByUserIdAndId(user.getId(), item.getId()));
+
+        tombstones.forEach((id, deletedAtText) -> {
+            String cleanId = string(id);
+            Instant deletedAt = parseInstant(deletedAtText, null);
+            if (cleanId.isBlank() || deletedAt == null) return;
+            CanvasProjectEntity entity = existing.get(cleanId);
+            if (entity == null) {
+                entity = new CanvasProjectEntity();
+                entity.setId(recordId(user.getId(), cleanId));
+                entity.setUser(user);
+                entity.setTitle("已删除画布");
+                entity.setCreatedAt(deletedAt);
+                entity.setUpdatedAt(deletedAt);
+                entity.setProjectJson(writeJson(Map.of("id", cleanId, "title", "已删除画布", "createdAt", deletedAt.toString(), "updatedAt", deletedAt.toString())));
+            }
+            if (entity.getUpdatedAt() != null && entity.getUpdatedAt().isAfter(deletedAt)) return;
+            if (entity.getDeletedAt() == null || entity.getDeletedAt().isBefore(deletedAt)) {
+                entity.setDeletedAt(deletedAt);
+                projects.save(entity);
+            }
+        });
     }
 
     @Transactional(readOnly = true)
@@ -79,7 +126,6 @@ public class UserDataService {
     public void replaceAssets(User user, List<Object> items) {
         Map<String, UserAsset> existing = new HashMap<>();
         assets.findByUserIdOrderByUpdatedAtDesc(user.getId()).forEach(item -> existing.put(assetDataId(item), item));
-        Set<String> nextRecordIds = new HashSet<>();
         for (Object item : items) {
             Map<String, Object> asset = asMap(item);
             String id = string(asset.get("id"));
@@ -89,13 +135,11 @@ public class UserDataService {
                 entity = new UserAsset();
                 entity.setId(recordId(user.getId(), id));
             }
-            nextRecordIds.add(entity.getId());
             entity.setUser(user);
             entity.setUpdatedAt(parseInstant(asset.get("updatedAt"), Instant.now()));
             entity.setAssetJson(writeJson(withId(asset, id)));
             assets.save(entity);
         }
-        existing.values().stream().filter(item -> !nextRecordIds.contains(item.getId())).forEach(item -> assets.deleteByUserIdAndId(user.getId(), item.getId()));
     }
 
     public String writeJson(Object value) {

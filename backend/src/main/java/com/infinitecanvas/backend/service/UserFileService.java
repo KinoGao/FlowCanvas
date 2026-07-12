@@ -22,7 +22,7 @@ public class UserFileService {
     private final UserFileRepository files;
 
     public UserFileService(@Value("${app.user-file-dir:./data/user-files}") String dir, UserFileRepository files) {
-        this.fileDir = Paths.get(dir);
+        this.fileDir = Paths.get(dir).toAbsolutePath().normalize();
         this.files = files;
         try {
             Files.createDirectories(fileDir);

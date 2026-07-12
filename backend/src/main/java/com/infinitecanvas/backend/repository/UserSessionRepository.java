@@ -10,4 +10,5 @@ public interface UserSessionRepository extends JpaRepository<UserSession, String
     Optional<UserSession> findByTokenHash(String tokenHash);
     void deleteByTokenHash(String tokenHash);
     void deleteByExpiresAtBefore(Instant time);
+    void deleteByUserId(String userId);
 }

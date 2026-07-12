@@ -2,11 +2,10 @@
 
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
-import { Button, InputNumber, Segmented, Select, Switch, type SelectProps } from "antd";
+import { App, Button, ConfigProvider, InputNumber, Segmented, Select, Switch, type SelectProps } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -72,20 +71,47 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
     const globalConfig = useEffectiveConfig();
     const comfyui = useConfigStore((state) => state.comfyui);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const antdTheme = useMemo(
+        () => ({
+            token: {
+                colorPrimary: theme.node.activeStroke,
+                colorBgContainer: theme.node.panel,
+                colorBgElevated: theme.toolbar.panel,
+                colorBorder: theme.node.stroke,
+                colorText: theme.node.text,
+                colorTextPlaceholder: theme.node.placeholder,
+                colorFillSecondary: theme.toolbar.activeBg,
+                borderRadius: 8,
+                controlHeight: 40,
+            },
+        }),
+        [theme],
+    );
     const mode = node.metadata?.generationMode || defaultModeForNode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const selectedWorkflow = useMemo(() => workflows.find((workflow) => workflow.id === (node.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId)) || workflows[0], [comfyui.defaultWorkflowId, node.metadata?.comfyWorkflowId, workflows]);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const credits = mode === "comfyui" ? 0 : requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
     const canGenerate = mode === "comfyui" ? Boolean(selectedWorkflow) : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
 
     useEffect(() => {
-        void listComfyWorkflows().then(setWorkflows);
+        if (mode !== "comfyui") return;
+        let cancelled = false;
+        void listComfyWorkflows()
+            .then((items) => {
+                if (!cancelled) setWorkflows(items);
+            })
+            .catch(() => {
+                if (!cancelled) setWorkflows([]);
+            });
+        return () => {
+            cancelled = true;
+        };
     }, [mode]);
 
     useEffect(() => {
@@ -113,16 +139,39 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
         onHeightChange(node.id, desired);
     }, [mode, node.id, onHeightChange, selectedWorkflow?.fields?.length]);
 
+    const handlePrimaryAction = () => {
+        if (isRunning) {
+            onStop(node.id);
+            return;
+        }
+        if (mode === "comfyui" && !selectedWorkflow) {
+            message.warning("请先选择或配置 ComfyUI 工作流");
+            window.location.assign("/admin");
+            return;
+        }
+        if (!canGenerate) {
+            message.info(mode === "audio" ? "请先输入朗读文本或连接文本节点" : "请先输入提示词或连接上游素材");
+            onComposerToggle();
+            return;
+        }
+        onGenerate(node.id);
+    };
+
     return (
-        <div className="flex h-full min-h-0 min-w-0 w-full cursor-move flex-col px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }}>
+        <ConfigProvider theme={antdTheme}>
+        <div className="creative-os-config-panel flex h-full min-h-0 min-w-0 w-full cursor-default flex-col rounded-[inherit] px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text, background: theme.node.panel }}>
             <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="shrink-0 text-sm font-semibold">生成配置</div>
-                <div className="min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="shrink-0 cursor-move text-sm font-semibold">生成配置</div>
+                <div data-canvas-no-zoom className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
                         className="!flex-nowrap !min-w-0 !rounded-md !p-0.5 [&_.ant-segmented-item]:!flex-none [&_.ant-segmented-item-label]:!whitespace-nowrap"
                         value={mode}
-                        onChange={(value) => onConfigChange(node.id, { generationMode: value as CanvasGenerationMode })}
+                        onChange={(value) => {
+                            const nextMode = value as CanvasGenerationMode;
+                            const nextModel = defaultModelForMode(globalConfig, nextMode);
+                            onConfigChange(node.id, { generationMode: nextMode, ...(nextModel ? { model: nextModel } : {}) });
+                        }}
                         options={[
                             {
                                 value: "image",
@@ -179,13 +228,14 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                 <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
                 <InputChip label="参考视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} />
                 <InputChip label="参考音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} />
-                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
+                <button type="button" data-canvas-no-zoom className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
                     <Settings2 className="size-3.5" />
                     组装提示词
                 </button>
             </div>
 
             <div
+                data-canvas-no-zoom
                 className={`nodrag nopan mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -224,11 +274,12 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
 
             <Button
                 type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
+                className="creative-os-primary-action mt-auto !h-10 !w-full !cursor-pointer !rounded-[8px]"
                 danger={isRunning}
-                disabled={!isRunning && !canGenerate}
+                data-canvas-no-zoom
                 onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={handlePrimaryAction}
             >
                 <span className="inline-flex items-center gap-1.5">
                     {isRunning ? (
@@ -239,14 +290,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                         </>
                     ) : (
                         <>
-                            {mode === "comfyui" ? (
-                                <span>本地工作流</span>
-                            ) : (
-                                <span className="inline-flex items-center gap-1">
-                                    <CreditSymbol />
-                                    {credits.toLocaleString()}
-                                </span>
-                            )}
+                            {mode === "comfyui" ? <span>{selectedWorkflow ? "本地工作流" : "配置工作流"}</span> : null}
                             <Play className="size-4" />
                             <span>开始生成</span>
                         </>
@@ -254,6 +298,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                 </span>
             </Button>
         </div>
+        </ConfigProvider>
     );
 }
 
@@ -288,7 +333,7 @@ function ComfyWorkflowControls({
                 onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
             />
             {selectedWorkflow?.fields.length ? (
-                <div className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
+                <div className="creative-os-hidden-scroll grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
                     {selectedWorkflow.fields.map((field) => (
                         <div key={field.id} className="grid gap-1 text-[11px]">
                             <span className="truncate opacity-70">{field.name || field.input}</span>
@@ -298,7 +343,9 @@ function ComfyWorkflowControls({
                 </div>
             ) : selectedWorkflow ? (
                 <div className="text-[11px] opacity-50">该工作流没有暴露参数，请在 ComfyUI 管理页面配置</div>
-            ) : null}
+            ) : (
+                <div className="rounded-md border border-dashed px-3 py-3 text-[11px] opacity-65">未找到可用工作流，点击下方“配置工作流”完成设置</div>
+            )}
         </div>
     );
 }
@@ -377,8 +424,16 @@ function InputChip({ label, value, style }: { label: string; value: string; styl
     );
 }
 
+function defaultModelForMode(config: AiConfig, mode: CanvasGenerationMode) {
+    if (mode === "comfyui") return "";
+    if (mode === "image") return config.imageModel || config.model || defaultConfig.model;
+    if (mode === "video") return config.videoModel || config.model || defaultConfig.model;
+    if (mode === "audio") return config.audioModel || config.model || defaultConfig.audioModel;
+    return config.textModel || config.model || defaultConfig.model;
+}
+
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasGenerationMode): AiConfig {
-    const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
+    const defaultModel = defaultModelForMode(globalConfig, mode);
     return {
         ...globalConfig,
         model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
@@ -388,6 +443,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
+        videoDraft: node.metadata?.draft || globalConfig.videoDraft || defaultConfig.videoDraft,
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,
@@ -400,6 +456,7 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     if (key === "videoSeconds") return { seconds: value };
     if (key === "videoGenerateAudio") return { generateAudio: value };
     if (key === "videoWatermark") return { watermark: value };
+    if (key === "videoDraft") return { draft: value };
     return { [key]: value };
 }
 

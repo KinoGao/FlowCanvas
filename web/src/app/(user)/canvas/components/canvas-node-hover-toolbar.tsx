@@ -112,9 +112,10 @@ export function CanvasNodeHoverToolbar({
     const isImage = currentNode.type === CanvasNodeType.Image;
     const isVideo = currentNode.type === CanvasNodeType.Video;
     const isAudio = currentNode.type === CanvasNodeType.Audio;
-    const hasImage = isImage && Boolean(currentNode.metadata?.content);
-    const hasVideo = isVideo && Boolean(currentNode.metadata?.content);
-    const hasAudio = isAudio && Boolean(currentNode.metadata?.content);
+    const hasStoredMedia = Boolean(currentNode.metadata?.content || currentNode.metadata?.storageKey);
+    const hasImage = isImage && hasStoredMedia;
+    const hasVideo = isVideo && hasStoredMedia;
+    const hasAudio = isAudio && hasStoredMedia;
     const isText = currentNode.type === CanvasNodeType.Text;
     const isConfig = currentNode.type === CanvasNodeType.Config;
     const canOpenDialog = isText || hasImage || isVideo;
@@ -186,13 +187,13 @@ export function CanvasNodeHoverToolbar({
             <div
                 className="absolute z-[70] flex h-11 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border text-sm shadow-[0_14px_34px_rgba(0,0,0,.24)] backdrop-blur-xl"
                 style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-                onMouseEnter={() => onKeep(node.id)}
-                onMouseLeave={() => {
+                onPointerEnter={() => onKeep(node.id)}
+                onPointerLeave={() => {
                     if (!imageToolSettingsOpen) onLeave();
                 }}
-                onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
+                <span className="pointer-events-auto absolute inset-x-0 top-full h-4" aria-hidden />
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}

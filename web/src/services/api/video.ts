@@ -7,14 +7,12 @@ import {
     boolConfig,
     buildSeedancePromptText,
     isAgnesVideoConfig,
-    isSeedanceNewModel,
     isSeedanceVideoConfig,
+    normalizeResolutionToken,
     normalizeSeedanceDuration,
     normalizeSeedanceRatio,
     normalizeSeedanceResolution,
     seedanceCapabilityError,
-    seedanceGenerationMode,
-    seedanceSupportsGenerateAudio,
     seedanceVideoReferenceError,
     SEEDANCE_REFERENCE_LIMITS,
 } from "@/lib/seedance-video";
@@ -24,6 +22,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { resolveVideoModelCapabilityForRequest, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -49,7 +48,7 @@ type AgnesTask = {
     message?: string;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; generationMode?: VideoGenerationMode };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
@@ -87,19 +86,64 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
-    if (isSeedanceVideoConfig(requestConfig)) {
-        return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+    const capability = await resolveVideoModelCapabilityForRequest(modelOptionName(selectedModel));
+    const generationMode = resolveGenerationMode(options?.generationMode, capability, references, videoReferences, audioReferences);
+    const selectedReferences = selectVideoReferences(generationMode, references, videoReferences, audioReferences, capability);
+    if (capability?.requestAdapter.startsWith("seedance") || (!capability && isSeedanceVideoConfig(requestConfig))) {
+        return createSeedanceTask(requestConfig, selectedModel, prompt, selectedReferences.images, selectedReferences.videos, selectedReferences.audios, generationMode, capability, options);
     }
-    if (isAgnesVideoConfig(requestConfig)) {
-        if (videoReferences.length || audioReferences.length) {
+    if (capability?.requestAdapter === "agnes-v2" || (!capability && isAgnesVideoConfig(requestConfig))) {
+        if (selectedReferences.videos.length || selectedReferences.audios.length) {
             throw new Error("Agnes 视频接口暂不支持参考视频或参考音频，请移除相关素材");
         }
-        return createAgnesVideoTask(requestConfig, selectedModel, prompt, references, options);
+        return createAgnesVideoTask(requestConfig, selectedModel, prompt, selectedReferences.images, capability, options);
     }
-    if (videoReferences.length || audioReferences.length) {
+    if (selectedReferences.videos.length || selectedReferences.audios.length) {
         throw new Error("当前视频接口不支持参考视频或参考音频，请切换到 Seedance 2.0 / 火山 Agent Plan 模型，或移除参考素材");
     }
-    return createOpenAIVideoTask(requestConfig, selectedModel, prompt, references, options);
+    return createOpenAIVideoTask(requestConfig, selectedModel, prompt, selectedReferences.images, options);
+}
+
+function resolveGenerationMode(requested: VideoGenerationMode | undefined, capability: VideoModelCapability | null, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]) {
+    if (!capability) {
+        if (requested) return requested;
+        if (videos.length || audios.length) return "all-in-one-reference";
+        if (images.length >= 2) return "first-last-frame";
+        if (images.length === 1) return "image-to-video";
+        return "text-to-video";
+    }
+    const modes = capability.modes.length ? capability.modes : ["text-to-video" as const];
+    if (requested && modes.includes(requested)) return requested;
+    return modes[0];
+}
+
+function selectVideoReferences(mode: VideoGenerationMode, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[], capability: VideoModelCapability | null) {
+    if (mode === "text-to-video") return { images: [], videos: [], audios: [] };
+    if (mode === "image-to-video") {
+        if (!images.length) throw new Error("图生视频需要连接 1 张参考图片");
+        return { images: images.slice(0, 1), videos: [], audios: [] };
+    }
+    if (mode === "first-last-frame") {
+        if (images.length < 2) throw new Error("首尾帧视频需要按顺序连接首帧和尾帧两张图片");
+        return { images: images.slice(0, 2), videos: [], audios: [] };
+    }
+    if (mode === "image-reference") {
+        if (!images.length) throw new Error("图片参考模式至少需要连接 1 张参考图片");
+        return { images: boundedReferences("图片", images, capability?.maxImages), videos: [], audios: [] };
+    }
+    const selected = {
+        images: boundedReferences("图片", images, capability?.maxImages),
+        videos: boundedReferences("视频", videos, capability?.maxVideos),
+        audios: boundedReferences("音频", audios, capability?.maxAudios),
+    };
+    if (!selected.images.length && !selected.videos.length && !selected.audios.length) throw new Error("全能参考模式至少需要连接一项图片、视频或音频素材");
+    if (selected.audios.length && !selected.images.length && !selected.videos.length) throw new Error("参考音频不能单独使用，请同时连接参考图片或视频");
+    return selected;
+}
+
+function boundedReferences<T>(label: string, values: T[], max: number | undefined) {
+    if (typeof max === "number" && values.length > max) throw new Error(`当前模型最多支持 ${max} 个参考${label}`);
+    return typeof max === "number" ? values.slice(0, max) : values;
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
@@ -150,36 +194,42 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
     }
 }
 
-async function createSeedanceTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], options?: RequestOptions): Promise<VideoGenerationTask> {
+async function createSeedanceTask(
+    config: AiConfig,
+    model: string,
+    prompt: string,
+    references: ReferenceImage[],
+    videoReferences: ReferenceVideo[],
+    audioReferences: ReferenceAudio[],
+    generationMode: VideoGenerationMode,
+    capability: VideoModelCapability | null,
+    options?: RequestOptions,
+): Promise<VideoGenerationTask> {
     if (audioReferences.length && !references.length && !videoReferences.length) {
         throw new Error("Seedance 参考音频不能单独使用，请同时添加参考图或参考视频");
     }
     const modelName = modelOptionName(model);
-    const capabilityError = seedanceCapabilityError(modelName, references, videoReferences, audioReferences);
-    if (capabilityError) throw new Error(capabilityError);
+    if (!capability) {
+        const capabilityError = seedanceCapabilityError(modelName, references, videoReferences, audioReferences);
+        if (capabilityError) throw new Error(capabilityError);
+    }
     assertSeedanceVideoReferences(videoReferences);
     assertSeedanceAudioReferences(audioReferences);
-    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences);
+    const content = await buildSeedanceContent(config, prompt, references, videoReferences, audioReferences, generationMode);
     if (!content.length) throw new Error("请输入视频提示词，或连接参考图片/视频/音频");
-    const isNewModel = isSeedanceNewModel(modelName);
+    const ratio = capability ? supportedString(normalizeSeedanceRatio(config.size), capability.ratios, "adaptive") : normalizeSeedanceRatio(config.size);
+    let resolution = capability ? supportedString(normalizeResolutionToken(config.vquality), capability.resolutions, "720p") : normalizeSeedanceResolution(config.vquality, modelName);
+    const duration = capability ? supportedNumber(normalizeSeedanceDuration(config.videoSeconds), capability.durations, 5) : normalizeSeedanceDuration(config.videoSeconds);
+    const draft = Boolean(capability?.draft) && boolConfig(config.videoDraft, false);
+    if (draft) resolution = "480p";
     const payload: Record<string, unknown> = { model: modelName, content };
-    if (isNewModel) {
-        // 1.5+ 支持顶层 ratio/duration/watermark/generate_audio
-        payload.ratio = normalizeSeedanceRatio(config.size);
-        payload.resolution = normalizeSeedanceResolution(config.vquality, modelName);
-        payload.duration = normalizeSeedanceDuration(config.videoSeconds);
-        payload.generate_audio = seedanceSupportsGenerateAudio(modelName) && boolConfig(config.videoGenerateAudio, true);
-        payload.watermark = boolConfig(config.videoWatermark, false);
-    } else {
-        // 1.0/lite 只支持 content text 里的 --key value 格式
-        const textItem = content.find((item: Record<string, unknown>) => item.type === "text");
-        if (textItem && typeof textItem.text === "string") {
-            const flags = [`--resolution ${normalizeSeedanceResolution(config.vquality, modelName)}`, `--duration ${normalizeSeedanceDuration(config.videoSeconds)}`, `--watermark ${boolConfig(config.videoWatermark, false)}`, `--camerafixed false`].join(
-                "  ",
-            );
-            textItem.text = `${textItem.text}  ${flags}`;
-        }
-    }
+    payload.ratio = ratio;
+    payload.resolution = resolution;
+    payload.duration = duration;
+    payload.camera_fixed = false;
+    if (capability?.watermark ?? true) payload.watermark = boolConfig(config.videoWatermark, false);
+    if (capability?.generateAudio) payload.generate_audio = boolConfig(config.videoGenerateAudio, true);
+    if (capability?.draft) payload.draft = draft;
 
     try {
         const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
@@ -326,33 +376,33 @@ function agnesReferenceImageUrl(image: ReferenceImage) {
     return "";
 }
 
-async function createAgnesVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+async function createAgnesVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], capability: VideoModelCapability | null, options?: RequestOptions): Promise<VideoGenerationTask> {
     // Agnes 官方文档要求 image 是公网可访问 URL；本地 blob/data URL 先上传临时图床，不再直传 base64。
     const initialUrls = references.map((image) => agnesReferenceImageUrl(image));
     if (references.length && initialUrls.some((url) => !url)) {
-        return agnesRetryWithPublicHost(config, model, prompt, references, "本地参考图需要先转成公网 URL，已跳过 base64 直传", options);
+        return agnesRetryWithPublicHost(config, model, prompt, references, capability, "本地参考图需要先转成公网 URL，已跳过 base64 直传", options);
     }
     try {
-        return await sendAgnesCreateRequest(config, model, prompt, initialUrls, options);
+        return await sendAgnesCreateRequest(config, model, prompt, initialUrls, capability, options);
     } catch (error) {
         // 非图片错误 或 没有可重试的参考图 → 直接抛出
         if (!isAgnesImageUrlError(error) || !references.length) {
             throw new Error(readAxiosError(error, "Agnes 视频任务创建失败"));
         }
         const imageError = readAxiosError(error, "Agnes 视频任务创建失败");
-        return agnesRetryWithPublicHost(config, model, prompt, references, imageError, options);
+        return agnesRetryWithPublicHost(config, model, prompt, references, capability, imageError, options);
     }
 }
 
 // 后端公网地址可用时，优先上传到后端；否则降级到临时图床
-async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], imageError: string, options?: RequestOptions): Promise<VideoGenerationTask> {
+async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], capability: VideoModelCapability | null, imageError: string, options?: RequestOptions): Promise<VideoGenerationTask> {
     const errors: string[] = [`[本地图片准备] ${imageError}`];
 
     const token = useUserStore.getState().token;
     if (token.trim()) {
         try {
             const publicUrls = await uploadReferencesToBackend(references, token, options?.signal);
-            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, options);
+            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, capability, options);
         } catch (backendError) {
             const message = backendError instanceof Error ? backendError.message : String(backendError);
             errors.push(`[后端公网地址] 上传失败：${message}`);
@@ -370,7 +420,7 @@ async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt:
             continue;
         }
         try {
-            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, options);
+            return await sendAgnesCreateRequest(config, model, prompt, publicUrls, capability, options);
         } catch (agnesError) {
             const agnesMessage = readAxiosError(agnesError, "Agnes 视频任务创建失败");
             errors.push(`[方法${methodIndex}: ${source} 公网 URL] Agnes 返回：${agnesMessage}`);
@@ -384,9 +434,12 @@ async function agnesRetryWithPublicHost(config: AiConfig, model: string, prompt:
     throw new Error(`无法生成视频。已依次尝试 temp.sh、litterbox 两个公网 URL 方案，Agnes 都无法消费这些图片 URL，请手动提供公网图片 URL 后重试。详细：${errors.join(" ")}`);
 }
 
-async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: string, urls: string[], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const seconds = Math.max(1, Math.min(20, Math.floor(Number(config.videoSeconds) || 6)));
-    const { width, height } = agnesVideoSize(config.size, normalizeVideoResolution(config.vquality));
+async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: string, urls: string[], capability: VideoModelCapability | null, options?: RequestOptions): Promise<VideoGenerationTask> {
+    const requestedSeconds = Math.max(1, Math.min(20, Math.floor(Number(config.videoSeconds) || 6)));
+    const seconds = capability ? supportedNumber(requestedSeconds, capability.durations, 6) : requestedSeconds;
+    const ratio = capability ? supportedString(normalizeSeedanceRatio(config.size), capability.ratios, "16:9") : config.size;
+    const resolution = capability ? supportedString(normalizeResolutionToken(config.vquality), capability.resolutions, "720p") : normalizeVideoResolution(config.vquality);
+    const { width, height } = agnesVideoSize(ratio, resolution);
     const body: Record<string, unknown> = {
         model: modelOptionName(model),
         prompt,
@@ -475,21 +528,26 @@ async function pollAgnesVideoTask(config: AiConfig, task: VideoGenerationTask, o
     }
 }
 
-async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
+async function buildSeedanceContent(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[], generationMode: VideoGenerationMode) {
     const content: Array<Record<string, unknown>> = [];
     const text = buildSeedancePromptText(prompt, references, videoReferences, audioReferences);
     if (text) content.push({ type: "text", text });
-    const mode = seedanceGenerationMode(references, videoReferences, audioReferences);
-    const imageReferences = mode === "i2v_first_tail" ? references.slice(0, 2) : references.slice(0, 1);
-    for (let index = 0; index < imageReferences.length; index += 1) {
-        const role = mode === "i2v_first_tail" && index === 1 ? "last_frame" : "first_frame";
-        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, imageReferences[index]) }, role });
+    if (generationMode === "image-to-video" && references[0]) {
+        content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, references[0]) }, role: "first_frame" });
+    } else if (generationMode === "first-last-frame") {
+        for (let index = 0; index < Math.min(2, references.length); index += 1) {
+            content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, references[index]) }, role: index === 0 ? "first_frame" : "last_frame" });
+        }
+    } else if (generationMode === "image-reference" || generationMode === "all-in-one-reference") {
+        for (const image of references) content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
     }
-    for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
-        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
-    }
-    for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
-        content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
+    if (generationMode === "all-in-one-reference") {
+        for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
+            content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
+        }
+        for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
+            content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
+        }
     }
     return content;
 }
@@ -555,6 +613,18 @@ function normalizeVideoResolution(value: string) {
     if (value === "auto" || value === "high" || value === "medium") return "720p";
     const resolution = value.replace(/p$/i, "") || "720";
     return `${resolution}p`;
+}
+
+function supportedString(value: string, values: string[], preferred: string) {
+    if (!values.length || values.includes(value)) return value;
+    if (values.includes(preferred)) return preferred;
+    return values[0];
+}
+
+function supportedNumber(value: number, values: number[], preferred: number) {
+    if (!values.length || values.includes(value)) return value;
+    if (values.includes(preferred)) return preferred;
+    return values.reduce((closest, item) => (Math.abs(item - value) < Math.abs(closest - value) ? item : closest), values[0]);
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse) {

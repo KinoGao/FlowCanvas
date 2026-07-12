@@ -7,4 +7,5 @@ import java.util.Optional;
 
 public interface UserConfigRepository extends JpaRepository<UserConfig, String> {
     Optional<UserConfig> findByUserId(String userId);
+    void deleteByUserId(String userId);
 }

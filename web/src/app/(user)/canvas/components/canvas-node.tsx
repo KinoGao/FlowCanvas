@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Handle, Position as ReactFlowPosition, useUpdateNodeInternals } from "@xyflow/react";
 import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Music2, RefreshCw, Settings2, Star, Video } from "lucide-react";
 import * as THREE from "three";
 
@@ -21,7 +20,7 @@ import type { CanvasResourceReference } from "../utils/canvas-resource-reference
 import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-const selectionBlue = "#7dd3fc";
+const selectionBlue = "#0a84ff";
 
 type ResizeStartEvent = React.PointerEvent;
 
@@ -63,6 +62,7 @@ export type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
+    connectionTargetSide?: "source" | "target" | null;
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
@@ -78,12 +78,12 @@ export type CanvasNodeProps = {
     batchOpening?: boolean;
     batchRecovering?: boolean;
     batchMotion?: { x: number; y: number; index: number };
-    onMouseDown: (event: React.MouseEvent, nodeId: string) => void;
     onHoverStart: (nodeId: string) => void;
     onHoverEnd: (nodeId: string) => void;
     onConnectStart: (nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: CanvasPosition) => void;
     onContentChange: (nodeId: string, content: string) => void;
+    onTitleChange: (nodeId: string, title: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onOpenComposer?: (node: CanvasNodeData) => void;
@@ -91,12 +91,14 @@ export type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
+    onGroupAction?: (node: CanvasNodeData, action: "run" | "toolbox" | "storyboard" | "ungroup" | "download") => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
 type NodeContentRendererProps = {
     node: CanvasNodeData;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    isSelected: boolean;
     isEditingContent: boolean;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     isBatchRoot: boolean;
@@ -115,6 +117,7 @@ type NodeContentRendererProps = {
     onSetBatchPrimary?: () => void;
     onOpenComposer?: () => void;
     onUpload?: () => void;
+    onGroupAction?: (node: CanvasNodeData, action: "run" | "toolbox" | "storyboard" | "ungroup" | "download") => void;
 };
 
 /** Custom memo comparator: skip function props (renderPanel, renderNodeContent, callbacks)
@@ -126,6 +129,7 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.isFocusRelated !== next.isFocusRelated) return false;
     if (prev.isConnectionTarget !== next.isConnectionTarget) return false;
     if (prev.isConnecting !== next.isConnecting) return false;
+    if (prev.connectionTargetSide !== next.connectionTargetSide) return false;
     if (prev.showPanel !== next.showPanel) return false;
     if (prev.showImageInfo !== next.showImageInfo) return false;
     if (prev.isOverview !== next.isOverview) return false;
@@ -149,6 +153,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
+    connectionTargetSide = null,
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
@@ -164,12 +169,12 @@ export const CanvasNode = React.memo(function CanvasNode({
     batchOpening = false,
     batchRecovering = false,
     batchMotion,
-    onMouseDown,
     onHoverStart,
     onHoverEnd,
     onConnectStart,
     onResize,
     onContentChange,
+    onTitleChange,
     onToggleBatch,
     onSetBatchPrimary,
     onOpenComposer,
@@ -177,19 +182,20 @@ export const CanvasNode = React.memo(function CanvasNode({
     onRetry,
     onGenerateImage,
     onViewImage,
+    onGroupAction,
     onContextMenu,
 }: CanvasNodeProps) {
     const scaleRef = useCanvasScaleRef();
-    const updateNodeInternals = useUpdateNodeInternals();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [isEditingContent, setIsEditingContent] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
+    const isGroup = data.type === CanvasNodeType.Group;
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
-    const imageBorderColor = isActive ? selectionBlue : isRelated && !isBatchChild ? theme.node.muted : "transparent";
+    const imageBorderColor = isActive || (isRelated && !isBatchChild) ? theme.ui.accent : theme.ui.hairline;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const nodeRef = useRef<HTMLDivElement>(null);
@@ -319,15 +325,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             resizeFrameRef.current = null;
         }
         onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
-        updateNodeInternals(data.id);
-        requestAnimationFrame(() => updateNodeInternals(data.id));
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
         window.removeEventListener("pointermove", handleResizeMove);
         window.removeEventListener("pointerup", handleResizeUp);
         window.removeEventListener("pointercancel", handleResizeUp);
         window.removeEventListener("blur", handleResizeUp);
-    }, [data.id, handleResizeMove, onResize, updateNodeInternals]);
+    }, [data.id, handleResizeMove, onResize]);
 
     const handleResizeMouseDown = (event: ResizeStartEvent, corner: ResizeCorner) => {
         event.stopPropagation();
@@ -384,7 +388,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         (event: React.MouseEvent) => {
             if (data.type !== CanvasNodeType.Image || !hasImageContent) return;
             const now = Date.now();
-            if (now - mediaClickRef.current.lastAt > 1200) mediaClickRef.current.count = 0;
+            if (now - mediaClickRef.current.lastAt > 750) mediaClickRef.current.count = 0;
             mediaClickRef.current.count += 1;
             mediaClickRef.current.lastAt = now;
 
@@ -393,8 +397,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                 clearMediaClickTimer();
                 mediaClickTimerRef.current = window.setTimeout(() => {
                     mediaClickTimerRef.current = null;
+                    mediaClickRef.current.count = 0;
                     onOpenComposer?.(data);
-                }, 260);
+                }, 760);
             } else if (mediaClickRef.current.count >= 3) {
                 event.stopPropagation();
                 clearMediaClickTimer();
@@ -405,7 +410,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         [clearMediaClickTimer, data, hasImageContent, isBatchRoot, onOpenComposer, onViewImage],
     );
 
-    const shouldUseOverview = isOverview && !isActive && !showPanel && !isEditingContent;
+    const shouldUseOverview = isOverview && !showPanel && !isEditingContent;
     const panelWidthClass =
         data.metadata?.canvasTool === "director"
             ? "w-[920px] max-w-[calc(100vw-48px)]"
@@ -417,38 +422,48 @@ export const CanvasNode = React.memo(function CanvasNode({
         <div
             ref={nodeRef}
             data-node-id={data.id}
-            className={`node-element ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-200 ${isSelected ? "z-50" : "z-10"}`}
+            className={`node-element ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-150 ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
                 height: data.height,
-                transition: "box-shadow 200ms ease",
+                transition: "box-shadow 160ms ease, opacity 160ms ease",
                 contain: "layout style",
             }}
-            onMouseEnter={() => {
+            onPointerEnter={() => {
                 if (shouldUseOverview) return;
                 onHoverStart(data.id);
             }}
-            onMouseLeave={() => {
+            onPointerLeave={() => {
                 if (shouldUseOverview) return;
                 onHoverEnd(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <Card
-                className="relative h-full w-full overflow-visible rounded-[10px] border bg-transparent p-0 py-0 text-sm ring-0"
+                className="creative-os-node relative h-full w-full overflow-visible rounded-[8px] border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
-                    background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.fill : "transparent",
-                    borderColor: shouldUseOverview ? (isRelated ? theme.node.muted : theme.node.stroke) : hasImageContent ? imageBorderColor : isActive ? selectionBlue : isRelated ? theme.node.muted : theme.node.stroke,
-                    boxShadow: shouldUseOverview ? undefined : isActive ? `0 0 0 1px ${selectionBlue}66, 0 12px 28px rgba(0,0,0,.18)` : isRelated && !isBatchChild ? `0 0 0 1px ${theme.node.muted}44, 0 12px 28px rgba(0,0,0,.12)` : undefined,
+                    background: isGroup ? theme.ui.controlFill : shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.panel : "rgba(14,14,14,.45)",
+                    borderColor: isGroup
+                        ? isSelected
+                            ? theme.ui.accent
+                            : theme.ui.hairline
+                        : shouldUseOverview
+                          ? isRelated
+                              ? theme.ui.accent
+                              : theme.ui.hairline
+                          : hasImageContent
+                            ? imageBorderColor
+                            : isActive
+                              ? theme.ui.accent
+                              : isRelated
+                                ? theme.ui.accent
+                                : theme.ui.hairline,
+                    boxShadow: isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : shouldUseOverview ? undefined : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
-                onMouseDown={(event) => onMouseDown(event, data.id)}
                 onClick={handleMediaClick}
                 onDoubleClick={(event) => {
-                    if (data.type === CanvasNodeType.Image && hasImageContent) {
-                        event.stopPropagation();
-                        return;
-                    }
+                    if (data.type === CanvasNodeType.Image && hasImageContent) return;
                     if (isBatchRoot) {
                         event.stopPropagation();
                         onToggleBatch?.(data.id);
@@ -463,7 +478,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
-                            background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.fill : "transparent",
+                            background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.panel : "transparent",
                             "--batch-from-x": `${batchMotion?.x || 0}px`,
                             "--batch-from-y": `${batchMotion?.y || 0}px`,
                             "--batch-from-rotate": `${6 + (batchMotion?.index || 0) * 4}deg`,
@@ -478,6 +493,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         <NodeContent
                             node={data}
                             theme={theme}
+                            isSelected={isSelected}
                             isEditingContent={isEditingContent}
                             textareaRef={textareaRef}
                             isBatchRoot={isBatchRoot}
@@ -496,17 +512,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onUpload={() => onUpload?.(data)}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                            onGroupAction={onGroupAction}
                         />
                     )}
                 </div>
 
-                {!shouldUseOverview ? <NodeTitleBadge node={data} theme={theme} /> : null}
+                {!isGroup ? <NodeTitleBadge node={data} theme={theme} overview={isOverview} /> : null}
+                {isGroup ? <GroupTitleEditor node={data} theme={theme} overview={isOverview} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
-
-                {!shouldUseOverview && !hasImageContent && !hasVideoContent && !hasAudioContent ? (
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: `linear-gradient(to top, ${theme.canvas.background}66, transparent)` }} />
-                ) : null}
 
                 {!shouldUseOverview ? (
                     <>
@@ -518,13 +532,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ) : null}
             </Card>
 
-            <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} onMouseDown={() => onConnectStart(data.id, "target")} />
-            <ConnectionHandleDot side="right" visible={!shouldUseOverview && data.type !== CanvasNodeType.Config && (isSelected || isConnecting)} onMouseDown={() => onConnectStart(data.id, "source")} />
+            {!isGroup ? <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
+            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && data.type !== CanvasNodeType.Config && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} /> : null}
 
             {showPanel && renderPanel ? (
                 <div
                     ref={panelRef}
-                    className={cn("absolute left-1/2 top-full z-[70] max-h-[68vh] -translate-x-1/2 overflow-y-auto pt-4 thin-scrollbar", panelWidthClass)}
+                    className={cn("absolute left-1/2 top-full z-[70] max-h-[68vh] -translate-x-1/2 overflow-x-hidden overflow-y-auto pt-4 thin-scrollbar", panelWidthClass)}
                     onWheel={(event) => {
                         const el = event.currentTarget;
                         if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
@@ -607,7 +621,7 @@ function OverviewAudioContent({ node, theme }: { node: CanvasNodeData; theme: (t
 }
 
 function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const title = node.title || node.metadata?.prompt || node.metadata?.content || (node.type === CanvasNodeType.Config ? "配置节点" : "节点");
     return (
         <div className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3 py-2" style={{ color: theme.node.text }}>
@@ -620,6 +634,7 @@ function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (ty
 }
 
 function NodeContent(props: NodeContentRendererProps): React.ReactElement {
+    if (props.node.type === CanvasNodeType.Group) return <GroupContent {...props} />;
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
@@ -637,23 +652,61 @@ const nodeContentRenderers = {
     [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
+    [CanvasNodeType.Group]: GroupContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
+
+function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
+    const isStoryboard = node.metadata?.groupVariant === "storyboard";
+    const actions: Array<{ key: "run" | "toolbox" | "storyboard" | "ungroup" | "download"; label: string }> = [
+        { key: "run", label: "整组执行" },
+        { key: "toolbox", label: "添加到工具箱" },
+        { key: "storyboard", label: isStoryboard ? "已是分镜组" : "转分镜组" },
+        { key: "ungroup", label: "解组" },
+        { key: "download", label: "批量下载" },
+    ];
+
+    return (
+        <div className="relative h-full w-full rounded-[inherit]">
+            {isSelected ? (
+                <div className="absolute -top-11 left-0 flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border border-white/10 bg-[#1f1f1f]/95 px-1.5 py-1 text-xs text-white/75 shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur">
+                    {actions.map((action) => (
+                        <button
+                            key={action.key}
+                            type="button"
+                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:bg-white/10 hover:text-white"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onGroupAction?.(node, action.key);
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                        >
+                            {action.label}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    );
+}
 
 function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
     return (
-        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }}>
-            <div className="absolute inset-0 overflow-hidden">
-                <div
-                    className="absolute inset-0"
-                    style={{
-                        background: `linear-gradient(90deg, transparent, ${theme.node.activeStroke}18, transparent)`,
-                        animation: "shimmer-sweep 2s ease-in-out infinite",
-                    }}
-                />
-            </div>
-            <span className="relative z-10 text-[10px] tracking-[0.2em]" style={{ color: theme.node.activeStroke }}>
-                生成中
-            </span>
+        <div
+            role="status"
+            aria-label="生成中"
+            className="canvas-generation-loading relative h-full w-full overflow-hidden rounded-[inherit]"
+            style={
+                {
+                    "--canvas-generation-base": canvasThemes.dark.canvas.background,
+                    "--canvas-generation-glow": canvasThemes.dark.node.text,
+                    "--canvas-generation-dot": theme.node.placeholder,
+                } as React.CSSProperties
+            }
+        >
+            <div aria-hidden className="canvas-generation-loading-dots absolute inset-0" />
+            <div aria-hidden className="canvas-generation-loading-dot-mask absolute inset-0" />
+            <div aria-hidden className="canvas-generation-loading-shimmer absolute inset-0" />
         </div>
     );
 }
@@ -832,12 +885,105 @@ function DirectorContent({ theme, onOpenComposer }: NodeContentRendererProps) {
     );
 }
 
-function NodeTitleBadge({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : FileText;
+function NodeTitleBadge({ node, theme, overview }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; overview: boolean }) {
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     return (
-        <div className="pointer-events-none absolute -top-6 left-0 flex max-w-full items-center gap-1 text-[11px]" style={{ color: theme.node.label }}>
+        <div
+            className={cn("pointer-events-none absolute left-0 z-30 flex max-w-[220px] items-center gap-1 text-[11px] leading-4", overview ? "top-0 rounded-md border px-1.5 py-1" : "-top-[22px] max-w-full")}
+            style={{
+                color: theme.node.label,
+                background: overview ? theme.toolbar.panel : "transparent",
+                borderColor: overview ? theme.toolbar.border : "transparent",
+                transform: overview ? "scale(var(--canvas-overview-inverse-scale, 1))" : undefined,
+                transformOrigin: "top left",
+            }}
+        >
             <Icon className="size-3 shrink-0 opacity-65" />
             <span className="truncate">{node.title || "未命名节点"}</span>
+        </div>
+    );
+}
+
+function GroupTitleEditor({
+    node,
+    theme,
+    overview,
+    onTitleChange,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    overview: boolean;
+    onTitleChange: (nodeId: string, title: string) => void;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState("");
+    const cancelRef = useRef(false);
+    const fallbackTitle = node.metadata?.groupVariant === "storyboard" ? "分镜组" : "分组";
+    const commit = () => {
+        if (cancelRef.current) {
+            cancelRef.current = false;
+            return;
+        }
+        onTitleChange(node.id, draft.trim() || fallbackTitle);
+        setEditing(false);
+    };
+    const sharedStyle: React.CSSProperties = {
+        color: theme.node.text,
+        background: theme.toolbar.panel,
+        borderColor: theme.toolbar.border,
+    };
+
+    return (
+        <div
+            className={cn("absolute z-40 max-w-[70%]", overview ? "bottom-full right-0" : "right-2 top-2")}
+            style={{
+                transform: overview ? "scale(var(--canvas-overview-inverse-scale, 1))" : undefined,
+                transformOrigin: overview ? "bottom right" : "top right",
+            }}
+        >
+            {editing ? (
+                <input
+                    autoFocus
+                    data-canvas-no-zoom
+                    value={draft}
+                    maxLength={64}
+                    className="h-7 w-40 select-text rounded-md border px-2 text-right text-xs outline-none"
+                    style={sharedStyle}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onBlur={commit}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            commit();
+                        }
+                        if (event.key === "Escape") {
+                            cancelRef.current = true;
+                            setEditing(false);
+                        }
+                    }}
+                />
+            ) : (
+                <button
+                    type="button"
+                    data-canvas-no-zoom
+                    title="双击重命名"
+                    className="block max-w-full truncate rounded-md border px-2 py-1 text-right text-xs font-medium"
+                    style={sharedStyle}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        cancelRef.current = false;
+                        setDraft(node.title || fallbackTitle);
+                        setEditing(true);
+                    }}
+                >
+                    {node.title || fallbackTitle}
+                </button>
+            )}
         </div>
     );
 }
@@ -1209,30 +1355,37 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     );
 }
 
-function ConnectionHandleDot({ side, visible, onMouseDown }: { side: "left" | "right"; visible: boolean; onMouseDown: () => void }) {
+function ConnectionHandleDot({ side, visible, active }: { side: "left" | "right"; visible: boolean; active: boolean }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isSource = side === "right";
-    const visualClass = isSource ? "left-1/2" : "right-1/2";
-    const plusVisibility = visible ? "opacity-100 scale-100" : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
+    const visualClass = isSource ? "left-[18px]" : "right-[18px]";
+    const plusVisibility = active
+        ? "opacity-100 scale-125"
+        : visible
+          ? "opacity-100 scale-100"
+          : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
 
     return (
-        <Handle
-            id={isSource ? "source" : "target"}
-            type={isSource ? "source" : "target"}
-            position={isSource ? ReactFlowPosition.Right : ReactFlowPosition.Left}
-            className="group/connection-handle !pointer-events-auto !z-40 !size-3 !border-0 !bg-transparent !opacity-100"
-            isConnectable
-            onMouseDown={onMouseDown}
+        <div
+            data-handle
+            data-handle-type={isSource ? "source" : "target"}
+            className="group/connection-handle !pointer-events-auto !z-40 absolute top-0 h-full cursor-crosshair"
+            style={{ [side]: "-22px", width: "44px" }}
         >
-            <span className={`absolute top-1/2 flex size-11 -translate-y-1/2 items-center justify-center ${visualClass}`}>
+            <span className={`absolute top-1/2 flex size-9 -translate-y-1/2 items-center justify-center ${visualClass}`}>
                 <span
-                    className={`pointer-events-none grid size-[22px] place-items-center rounded-full border shadow-[0_8px_20px_rgba(15,23,42,.18)] backdrop-blur-md transition duration-150 ${plusVisibility}`}
-                    style={{ background: theme.toolbar.panel, borderColor: theme.node.muted, color: theme.node.text }}
+                    className={`pointer-events-none relative grid size-5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                    style={{
+                        background: active ? "#a5f3fc" : "#f7f7f7",
+                        borderColor: active ? "#ecfeff" : "rgba(255,255,255,.7)",
+                        color: theme.canvas.background,
+                        boxShadow: active ? "0 0 0 7px rgba(165,243,252,.16), 0 0 18px rgba(103,232,249,.72)" : undefined,
+                    }}
                 >
-                    <span className="absolute h-2.5 w-px rounded-full bg-current" />
-                    <span className="absolute h-px w-2.5 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-[10px] w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-[1.5px] w-[10px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
                 </span>
             </span>
-        </Handle>
+        </div>
     );
 }

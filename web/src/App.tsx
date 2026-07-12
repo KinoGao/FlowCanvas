@@ -2,14 +2,14 @@ import { Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import UserLayout from "@/app/(user)/layout";
-import IndexPage from "@/app/(user)/page";
 import AssetsPage from "@/app/(user)/assets/page";
-import CanvasLibraryPage from "@/app/(user)/canvas/page";
 import CanvasPage from "@/app/(user)/canvas/[id]/canvas-client-page";
-import ComfyUiPage from "@/app/(user)/comfyui/page";
+import CanvasLibraryPage from "@/app/(user)/canvas/page";
 import ImagePage from "@/app/(user)/image/page";
+import IndexPage from "@/app/(user)/page";
 import PromptsPage from "@/app/(user)/prompts/page";
 import VideoPage from "@/app/(user)/video/page";
+import AdminPage from "@/app/admin/page";
 import NotFound from "@/app/not-found";
 
 function PageFallback() {
@@ -28,9 +28,10 @@ export default function App() {
                     <Route path="video" element={<VideoPage />} />
                     <Route path="assets" element={<AssetsPage />} />
                     <Route path="prompts" element={<PromptsPage />} />
-                    <Route path="comfyui" element={<ComfyUiPage />} />
+                    <Route path="comfyui" element={<Navigate to="/admin" replace />} />
                     <Route path="canvas/:id/*" element={<Navigate to=".." replace />} />
                 </Route>
+                <Route path="admin" element={<AdminPage />} />
                 <Route path="*" element={<NotFound />} />
             </Routes>
         </Suspense>

@@ -12,14 +12,149 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: false
+  servlet:
+    multipart:
+      max-file-size: ${USER_FILE_MAX_SIZE:512MB}
+      max-request-size: ${USER_REQUEST_MAX_SIZE:512MB}
 
 server:
   port: ${PORT:9801}
 
 app:
   auth-code: ${AUTH_CODE:gycode}
+  registration-code: ${REGISTRATION_CODE:${AUTH_CODE:gycode}}
+  admin-code: ${ADMIN_CODE:admincode}
   public-base-url: ${PUBLIC_BASE_URL:}
   comfyui-base-url: ${COMFYUI_BASE_URL:}
   public-image-dir: ${PUBLIC_IMAGE_DIR:./data/public-images}
   user-file-dir: ${USER_FILE_DIR:./data/user-files}
   workflow-dir: ${WORKFLOW_DIR:./data/workflows}
+  model-capabilities:
+    video:
+      - id: agnes-video-v2
+        provider: agnes
+        request-adapter: agnes-v2
+        model-patterns: ['agnes-video-v2.0', 'agnes-video-v2*']
+        modes: ['text-to-video', 'image-to-video', 'first-last-frame']
+        ratios: ['16:9', '9:16', '1:1', '4:3', '3:4']
+        resolutions: ['480p', '720p', '1080p']
+        durations: [4, 5, 6, 8, 10, 12, 15, 18]
+        counts: [1]
+        generate-audio: false
+        watermark: false
+        max-images: 2
+        max-videos: 0
+        max-audios: 0
+      - id: seedance-2-fast
+        provider: seedance
+        request-adapter: seedance-v2
+        model-patterns: ['doubao-seedance-2-0-fast-*', 'seedance-2.0-fast*', 'seedance-2-0-fast*']
+        modes: ['text-to-video', 'all-in-one-reference', 'image-to-video', 'first-last-frame', 'image-reference']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p']
+        durations: [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        counts: [1]
+        generate-audio: true
+        watermark: true
+        max-images: 9
+        max-videos: 3
+        max-audios: 3
+      - id: seedance-2-mini
+        provider: seedance
+        request-adapter: seedance-v2
+        model-patterns: ['doubao-seedance-2-0-mini-*', 'seedance-2.0-mini*', 'seedance-2-0-mini*']
+        modes: ['text-to-video', 'all-in-one-reference', 'image-to-video', 'first-last-frame', 'image-reference']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p']
+        durations: [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        counts: [1]
+        generate-audio: true
+        watermark: true
+        max-images: 9
+        max-videos: 3
+        max-audios: 3
+      - id: seedance-2
+        provider: seedance
+        request-adapter: seedance-v2
+        model-patterns: ['doubao-seedance-2-0-*', 'seedance-2.0*', 'seedance-2-0*']
+        modes: ['text-to-video', 'all-in-one-reference', 'image-to-video', 'first-last-frame', 'image-reference']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p', '1080p', '4k']
+        durations: [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        counts: [1]
+        generate-audio: true
+        watermark: true
+        max-images: 9
+        max-videos: 3
+        max-audios: 3
+      - id: seedance-1-5-pro
+        provider: seedance
+        request-adapter: seedance-v1.5
+        model-patterns: ['doubao-seedance-1-5-pro-*', 'seedance-1.5-pro*']
+        modes: ['text-to-video', 'image-to-video', 'first-last-frame']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p', '1080p']
+        durations: [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        counts: [1]
+        generate-audio: true
+        watermark: true
+        draft: true
+        max-images: 2
+        max-videos: 0
+        max-audios: 0
+      - id: seedance-1-pro-fast
+        provider: seedance
+        request-adapter: seedance-v1
+        model-patterns: ['doubao-seedance-1-0-pro-fast-*', 'seedance-1.0-pro-fast*']
+        modes: ['text-to-video', 'image-to-video']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p', '1080p']
+        durations: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        counts: [1]
+        generate-audio: false
+        watermark: true
+        max-images: 1
+        max-videos: 0
+        max-audios: 0
+      - id: seedance-1-pro
+        provider: seedance
+        request-adapter: seedance-v1
+        model-patterns: ['doubao-seedance-1-0-pro-*', 'seedance-1.0-pro*']
+        modes: ['text-to-video', 'image-to-video', 'first-last-frame']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p', '1080p']
+        durations: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        counts: [1]
+        generate-audio: false
+        watermark: true
+        max-images: 2
+        max-videos: 0
+        max-audios: 0
+      - id: seedance-lite-t2v
+        provider: seedance
+        request-adapter: seedance-v1
+        model-patterns: ['doubao-seedance-1-0-lite-t2v-*', 'seedance-1.0-lite-t2v*']
+        modes: ['text-to-video']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p', '1080p']
+        durations: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        counts: [1]
+        generate-audio: false
+        watermark: true
+        max-images: 0
+        max-videos: 0
+        max-audios: 0
+      - id: seedance-lite-i2v
+        provider: seedance
+        request-adapter: seedance-v1
+        model-patterns: ['doubao-seedance-1-0-lite-i2v-*', 'seedance-1.0-lite-i2v*']
+        modes: ['image-to-video']
+        ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+        resolutions: ['480p', '720p']
+        durations: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        counts: [1]
+        generate-audio: false
+        watermark: true
+        max-images: 1
+        max-videos: 0
+        max-audios: 0

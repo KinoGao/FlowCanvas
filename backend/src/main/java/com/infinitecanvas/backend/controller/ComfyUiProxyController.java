@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Value;
+import com.infinitecanvas.backend.service.PlatformConfigService;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,13 +23,13 @@ import java.util.Set;
 public class ComfyUiProxyController {
     private static final Set<String> ALLOWED_PATHS = Set.of("/system_stats", "/object_info", "/prompt", "/history/", "/view", "/upload/image");
     private static final int COMFY_PROXY_MAX_IN_MEMORY_SIZE = 256 * 1024 * 1024;
-    private final String configuredBaseUrl;
+    private final PlatformConfigService platformConfigService;
     private final WebClient webClient = WebClient.builder()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(COMFY_PROXY_MAX_IN_MEMORY_SIZE))
             .build();
 
-    public ComfyUiProxyController(@Value("${app.comfyui-base-url:}") String configuredBaseUrl) {
-        this.configuredBaseUrl = configuredBaseUrl == null ? "" : configuredBaseUrl.trim();
+    public ComfyUiProxyController(PlatformConfigService platformConfigService) {
+        this.platformConfigService = platformConfigService;
     }
 
     @GetMapping
@@ -78,6 +79,7 @@ public class ComfyUiProxyController {
     }
 
     private URI buildTargetUrl(String baseUrl, String path) {
+        String configuredBaseUrl = platformConfigService.comfyBaseUrl();
         String normalizedBase = !configuredBaseUrl.isBlank() ? configuredBaseUrl : (baseUrl == null || baseUrl.isBlank()) ? "http://127.0.0.1:8188" : baseUrl.trim();
         URI base = URI.create(normalizedBase);
         if (!"http".equalsIgnoreCase(base.getScheme()) && !"https".equalsIgnoreCase(base.getScheme())) throw new IllegalArgumentException("ComfyUI 地址只支持 http/https");

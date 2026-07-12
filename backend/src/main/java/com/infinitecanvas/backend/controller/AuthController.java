@@ -24,15 +24,26 @@ public class AuthController {
 
     @PostMapping("/register")
     public ApiResponse<AuthResponse> register(@RequestBody Map<String, Object> body) {
-        if (!authCodeService.matches(text(body.get("authCode")))) throw new IllegalArgumentException("鉴权码错误，无法注册账号");
-        AuthService.LoginResult result = authService.register(text(body.get("username")), text(body.get("password")), text(body.get("displayName")));
-        return ApiResponse.ok(new AuthResponse(result.token(), new UserDto(result.user())));
+        if (!authCodeService.matchesRegistration(text(body.get("authCode")))) {
+            throw new IllegalArgumentException("注册鉴权码错误");
+        }
+        AuthService.LoginResult result = authService.register(
+                text(body.get("username")), text(body.get("password")), text(body.get("displayName"))
+        );
+        return response(result);
     }
 
     @PostMapping("/login")
     public ApiResponse<AuthResponse> login(@RequestBody Map<String, Object> body) {
-        AuthService.LoginResult result = authService.login(text(body.get("username")), text(body.get("password")));
-        return ApiResponse.ok(new AuthResponse(result.token(), new UserDto(result.user())));
+        return response(authService.login(text(body.get("username")), text(body.get("password"))));
+    }
+
+    @PostMapping("/admin-login")
+    public ApiResponse<AuthResponse> adminLogin(@RequestBody Map<String, Object> body) {
+        if (!authCodeService.matchesAdmin(text(body.get("adminCode")))) {
+            throw new IllegalArgumentException("管理员授权码错误");
+        }
+        return response(authService.adminLogin(text(body.get("username")), text(body.get("password"))));
     }
 
     @GetMapping("/me")
@@ -47,7 +58,11 @@ public class AuthController {
         return ApiResponse.ok();
     }
 
+    private ApiResponse<AuthResponse> response(AuthService.LoginResult result) {
+        return ApiResponse.ok(new AuthResponse(result.token(), new UserDto(result.user())));
+    }
+
     private String text(Object value) {
-        return value instanceof String s ? s : "";
+        return value instanceof String text ? text : "";
     }
 }

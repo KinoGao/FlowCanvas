@@ -18,7 +18,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     const [zoomOpen, setZoomOpen] = useState(false);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
-    const dockStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: colorTheme === "dark" ? "0 14px 34px rgba(0,0,0,.26)" : "0 12px 30px rgba(28,25,23,.10)" };
+    const dockStyle = { background: theme.ui.material, borderColor: theme.ui.hairline, color: theme.toolbar.item, boxShadow: theme.ui.shadow };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
     const zoomPercent = Math.round(scale * 100);
 
@@ -28,9 +28,9 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     };
 
     return (
-        <div className="absolute bottom-3 left-4 z-50 flex items-end gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <div className="absolute bottom-4 left-4 z-50 flex items-end gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             {zoomOpen ? (
-                <div className="absolute bottom-11 left-[150px] w-[212px] rounded-2xl border p-2 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
+                <div className="creative-os-panel absolute bottom-14 left-0 w-[212px] rounded-2xl border p-2" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                     <div className="mb-2 flex h-8 items-center rounded-md border px-2 text-sm" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                         <input
                             className="min-w-0 flex-1 bg-transparent outline-none"
@@ -53,20 +53,19 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                 </div>
             ) : null}
 
-            <div className="flex h-10 items-center gap-1 rounded-xl border px-1.5 backdrop-blur-xl" style={dockStyle}>
+            <div className="creative-os-zoom-cluster flex h-11 items-center gap-1 border px-1.5" style={dockStyle}>
                 <Tooltip title="资产管理">
-                    <button type="button" className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[13px] transition" style={{ color: theme.toolbar.item }} onClick={onOpenMyAssets} aria-label="资产管理">
+                    <button type="button" className="creative-os-icon-button !size-8" style={{ color: theme.toolbar.item }} onClick={onOpenMyAssets} aria-label="资产管理">
                         <FolderOpen className="size-4" />
-                        <span className="whitespace-nowrap">资产管理</span>
                     </button>
                 </Tooltip>
                 <Tooltip title={isMiniMapOpen ? "关闭小地图" : "打开小地图"}>
-                    <Button type="text" className="!h-7 !w-7 !min-w-7 !rounded-md !p-0" style={isMiniMapOpen ? activeStyle : { color: theme.toolbar.item }} icon={<Compass className="size-4" />} onClick={onToggleMiniMap} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} />
+                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={isMiniMapOpen ? activeStyle : { color: theme.toolbar.item }} icon={<Compass className="size-4" />} onClick={onToggleMiniMap} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} />
                 </Tooltip>
                 <Tooltip title="重置视图">
-                    <Button type="text" className="!h-7 !w-7 !min-w-7 !rounded-md !p-0" style={{ color: theme.toolbar.item }} icon={<Focus className="size-4" />} onClick={onReset} aria-label="重置视图" />
+                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={{ color: theme.toolbar.item }} icon={<Focus className="size-4" />} onClick={onReset} aria-label="重置视图" />
                 </Tooltip>
-                <button type="button" className="h-7 rounded-md px-2 text-xs tabular-nums transition" style={zoomOpen ? activeStyle : { color: theme.toolbar.item }} onClick={() => setZoomOpen((value) => !value)} aria-label="缩放选项">
+                <button type="button" className="creative-os-zoom-value h-8 rounded-lg px-2 text-xs tabular-nums transition" style={zoomOpen ? activeStyle : { color: theme.toolbar.item }} onClick={() => setZoomOpen((value) => !value)} aria-label="缩放选项">
                     {zoomPercent}%
                 </button>
             </div>

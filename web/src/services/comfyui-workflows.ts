@@ -73,6 +73,12 @@ export async function saveComfyWorkflow(workflow: ComfyWorkflow) {
     return next;
 }
 
+export async function replaceComfyWorkflows(workflows: ComfyWorkflow[]) {
+    const next = workflows.map((workflow) => ({ ...workflow, fields: Array.isArray(workflow.fields) ? workflow.fields : [] }));
+    await store.setItem(LIST_KEY, next);
+    workflowCache = [...next];
+}
+
 export async function createComfyWorkflow(input: { name: string; title?: string; workflow: ComfyWorkflowJson }) {
     const now = new Date().toISOString();
     const name = normalizeWorkflowName(input.name);

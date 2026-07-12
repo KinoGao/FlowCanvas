@@ -18,7 +18,7 @@ public class PublicImageService {
     private final Path imageDir;
 
     public PublicImageService(@Value("${app.public-image-dir:./data/public-images}") String dir) {
-        this.imageDir = Paths.get(dir);
+        this.imageDir = Paths.get(dir).toAbsolutePath().normalize();
         try {
             Files.createDirectories(this.imageDir);
         } catch (IOException e) {
@@ -42,8 +42,10 @@ public class PublicImageService {
             default -> "";
         };
         String filename = UUID.randomUUID().toString().replace("-", "") + ext;
+        Path target = imageDir.resolve(filename).normalize();
+        if (!target.startsWith(imageDir)) throw new IllegalArgumentException("文件路径非法");
         try {
-            Files.copy(file.getInputStream(), imageDir.resolve(filename));
+            Files.copy(file.getInputStream(), target);
         } catch (IOException e) {
             throw new RuntimeException("保存图片失败", e);
         }

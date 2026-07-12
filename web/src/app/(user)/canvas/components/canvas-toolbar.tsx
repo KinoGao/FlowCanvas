@@ -33,6 +33,7 @@ import {
     Video,
     WandSparkles,
     Wrench,
+    X,
 } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
@@ -57,6 +58,8 @@ export function CanvasToolbar({
     onUndo,
     onRedo,
     onUpload,
+    onGroup,
+    onStoryboardGroup,
     onDelete,
     onClear,
     onBackgroundModeChange,
@@ -84,6 +87,8 @@ export function CanvasToolbar({
     onUndo: () => void;
     onRedo: () => void;
     onUpload: () => void;
+    onGroup: () => void;
+    onStoryboardGroup: () => void;
     onDelete: () => void;
     onClear: () => void;
     onDeselect: () => void;
@@ -110,7 +115,7 @@ export function CanvasToolbar({
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [tutorialOpen, setTutorialOpen] = useState(false);
     const [panelX, setPanelX] = useState(0);
-    const dockStyle = { background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item, boxShadow: colorTheme === "dark" ? "0 14px 36px rgba(0,0,0,.30)" : "0 14px 34px rgba(28,25,23,.10)" };
+    const dockStyle = { background: theme.ui.material, borderColor: theme.ui.hairline, color: theme.toolbar.item, boxShadow: theme.ui.shadow };
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
     const tip = hovered ? toolLabel(hovered) : "";
@@ -139,9 +144,9 @@ export function CanvasToolbar({
     }, [assetPanelOpen]);
 
     return (
-        <div className="pointer-events-none absolute bottom-5 left-0 right-0 z-50 flex justify-center px-4">
+        <div className="pointer-events-none absolute bottom-4 left-0 right-0 z-50 flex justify-center px-4">
             {tip ? <DockTip label={tip} x={tipX} theme={theme} /> : null}
-            <div ref={wrapRef} className="thin-scrollbar pointer-events-auto flex h-12 max-w-full items-center gap-1 overflow-x-auto rounded-xl border px-2 backdrop-blur-xl [&>*]:shrink-0" style={dockStyle}>
+            <div ref={wrapRef} className="creative-os-dock pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto border px-2 [&>*]:shrink-0" style={dockStyle}>
                 <ToolbarButton id="tool-add" label="添加节点" active={addMenuOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={(event) => openPanelAt(event, "add")}>
                     <Plus className="size-5" />
                 </ToolbarButton>
@@ -165,6 +170,17 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-tutorial" label="教程" active={tutorialOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={(event) => openPanelAt(event, "tutorial")}>
                     <BookOpen className="size-4.5" />
                 </ToolbarButton>
+                {selectedCount >= 2 ? (
+                    <>
+                        <Divider theme={theme} />
+                        <ToolbarButton id={'tool-group'} label={'成组'} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onGroup}>
+                            <Layers3 className={'size-4.5'} />
+                        </ToolbarButton>
+                        <ToolbarButton id={'tool-storyboard-group'} label={'分镜组'} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipX={setTipX} onHover={setHovered} onClick={onStoryboardGroup}>
+                            <Clapperboard className={'size-4.5'} />
+                        </ToolbarButton>
+                    </>
+                ) : null}
                 {selectedCount ? (
                     <>
                         <Divider theme={theme} />
@@ -181,8 +197,8 @@ export function CanvasToolbar({
 
             {!assetPanelOpen && addMenuOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[64px] z-30 w-[196px] -translate-x-1/2 rounded-2xl border p-2 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl"
-                    style={{ left: panelX || "50%", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    className="creative-os-panel pointer-events-auto absolute bottom-[72px] z-30 w-[196px] -translate-x-1/2 rounded-[8px] border p-2"
+                    style={{ left: panelX || "50%", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
                 >
                     <div className="px-2 pb-2 text-xs font-medium opacity-60">添加节点</div>
                     <AddNodeOption theme={theme} icon={<Type className="size-4" />} label="文本" onClick={onAddText} onClose={() => setAddMenuOpen(false)} />
@@ -203,8 +219,8 @@ export function CanvasToolbar({
 
             {!assetPanelOpen && materialOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[64px] z-30 w-[196px] -translate-x-1/2 rounded-2xl border p-2 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl"
-                    style={{ left: panelX || "50%", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    className="creative-os-panel pointer-events-auto absolute bottom-[72px] z-30 w-[196px] -translate-x-1/2 rounded-[8px] border p-2"
+                    style={{ left: panelX || "50%", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
                 >
                     <AddNodeOption theme={theme} icon={<Sparkles className="size-4" />} label="风格库" tag="NEW" onClick={() => onOpenMaterialLibrary("styles")} onClose={() => setMaterialOpen(false)} />
                     <AddNodeOption theme={theme} icon={<WandSparkles className="size-4" />} label="效果库" tag="NEW" onClick={() => onOpenMaterialLibrary("effects")} onClose={() => setMaterialOpen(false)} />
@@ -216,8 +232,8 @@ export function CanvasToolbar({
 
             {!assetPanelOpen && historyOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[64px] z-30 w-[196px] -translate-x-1/2 rounded-2xl border p-2 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl"
-                    style={{ left: panelX || "50%", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    className="creative-os-panel pointer-events-auto absolute bottom-[72px] z-30 w-[196px] -translate-x-1/2 rounded-[8px] border p-2"
+                    style={{ left: panelX || "50%", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
                 >
                     <AddNodeOption theme={theme} icon={<Undo2 className="size-4" />} label="撤销" disabled={!canUndo} onClick={onUndo} onClose={() => setHistoryOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Redo2 className="size-4" />} label="重做" disabled={!canRedo} onClick={onRedo} onClose={() => setHistoryOpen(false)} />
@@ -228,8 +244,8 @@ export function CanvasToolbar({
 
             {!assetPanelOpen && tutorialOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[64px] z-30 w-[196px] -translate-x-1/2 rounded-2xl border p-2 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl"
-                    style={{ left: panelX || "50%", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                    className="creative-os-panel pointer-events-auto absolute bottom-[72px] z-30 w-[196px] -translate-x-1/2 rounded-[8px] border p-2"
+                    style={{ left: panelX || "50%", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
                 >
                     <AddNodeOption theme={theme} icon={<BookOpen className="size-4" />} label="使用教程" onClick={() => onTutorialAction("guide")} onClose={() => setTutorialOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Info className="size-4" />} label="联系客服" onClick={() => onTutorialAction("support")} onClose={() => setTutorialOpen(false)} />
@@ -240,8 +256,8 @@ export function CanvasToolbar({
 
             {!assetPanelOpen && appearanceOpen ? (
                 <div
-                    className="pointer-events-auto absolute bottom-[64px] z-30 w-[248px] -translate-x-1/2 rounded-2xl border p-2.5 shadow-[0_18px_46px_rgba(0,0,0,.30)] backdrop-blur-xl"
-                    style={{ left: panelX || "50%", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.toolbar.item }}
+                    className="creative-os-panel pointer-events-auto absolute bottom-[72px] z-30 w-[248px] -translate-x-1/2 rounded-[8px] border p-2.5"
+                    style={{ left: panelX || "50%", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.toolbar.item }}
                 >
                     <div className="px-1 pb-2 text-sm font-medium opacity-65">画布外观</div>
                     <div className="px-1 pb-1.5 text-[11px] font-medium opacity-50">主题模式</div>
@@ -309,9 +325,9 @@ function AddNodeOption({ theme, icon, label, tag, disabled = false, danger = fal
     return (
         <button
             type="button"
-            className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition disabled:cursor-not-allowed disabled:opacity-40"
+            className="creative-os-menu-item flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition disabled:cursor-not-allowed disabled:opacity-40"
             disabled={disabled}
-            style={{ color: danger ? "#f87171" : theme.node.text }}
+            style={{ color: danger ? theme.ui.danger : theme.node.text }}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
             onClick={() => {
@@ -362,9 +378,9 @@ function ToolbarButton({
         <Button
             type="text"
             aria-label={label}
-            className="!h-8 !w-8 !min-w-8 !rounded-md !p-0"
+            className="creative-os-dock-button !h-11 !w-11 !min-w-11 !p-0"
             disabled={disabled}
-            style={active ? activeStyle : hovered === id && !disabled ? hoverStyle : { color: danger ? "#f87171" : theme.toolbar.item, opacity: disabled ? 0.35 : 1 }}
+            style={active ? activeStyle : hovered === id && !disabled ? hoverStyle : { color: danger ? theme.ui.danger : theme.toolbar.item, opacity: disabled ? 0.35 : 1 }}
             icon={children}
             onMouseEnter={(event) => {
                 onHover(id);
@@ -505,14 +521,14 @@ function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: 
     if (!open) return null;
 
     return (
-        <div className="pointer-events-auto absolute bottom-[64px] left-1/2 z-40 w-[min(96vw,1120px)] -translate-x-1/2 rounded-2xl border p-6 shadow-[0_18px_46px_rgba(0,0,0,.32)] backdrop-blur-xl" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
-            <button type="button" className="absolute right-4 top-4 grid size-8 place-items-center rounded-lg text-lg leading-none opacity-70 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭快捷键">
-                ×
+        <div className="creative-os-panel creative-os-shortcuts pointer-events-auto absolute bottom-[72px] left-1/2 z-40 w-[min(96vw,1120px)] -translate-x-1/2 border p-5" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}>
+            <button type="button" className="creative-os-icon-button absolute right-3 top-3 !size-8 opacity-70 hover:opacity-100" onClick={onClose} aria-label="关闭快捷键">
+                <X className="size-4" />
             </button>
-            <div className="grid grid-cols-4 gap-5 pr-8 text-sm">
+            <div className="grid grid-cols-1 gap-5 pr-8 text-sm sm:grid-cols-2 xl:grid-cols-4">
                 {groups.map((group) => (
                     <div key={group.title} className="min-w-0 border-r last:border-r-0" style={{ borderColor: theme.toolbar.border }}>
-                        <div className="mb-4 text-sm font-semibold text-cyan-300">{group.title}</div>
+                        <div className="mb-4 text-sm font-semibold" style={{ color: theme.ui.accent }}>{group.title}</div>
                         <div className="space-y-3 pr-4">
                             {group.items.map(([label, value]) => (
                                 <ShortcutLine key={label} label={label} value={value} />
@@ -530,11 +546,11 @@ function ShortcutLine({ label, value }: { label: string; value: string }) {
     return (
         <div className="flex min-w-0 items-center justify-between gap-3">
             <span className="min-w-0 text-xs opacity-65">{label}</span>
-            <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-xs" style={{ color: "#f5f5f5" }}>
+            <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-xs" style={{ color: "var(--creative-text)" }}>
                 {keys.map((key, index) => (
                     <span key={`${label}-${key}-${index}`} className="inline-flex items-center gap-1.5">
                         {index ? <span className="opacity-45">+</span> : null}
-                        <span className="rounded-md px-2 py-1" style={{ background: themeChipBg() }}>{key}</span>
+                        <span className="rounded-md px-2 py-1" style={{ background: "var(--creative-control-fill)" }}>{key}</span>
                     </span>
                 ))}
             </span>
@@ -542,9 +558,6 @@ function ShortcutLine({ label, value }: { label: string; value: string }) {
     );
 }
 
-function themeChipBg() {
-    return "rgba(255,255,255,.08)";
-}
 
 function DockTip({ label, x, theme }: { label: string; x: number; theme: CanvasTheme }) {
     return (
@@ -555,6 +568,8 @@ function DockTip({ label, x, theme }: { label: string; x: number; theme: CanvasT
 }
 
 function toolLabel(id: string) {
+    if (id === 'tool-group') return '成组';
+    if (id === 'tool-storyboard-group') return '分镜组';
     if (id === "tool-add") return "添加节点";
     if (id === "tool-toolbox") return "工具箱";
     if (id === "tool-material") return "素材库";

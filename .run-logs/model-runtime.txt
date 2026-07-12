@@ -1,0 +1,137 @@
+package com.infinitecanvas.backend.controller;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.infinitecanvas.backend.dto.PlatformConfigDocument;
+import com.infinitecanvas.backend.service.PlatformConfigService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.Set;
+
+@RestController
+@RequestMapping("/api/model-runtime/models")
+public class ModelRuntimeProxyController {
+    private static final Duration TIMEOUT = Duration.ofMinutes(20);
+    private static final Set<String> HOP_HEADERS = Set.of("connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length");
+    private final PlatformConfigService configService;
+    private final ObjectMapper objectMapper;
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NORMAL).build();
+
+    public ModelRuntimeProxyController(PlatformConfigService configService, ObjectMapper objectMapper) {
+        this.configService = configService;
+        this.objectMapper = objectMapper;
+    }
+
+    @RequestMapping("/{modelId}/**")
+    public ResponseEntity<?> proxy(HttpServletRequest request) throws IOException, InterruptedException {
+        String modelId = pathModelId(request);
+        PlatformConfigService.RuntimeModel runtime;
+        try { runtime = configService.requireRuntimeModel(modelId); }
+        catch (IllegalArgumentException error) { return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error.getMessage()); }
+
+        String prefix = "/api/model-runtime/models/" + modelId;
+        String suffix = request.getRequestURI().substring(prefix.length());
+        String query = request.getQueryString();
+        URI target = URI.create(runtime.provider().getBaseUrl() + (suffix.isBlank() ? "/" : suffix) + (query == null ? "" : "?" + query));
+        byte[] body = ("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod())) ? new byte[0] : request.getInputStream().readAllBytes();
+        String contentType = request.getContentType();
+        if (body.length > 0 && contentType != null && contentType.toLowerCase().contains("application/json")) {
+            try { body = validateAndRewrite(body, suffix, runtime.model()); }
+            catch (IllegalArgumentException error) { return ResponseEntity.badRequest().body(error.getMessage()); }
+        }
+
+        HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(TIMEOUT).header("Authorization", "Bearer " + runtime.provider().getApiKey());
+        copyHeader(request, builder, "Content-Type");
+        copyHeader(request, builder, "Accept");
+        builder.method(request.getMethod(), body.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
+        try {
+            HttpResponse<byte[]> upstream = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+            HttpHeaders headers = new HttpHeaders();
+            upstream.headers().map().forEach((name, values) -> {
+                if (!HOP_HEADERS.contains(name.toLowerCase()) && !name.startsWith(":")) values.forEach(value -> headers.add(name, value));
+            });
+            return new ResponseEntity<>(upstream.body(), headers, HttpStatus.valueOf(upstream.statusCode()));
+        } catch (java.net.http.HttpTimeoutException error) {
+            return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body("上游模型请求超时");
+        } catch (IOException error) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error.getMessage());
+        }
+    }
+
+    private byte[] validateAndRewrite(byte[] body, String path, PlatformConfigDocument.Model model) {
+        try {
+            JsonNode parsed = objectMapper.readTree(body);
+            if (!(parsed instanceof ObjectNode json)) throw new IllegalArgumentException("请求体必须是 JSON 对象");
+            validateCapability(path, model.getCapability());
+            validateString(json, List.of("mode", "task_type", "generation_type"), model.getModes(), "生成模式");
+            validateString(json, List.of("ratio", "aspect_ratio"), model.getRatios(), "画面比例");
+            validateString(json, List.of("resolution", "quality"), model.getResolutions(), "分辨�?);
+            validateInteger(json, List.of("duration", "seconds"), model.getDurations(), "时长");
+            validateInteger(json, List.of("n", "count"), model.getCounts(), "生成数量");
+            validateFlag(json, List.of("generate_audio", "audio"), model.isGenerateAudio(), "生成音频");
+            validateFlag(json, List.of("watermark"), model.isWatermark(), "??");
+            validateFlag(json, List.of("draft"), model.isDraft(), "草稿模式");
+            json.put("model", model.getRequestModel());
+            return objectMapper.writeValueAsBytes(json);
+        } catch (IllegalArgumentException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalArgumentException("请求 JSON 解析失败", error);
+        }
+    }
+
+    private void validateCapability(String path, String capability) {
+        String value = path.toLowerCase();
+        if (value.contains("/images/") && !"image".equals(capability)) throw new IllegalArgumentException("当前模型不支持对应的生成接口");
+        if (value.contains("/videos/") && !"video".equals(capability)) throw new IllegalArgumentException("当前模型不支持对应的生成接口");
+        if ((value.contains("/audio/") || value.contains("/speech")) && !"audio".equals(capability)) throw new IllegalArgumentException("当前模型不支持对应的生成接口");
+    }
+
+    private void validateString(ObjectNode json, List<String> keys, List<String> allowed, String label) {
+        if (allowed == null || allowed.isEmpty()) return;
+        JsonNode value = first(json, keys);
+        if (value != null && value.isTextual() && !allowed.contains(value.asText())) throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asText());
+    }
+
+    private void validateInteger(ObjectNode json, List<String> keys, List<Integer> allowed, String label) {
+        if (allowed == null || allowed.isEmpty()) return;
+        JsonNode value = first(json, keys);
+        if (value != null && value.canConvertToInt() && !allowed.contains(value.asInt())) throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asInt());
+    }
+
+    private void validateFlag(ObjectNode json, List<String> keys, boolean supported, String label) {
+        JsonNode value = first(json, keys);
+        if (value != null && value.asBoolean(false) && !supported) throw new IllegalArgumentException("当前模型不支�? + label);
+    }
+
+    private JsonNode first(ObjectNode json, List<String> keys) {
+        for (String key : keys) if (json.hasNonNull(key)) return json.get(key);
+        return null;
+    }
+
+    private String pathModelId(HttpServletRequest request) {
+        String prefix = "/api/model-runtime/models/";
+        String rest = request.getRequestURI().substring(prefix.length());
+        int slash = rest.indexOf('/');
+        return slash < 0 ? rest : rest.substring(0, slash);
+    }
+
+    private void copyHeader(HttpServletRequest request, HttpRequest.Builder builder, String name) {
+        String value = request.getHeader(name);
+        if (value != null && !value.isBlank()) builder.header(name, value);
+    }
+}
+

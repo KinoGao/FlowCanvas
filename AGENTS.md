@@ -17,7 +17,7 @@
 
 | LibTV 关键能力 | FlowCanvas 现状 / 规划 |
 | --- | --- |
-| 无限画布 + 节点连线 | ✅ 已实现（基于 `@xyflow/react`） |
+| 无限画布 + 节点连线 | ✅ 已实现（基于 LeaferJS） |
 | 五大基础节点：文本 / 图片 / 视频 / 音频 / 脚本 | 🟡 文本 / 图片 / 视频 / 音频 已实现；**脚本节点是 v1 优先补齐项** |
 | 9 宫格 / 25 宫格分镜、剧情推演、镜头聚焦、焦点编辑 | 🟡 通过 `/` 快捷功能逐步对齐 |
 | 多模型集成（Seedance 2.0、可灵 3.0、Wan 2.6、Seedream 5.0 等） | ✅ OpenAI 兼容接口前台直连 + Seedance 2.0 走火山方舟 |
@@ -44,7 +44,7 @@
 | 构建 | Vite | 7 |
 | 框架 | React + React DOM | 19 |
 | 语言 | TypeScript | 5 |
-| 画布 | `@xyflow/react`（React Flow） | 12 |
+| 画布 | LeaferJS（`leafer-ui`） | 2 |
 | UI 库 | Ant Design + `@ant-design/icons` | 6 |
 | 路由 | React Router | 7 |
 | 状态 | Zustand（业务状态）+ TanStack Query（服务端状态） | 5 / 5 |

@@ -46,7 +46,9 @@ export function normalizeConnectionWithNodeMap(firstNodeId: string, secondNodeId
     if (second.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
     if (first.type === CanvasNodeType.Config && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
     if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
-    return { fromNodeId: first.id, toNodeId: second.id };
+    return firstHandleType === "target"
+        ? { fromNodeId: second.id, toNodeId: first.id }
+        : { fromNodeId: first.id, toNodeId: second.id };
 }
 
 export function setsEqual<T>(left: Set<T>, right: Set<T>) {

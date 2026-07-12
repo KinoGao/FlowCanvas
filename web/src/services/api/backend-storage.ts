@@ -7,6 +7,7 @@ import { bearerHeaders } from "./auth";
 export type BackendBootstrap = {
     config: { data: string; updatedAt: string } | null;
     projects: CanvasProject[];
+    projectTombstones?: Record<string, string>;
     assets: Asset[];
 };
 
@@ -43,12 +44,12 @@ export async function pushBackendConfig(token: string, config: AiConfig): Promis
     );
 }
 
-export async function pushBackendProjects(token: string, projects: CanvasProject[]): Promise<void> {
+export async function pushBackendProjects(token: string, projects: CanvasProject[], projectTombstones: Record<string, string> = {}): Promise<void> {
     await readApi<void>(
         await fetch(apiUrl("/api/user/projects"), {
             method: "PUT",
             headers: bearerHeaders(token),
-            body: JSON.stringify({ projects }),
+            body: JSON.stringify({ projects, projectTombstones }),
         }),
     );
 }

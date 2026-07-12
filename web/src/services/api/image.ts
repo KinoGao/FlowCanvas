@@ -76,10 +76,10 @@ type ChatDeltaToolCall = { index?: number; id?: string; type?: "function"; funct
 type ChatStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
 
-type ImageApiResponse = {
-    data?: Array<Record<string, unknown>>;
-    error?: { message?: string };
-    code?: number;
+type ImageApiResponse = Record<string, unknown> & {
+    data?: unknown;
+    error?: unknown;
+    code?: number | string;
     msg?: string;
 };
 type GeminiPart = {
@@ -221,22 +221,28 @@ function resolveImageDataUrl(item: Record<string, unknown>, useProxy?: boolean) 
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
     }
-    if (typeof item.url === "string" && item.url) {
-        return rewriteThroughProxy(item.url, useProxy);
-    }
+    const directUrl = stringValue(item.url) || stringValue(item.dataUrl) || stringValue(item.data_url) || stringValue(item.image_url) || stringValue(item.output_url) || stringValue(item.file_url) || stringValue(item.public_url);
+    if (directUrl) return rewriteThroughProxy(directUrl, useProxy);
+    const imageUrl = isRecord(item.image_url) ? stringValue(item.image_url.url) : "";
+    if (imageUrl) return rewriteThroughProxy(imageUrl, useProxy);
     return null;
 }
 
 function parseImagePayload(payload: ImageApiResponse, useProxy?: boolean) {
-    if (typeof payload.code === "number" && payload.code !== 0) {
+    if (payload.error) {
+        const errorMessage = readPayloadError(payload.error);
+        if (errorMessage) throw new Error(errorMessage);
+    }
+    if (payload.code != null && !isSuccessCode(payload.code)) {
         throw new Error(payload.msg || "请求失败");
     }
-    const itemError = payload.data?.map((item) => item.error).find(Boolean);
+    const records = collectImagePayloadRecords(payload);
+    const itemError = records.map((item) => item.error).find(Boolean);
     if (typeof itemError === "string") throw new Error(itemError);
     if (isRecord(itemError)) throw new Error(stringValue(itemError.message) || stringValue(itemError.msg) || "图片生成失败");
     const images =
-        payload.data
-            ?.map((item) => resolveImageDataUrl(item, useProxy))
+        records
+            .map((item) => resolveImageDataUrl(item, useProxy))
             .filter((value): value is string => Boolean(value))
             .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
 
@@ -245,6 +251,43 @@ function parseImagePayload(payload: ImageApiResponse, useProxy?: boolean) {
     }
 
     return images;
+}
+
+function isSuccessCode(code: number | string) {
+    const value = typeof code === "string" ? Number(code) : code;
+    return value === 0 || value === 200;
+}
+
+function readPayloadError(error: unknown) {
+    if (typeof error === "string") return error;
+    if (!isRecord(error)) return "";
+    return stringValue(error.message) || stringValue(error.msg) || stringValue(error.detail) || "";
+}
+
+function collectImagePayloadRecords(value: unknown, records: Array<Record<string, unknown>> = [], seen = new WeakSet<object>()) {
+    if (!value) return records;
+    if (typeof value === "string") {
+        if (looksLikeImageSource(value)) records.push({ url: value });
+        return records;
+    }
+    if (Array.isArray(value)) {
+        value.forEach((item) => collectImagePayloadRecords(item, records, seen));
+        return records;
+    }
+    if (!isRecord(value) || seen.has(value)) return records;
+    seen.add(value);
+
+    if (hasImagePayloadField(value)) records.push(value);
+    ["data", "images", "image", "output", "outputs", "result", "results"].forEach((key) => collectImagePayloadRecords(value[key], records, seen));
+    return records;
+}
+
+function hasImagePayloadField(value: Record<string, unknown>) {
+    return Boolean(value.b64_json || value.url || value.dataUrl || value.data_url || value.image_url || value.output_url || value.file_url || value.public_url);
+}
+
+function looksLikeImageSource(value: string) {
+    return /^data:image\//i.test(value) || /^https?:\/\//i.test(value) || /^blob:/i.test(value);
 }
 
 function readAxiosError(error: unknown, fallback: string) {

@@ -7,25 +7,20 @@ import java.util.UUID;
 
 @Service
 public class AuthCodeService {
-    private final String authCode;
+    private final String registrationCode;
+    private final String adminCode;
 
-    public AuthCodeService(@Value("${app.auth-code:gycode}") String authCode) {
-        if (authCode == null || authCode.isBlank()) {
-            this.authCode = UUID.randomUUID().toString().replace("-", "");
-            System.out.println("========================================");
-            System.out.println("  AUTH_CODE 未设置，已自动生成: " + this.authCode);
-            System.out.println("  请在注册账号时填写此鉴权码");
-            System.out.println("========================================");
-        } else {
-            this.authCode = authCode;
-        }
+    public AuthCodeService(
+            @Value("${app.registration-code:${app.auth-code:gycode}}") String registrationCode,
+            @Value("${app.admin-code:admincode}") String adminCode
+    ) {
+        this.registrationCode = registrationCode == null || registrationCode.isBlank()
+                ? UUID.randomUUID().toString().replace("-", "") : registrationCode;
+        this.adminCode = adminCode == null ? "" : adminCode;
     }
 
-    public boolean matches(String value) {
-        return value != null && value.equals(authCode);
-    }
-
-    public String value() {
-        return authCode;
-    }
+    public boolean matches(String value) { return matchesRegistration(value); }
+    public boolean matchesRegistration(String value) { return value != null && value.equals(registrationCode); }
+    public boolean matchesAdmin(String value) { return value != null && !adminCode.isBlank() && value.equals(adminCode); }
+    public String value() { return registrationCode; }
 }

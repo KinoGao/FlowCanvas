@@ -46,15 +46,9 @@ export function createMediaMetadata(metadata: CanvasNodeMetadata): CanvasNodeMet
 export function createDirectorMetadataPatch(metadata: CanvasNodeMetadata): CanvasNodeMetadata {
     return {
         canvasTool: metadata.canvasTool,
-        directorScene: metadata.directorScene,
-        directorStyle: metadata.directorStyle,
-        directorCast: metadata.directorCast,
-        directorProps: metadata.directorProps,
-        directorSceneSettings: metadata.directorSceneSettings,
-        directorCharacters: metadata.directorCharacters,
-        directorPropItems: metadata.directorPropItems,
-        directorShots: metadata.directorShots,
-        directorCaptures: metadata.directorCaptures,
+        directorProject: metadata.directorProject,
+
+
         directorOutputIds: metadata.directorOutputIds,
     };
 }
