@@ -25,6 +25,9 @@ export default defineConfig({
                 changeOrigin: true,
             },
         },
+        // Vite expects hostnames without a protocol. The leading dot allows
+        // cpolar's rotating subdomains while keeping host validation enabled.
+        allowedHosts: [".r23.cpolar.top"],
     },
     preview: {
         host: "0.0.0.0",
