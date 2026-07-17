@@ -300,15 +300,30 @@ function readAxiosError(error: unknown, fallback: string) {
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
         if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
+        return responseData?.msg || normalizeUpstreamMessage(responseData?.error?.message) || readStatusError(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
 }
 
+/** 把上游 OpenAI 兼容格式的长错误精简成中文短句，便于在画布上提示用户 */
+function normalizeUpstreamMessage(message: string | undefined): string | undefined {
+    if (!message) return undefined;
+    if (/ServiceUnavailable|Service busy|Service Unavailable/i.test(message)) return "上游服务繁忙，请稍后重试";
+    if (/Rate limit|Too Many Requests|rate limit/i.test(message)) return "请求被限流，请稍后重试";
+    if (/Insufficient (quota|balance|credits)/i.test(message)) return "账户余额不足，请充值后重试";
+    if (/Invalid API [Kk]ey|authentication|Unauthorized/i.test(message)) return "鉴权失败，请检查 API Key";
+    if (/Model not exist|model not found|does not exist/i.test(message)) return "模型不可用，请检查模型名称或权限";
+    // 截断过长的原始错误，只保留前 200 字符
+    const trimmed = message.length > 200 ? `${message.slice(0, 200)}…` : message;
+    return trimmed;
+}
+
 function readStatusError(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
+    if (status === 503) return "上游服务繁忙，请稍后重试";
+    if (status === 502 || status === 504) return "上游网关异常，请稍后重试";
     return status ? `${fallback}：${status}` : fallback;
 }
 
