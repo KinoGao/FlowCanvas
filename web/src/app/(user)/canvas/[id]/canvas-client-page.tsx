@@ -941,33 +941,44 @@ function ReactFlowCanvasPage() {
         };
     }, []);
 
+    const nodeDragRafRef = useRef<number>(0);
+    const pendingDragPosRef = useRef<{ nodeId: string; position: { x: number; y: number } } | null>(null);
     const handleLeaferNodeDrag = useCallback((nodeId: string, position: { x: number; y: number }) => {
-        const multiNodeDrag = multiNodeDragStartRef.current;
-        if (multiNodeDrag?.anchorId === nodeId) {
-            const dx = position.x - multiNodeDrag.anchorPosition.x;
-            const dy = position.y - multiNodeDrag.anchorPosition.y;
+        // RAF 节流：拖拽时每帧最多更新一次 nodes state，避免高频 setNodes 触发级联 useMemo 重算
+        pendingDragPosRef.current = { nodeId, position };
+        if (nodeDragRafRef.current) return;
+        nodeDragRafRef.current = requestAnimationFrame(() => {
+            nodeDragRafRef.current = 0;
+            const pending = pendingDragPosRef.current;
+            if (!pending) return;
+            pendingDragPosRef.current = null;
+            const multiNodeDrag = multiNodeDragStartRef.current;
+            if (multiNodeDrag?.anchorId === pending.nodeId) {
+                const dx = pending.position.x - multiNodeDrag.anchorPosition.x;
+                const dy = pending.position.y - multiNodeDrag.anchorPosition.y;
+                setNodes((prev) => {
+                    let changed = false;
+                    const next = prev.map((node) => {
+                        const startPosition = multiNodeDrag.nodePositions.get(node.id);
+                        if (!startPosition) return node;
+                        const nextPosition = { x: startPosition.x + dx, y: startPosition.y + dy };
+                        if (node.position.x === nextPosition.x && node.position.y === nextPosition.y) return node;
+                        changed = true;
+                        return { ...node, position: nextPosition };
+                    });
+                    return changed ? next : prev;
+                });
+                return;
+            }
             setNodes((prev) => {
                 let changed = false;
                 const next = prev.map((node) => {
-                    const startPosition = multiNodeDrag.nodePositions.get(node.id);
-                    if (!startPosition) return node;
-                    const nextPosition = { x: startPosition.x + dx, y: startPosition.y + dy };
-                    if (node.position.x === nextPosition.x && node.position.y === nextPosition.y) return node;
+                    if (node.id !== pending.nodeId || (node.position.x === pending.position.x && node.position.y === pending.position.y)) return node;
                     changed = true;
-                    return { ...node, position: nextPosition };
+                    return { ...node, position: pending.position };
                 });
                 return changed ? next : prev;
             });
-            return;
-        }
-        setNodes((prev) => {
-            let changed = false;
-            const next = prev.map((node) => {
-                if (node.id !== nodeId || (node.position.x === position.x && node.position.y === position.y)) return node;
-                changed = true;
-                return { ...node, position };
-            });
-            return changed ? next : prev;
         });
     }, []);
 
@@ -1000,6 +1011,12 @@ function ReactFlowCanvasPage() {
             });
         }
         multiNodeDragStartRef.current = null;
+        // 取消可能 pending 的拖拽 RAF，避免 dragStop 后多一次无效 setNodes
+        if (nodeDragRafRef.current) {
+            cancelAnimationFrame(nodeDragRafRef.current);
+            nodeDragRafRef.current = 0;
+        }
+        pendingDragPosRef.current = null;
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
@@ -1041,6 +1058,23 @@ function ReactFlowCanvasPage() {
 
         return querySpatialIndex(nodeSpatialIndex, viewRect).map((entry) => entry.item);
     }, [isNodeDragging, nodeSpatialIndex, size.height, size.width, viewport]);
+
+    // 实际渲染的节点列表：视口内可见节点 + 必须保持挂载的特殊节点（正在编辑/有对话框/有工具栏等）
+    const renderedNodes = useMemo(() => {
+        const visibleIds = new Set(visibleNodes.map((n) => n.id));
+        const mustRenderIds = new Set<string>();
+        // 正在编辑、有对话框、有工具栏、有裁剪/蒙版等操作中的节点即使不在视口内也需保持挂载
+        for (const id of [editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId]) {
+            if (id) mustRenderIds.add(id);
+        }
+        // 选中节点也需保持挂载（可能被拖拽出视口）
+        selectedNodeIdsRef.current.forEach((id) => mustRenderIds.add(id));
+        // 合并：视口内 + 必须挂载的，保持 Group 优先排序
+        const extra = mustRenderIds.size
+            ? visibleNodeItems.filter((n) => !visibleIds.has(n.id) && mustRenderIds.has(n.id))
+            : [];
+        return extra.length ? [...visibleNodes, ...extra] : visibleNodes;
+    }, [visibleNodes, visibleNodeItems, editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId]);
 
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -1119,8 +1153,8 @@ function ReactFlowCanvasPage() {
     const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(canvasGraph, resourceContextNodeId), [canvasGraph, resourceContextNodeId]);
     const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: projectTitle || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, projectTitle, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: projectTitle || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport: viewportRef.current }),
+        [connections, projectTitle, nodes, projectId, selectedNodeIds],
     );
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
@@ -3609,13 +3643,29 @@ function ReactFlowCanvasPage() {
         }, CANVAS_AGENT_PANEL_MOTION_MS);
     };
 
+    const viewportRafRef = useRef<number>(0);
+    const pendingViewportRef = useRef<ViewportTransform | null>(null);
     const handleReactFlowViewportChange = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
-        setViewport((current) => {
-            if (current.x === next.x && current.y === next.y && current.k === next.k) return current;
-            return next;
+        pendingViewportRef.current = next;
+        if (viewportRafRef.current) return;
+        viewportRafRef.current = requestAnimationFrame(() => {
+            viewportRafRef.current = 0;
+            const pending = pendingViewportRef.current;
+            if (!pending) return;
+            pendingViewportRef.current = null;
+            setViewport((current) => {
+                if (current.x === pending.x && current.y === pending.y && current.k === pending.k) return current;
+                return pending;
+            });
+            setContextMenu((current) => (current ? null : current));
         });
-        setContextMenu((current) => (current ? null : current));
+    }, []);
+
+    // 组件卸载时取消未执行的 RAF
+    useEffect(() => () => {
+        if (viewportRafRef.current) cancelAnimationFrame(viewportRafRef.current);
+        if (nodeDragRafRef.current) cancelAnimationFrame(nodeDragRafRef.current);
     }, []);
 
     const selectOnlyNode = useCallback((nodeId: string) => {
@@ -3851,7 +3901,6 @@ function ReactFlowCanvasPage() {
                                             selectConnection(connection.id);
                                         }}
                                         onPointerEnter={() => setHoveredConnectionId(connection.id)}
-                                        onPointerMove={() => setHoveredConnectionId(connection.id)}
                                         onPointerLeave={() => setHoveredConnectionId((current) => (current === connection.id ? null : current))}
                                         onContextMenu={(event) => {
                                             event.preventDefault();
@@ -3890,7 +3939,7 @@ function ReactFlowCanvasPage() {
                         })}
                     </svg>
                     {/* Render node DOM elements */}
-                    {visibleNodeItems.map((node) => {
+                    {renderedNodes.map((node) => {
                         const isSelected = selectedNodeIds.has(node.id);
                         return (
                             <CanvasNode
