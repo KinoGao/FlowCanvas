@@ -4,7 +4,6 @@ import { apiUrl } from "@/constant/env";
 import { useMemo } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { BackendSyncConfig } from "@/services/api/backend";
 import { nanoid } from "nanoid";
 
 export type ApiCallFormat = "openai" | "gemini";
@@ -76,19 +75,11 @@ export type ComfyUiConfig = {
     pollIntervalMs: string;
 };
 
-export const defaultBackendSyncConfig: BackendSyncConfig = {
-    enabled: false,
-    url: "",
-    authCode: "",
-    publicBaseUrl: "",
-};
-
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
-const DEPRECATED_BACKEND_HOSTS = new Set(["1539e726.r23.cpolar.top"]);
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -154,13 +145,12 @@ type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
     comfyui: ComfyUiConfig;
-    backend: BackendSyncConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    replaceConfig: (config: AiConfig) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     updateComfyUiConfig: <K extends keyof ComfyUiConfig>(key: K, value: ComfyUiConfig[K]) => void;
-    updateBackendConfig: <K extends keyof BackendSyncConfig>(key: K, value: BackendSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
@@ -234,7 +224,6 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             comfyui: defaultComfyUiConfig,
-            backend: defaultBackendSyncConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -244,6 +233,7 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            replaceConfig: (config) => set({ config }),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {
@@ -258,13 +248,6 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            updateBackendConfig: (key, value) =>
-                set((state) => ({
-                    backend: {
-                        ...state.backend,
-                        [key]: value,
-                    },
-                })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
@@ -272,48 +255,15 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config, webdav: state.webdav, comfyui: state.comfyui, backend: state.backend }),
+            partialize: (state) => ({ webdav: state.webdav }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
-                const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const persistedComfyUi = (persistedState.comfyui || {}) as Partial<ComfyUiConfig>;
-                const persistedBackend = (persistedState.backend || {}) as Partial<BackendSyncConfig>;
-                const config = { ...defaultConfig, ...persistedConfig };
-                if (!Array.isArray(persistedConfig.channels)) config.channels = [];
-                const channels = normalizeChannels(config);
-                const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
+                    config: defaultConfig,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav, proxyMode: normalizeProxyMode(persistedWebdav.proxyMode) },
-                    comfyui: { ...defaultComfyUiConfig, ...persistedComfyUi, proxyMode: normalizeProxyMode(persistedComfyUi.proxyMode) },
-                    backend: normalizeBackendSyncConfig(persistedBackend),
-                    config: {
-                        ...config,
-                        channelMode: "local",
-                        apiFormat: normalizeApiFormat(config.apiFormat),
-                        channels,
-                        models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
-                        audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
-                        imageResponseFormat: normalizeImageResponseFormatPolicy(config.imageResponseFormat),
-                        audioVoice: config.audioVoice || defaultConfig.audioVoice,
-                        audioFormat: config.audioFormat || defaultConfig.audioFormat,
-                        audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
-                        audioInstructions: config.audioInstructions || "",
-                        videoSeconds: config.videoSeconds || "6",
-                        vquality: config.vquality || "720",
-                        videoGenerateAudio: config.videoGenerateAudio || "true",
-                        videoWatermark: config.videoWatermark || "false",
-                        videoDraft: config.videoDraft || "false",
-                        canvasImageCount: config.canvasImageCount || "3",
-                        imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels, channels) : filterModelsByCapability(models, "image"),
-                        videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels, channels) : filterModelsByCapability(models, "video"),
-                        textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels, channels) : filterModelsByCapability(models, "text"),
-                        audioModels: Array.isArray(persistedConfig.audioModels) ? normalizeModelList(config.audioModels, channels) : filterModelsByCapability(models, "audio"),
-                    },
+                    comfyui: defaultComfyUiConfig,
                 };
             },
         },
@@ -322,21 +272,6 @@ export const useConfigStore = create<ConfigStore>()(
 
 function normalizeProxyMode(value: unknown): ProxyMode {
     return value === "backend" || value === "nextjs" ? "backend" : "direct";
-}
-
-function normalizeBackendSyncConfig(source: Partial<BackendSyncConfig>) {
-    const backend = { ...defaultBackendSyncConfig, ...source };
-    return isDeprecatedBackendUrl(backend.url) || isDeprecatedBackendUrl(backend.publicBaseUrl) ? defaultBackendSyncConfig : backend;
-}
-
-function isDeprecatedBackendUrl(value?: string) {
-    const raw = value?.trim();
-    if (!raw) return false;
-    try {
-        return DEPRECATED_BACKEND_HOSTS.has(new URL(raw).hostname);
-    } catch {
-        return Array.from(DEPRECATED_BACKEND_HOSTS).some((host) => raw.includes(host));
-    }
 }
 
 function normalizeModelList(models: string[], channels: ModelChannel[]) {

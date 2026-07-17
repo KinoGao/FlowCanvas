@@ -42,6 +42,7 @@ public class AiProxyController {
         copyRequestHeader(request, builder, "Authorization");
         copyRequestHeader(request, builder, "Content-Type");
         copyRequestHeader(request, builder, "Accept");
+        copyRequestHeader(request, builder, "Range");
         builder.method(method, body.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
 
         try {

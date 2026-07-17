@@ -5,8 +5,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 
 import { useBackendWorkspaceSync } from "@/hooks/use-backend-workspace-sync";
-import { fetchPublishedWorkflows } from "@/services/api/platform-admin";
-import { replaceComfyWorkflows } from "@/services/comfyui-workflows";
+import { listComfyWorkflows } from "@/services/comfyui-workflows";
 import { refreshRuntimeConfig, RUNTIME_CONFIG_CHANGED_EVENT } from "@/services/runtime-config";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -21,8 +20,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             .catch((error) => message.warning(error instanceof Error ? error.message : "模型配置加载失败"));
         loadRuntime();
         window.addEventListener(RUNTIME_CONFIG_CHANGED_EVENT, loadRuntime);
-        void fetchPublishedWorkflows()
-            .then(replaceComfyWorkflows)
+        void listComfyWorkflows()
             .catch((error) => console.warn("Published workflows could not be loaded", error));
         return () => window.removeEventListener(RUNTIME_CONFIG_CHANGED_EVENT, loadRuntime);
     }, [message]);

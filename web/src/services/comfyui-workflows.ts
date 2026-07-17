@@ -1,7 +1,8 @@
 "use client";
 
-import localforage from "localforage";
 import { nanoid } from "nanoid";
+
+import { fetchPublishedWorkflows } from "@/services/api/platform-admin";
 
 export type ComfyWorkflowFieldType = "text" | "textarea" | "number" | "slider" | "dropdown" | "image" | "video" | "audio" | "boolean";
 
@@ -47,14 +48,29 @@ export type ComfyWorkflowInputCandidate = {
     classType: string;
 };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "comfyui_workflows" });
-const LIST_KEY = "items";
 let workflowCache: ComfyWorkflow[] | null = null;
+let workflowRequest: Promise<ComfyWorkflow[]> | null = null;
 
 export async function listComfyWorkflows() {
     if (workflowCache) return [...workflowCache];
-    workflowCache = (await store.getItem<ComfyWorkflow[]>(LIST_KEY)) || [];
-    return [...workflowCache];
+    if (!workflowRequest) {
+        workflowRequest = fetchPublishedWorkflows()
+            .then((workflows) => normalizeComfyWorkflows(workflows))
+            .then((workflows) => {
+                workflowCache = workflows;
+                return workflows;
+            })
+            .finally(() => {
+                workflowRequest = null;
+            });
+    }
+    return [...(await workflowRequest)];
+}
+
+export async function refreshComfyWorkflows() {
+    workflowCache = null;
+    workflowRequest = null;
+    return listComfyWorkflows();
 }
 
 export async function getComfyWorkflow(id: string) {
@@ -62,44 +78,8 @@ export async function getComfyWorkflow(id: string) {
     return workflows.find((workflow) => workflow.id === id) || null;
 }
 
-export async function saveComfyWorkflow(workflow: ComfyWorkflow) {
-    const workflows = await listComfyWorkflows();
-    const next = { ...workflow, updatedAt: new Date().toISOString() };
-    const index = workflows.findIndex((item) => item.id === workflow.id);
-    if (index >= 0) workflows[index] = next;
-    else workflows.unshift(next);
-    await store.setItem(LIST_KEY, workflows);
-    workflowCache = [...workflows];
-    return next;
-}
-
-export async function replaceComfyWorkflows(workflows: ComfyWorkflow[]) {
-    const next = workflows.map((workflow) => ({ ...workflow, fields: Array.isArray(workflow.fields) ? workflow.fields : [] }));
-    await store.setItem(LIST_KEY, next);
-    workflowCache = [...next];
-}
-
-export async function createComfyWorkflow(input: { name: string; title?: string; workflow: ComfyWorkflowJson }) {
-    const now = new Date().toISOString();
-    const name = normalizeWorkflowName(input.name);
-    const id = name.replace(/\.json$/i, "");
-    const workflow: ComfyWorkflow = {
-        id,
-        name,
-        title: input.title?.trim() || id,
-        workflow: input.workflow,
-        fields: [],
-        createdAt: now,
-        updatedAt: now,
-    };
-    return saveComfyWorkflow(workflow);
-}
-
-export async function deleteComfyWorkflow(id: string) {
-    const workflows = await listComfyWorkflows();
-    const next = workflows.filter((workflow) => workflow.id !== id);
-    await store.setItem(LIST_KEY, next);
-    workflowCache = [...next];
+function normalizeComfyWorkflows(workflows: ComfyWorkflow[]) {
+    return workflows.map((workflow) => ({ ...workflow, fields: Array.isArray(workflow.fields) ? workflow.fields : [] }));
 }
 
 export function parseComfyWorkflowJson(text: string): ComfyWorkflowJson {
@@ -162,11 +142,6 @@ export function applyComfyWorkflowFields(workflow: ComfyWorkflowJson, fields: Co
         node.inputs[field.input] = normalizeFieldValue(field, values[field.id] ?? field.default);
     });
     return next;
-}
-
-function normalizeWorkflowName(value: string) {
-    const name = value.trim().replace(/\.json$/i, "") || "comfy-workflow";
-    return `${name}.json`;
 }
 
 function isWorkflowLink(value: unknown) {

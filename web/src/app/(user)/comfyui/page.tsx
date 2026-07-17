@@ -1,19 +1,16 @@
 "use client";
 
 import { App, Button, Empty, Form, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tag, Typography } from "antd";
-import { Check, CloudDownload, CloudUpload, Play, Save, Trash2, Upload, Workflow } from "lucide-react";
+import { Check, Play, Save, Trash2, Upload, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { runComfyWorkflow } from "@/services/api/comfyui";
-import { deleteBackendWorkflow, fetchBackendWorkflows, pushBackendWorkflowConfig, uploadBackendWorkflow } from "@/services/api/backend";
+import { deleteBackendWorkflow, pushBackendWorkflowConfig, uploadBackendWorkflow } from "@/services/api/backend";
 import {
     applyComfyWorkflowFields,
-    createComfyWorkflow,
-    deleteComfyWorkflow,
     listComfyWorkflowInputCandidates,
-    listComfyWorkflows,
+    refreshComfyWorkflows,
     parseComfyWorkflowJson,
-    saveComfyWorkflow,
     type ComfyWorkflow,
     type ComfyWorkflowField,
     type ComfyWorkflowFieldType,
@@ -43,7 +40,6 @@ export default function ComfyUiPage() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [running, setRunning] = useState(false);
-    const [syncing, setSyncing] = useState(false);
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const [selectedId, setSelectedId] = useState("");
     const [runImages, setRunImages] = useState<string[]>([]);
@@ -55,82 +51,15 @@ export default function ComfyUiPage() {
     const selectedFieldKeys = useMemo(() => new Set((selected?.fields || []).map(fieldKey)), [selected?.fields]);
 
     useEffect(() => {
-        void refreshWorkflows();
+        void refreshWorkflows().catch(() => undefined);
     }, []);
 
     const backendReady = Boolean(token.trim());
 
-    const syncFromBackend = async () => {
-        if (!backendReady) {
-            message.warning("请先登录后端账号");
-            return;
-        }
-        setSyncing(true);
-        try {
-            const remoteWorkflows = await fetchBackendWorkflows(token);
-            const localWorkflows = await listComfyWorkflows();
-            const localMap = new Map(localWorkflows.map((w) => [w.id, w]));
-            let changed = false;
-            for (const remote of remoteWorkflows) {
-                if (!remote.workflow || typeof remote.workflow !== "object") continue;
-                const local = localMap.get(remote.id);
-                if (!local) {
-                    await saveComfyWorkflow({ ...remote, fields: Array.isArray(remote.fields) ? remote.fields : [] });
-                    changed = true;
-                } else if (JSON.stringify(local.fields) !== JSON.stringify(remote.fields) || local.title !== remote.title) {
-                    const merged = { ...local, fields: remote.fields, title: remote.title };
-                    await saveComfyWorkflow(merged);
-                    changed = true;
-                }
-                localMap.delete(remote.id);
-            }
-            if (changed) {
-                await refreshWorkflows(selectedId);
-                message.success("工作流已从后端同步");
-            } else {
-                message.info("本地与后端工作流已一致");
-            }
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "从后端同步工作流失败");
-        } finally {
-            setSyncing(false);
-        }
-    };
-
-    const syncToBackend = async () => {
-        if (!backendReady) {
-            message.warning("请先登录后端账号");
-            return;
-        }
-        setSyncing(true);
-        try {
-            const localWorkflows = await listComfyWorkflows();
-            const remoteWorkflows = await fetchBackendWorkflows(token);
-            const remoteIds = new Set(remoteWorkflows.map((w) => w.id));
-            for (const workflow of localWorkflows) {
-                if (remoteIds.has(workflow.id)) {
-                    await pushBackendWorkflowConfig(token, workflow.id, { title: workflow.title, fields: workflow.fields });
-                } else {
-                    await uploadBackendWorkflow(token, workflow.id, workflow.workflow);
-                    await pushBackendWorkflowConfig(token, workflow.id, { title: workflow.title, fields: workflow.fields });
-                }
-                remoteIds.delete(workflow.id);
-            }
-            for (const id of remoteIds) {
-                await deleteBackendWorkflow(token, id);
-            }
-            message.success("本地工作流配置已同步到后端");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "推送工作流到后端失败");
-        } finally {
-            setSyncing(false);
-        }
-    };
-
     const refreshWorkflows = async (nextSelectedId = selectedId) => {
         setLoading(true);
         try {
-            const items = await listComfyWorkflows();
+            const items = await refreshComfyWorkflows();
             setWorkflows(items);
             const nextId = nextSelectedId && items.some((item) => item.id === nextSelectedId) ? nextSelectedId : items[0]?.id || "";
             setSelectedId(nextId);
@@ -161,21 +90,18 @@ export default function ComfyUiPage() {
 
     const importWorkflow = async (file?: File) => {
         if (!file) return;
+        if (!backendReady) {
+            message.warning("请先登录后端账号");
+            return;
+        }
         try {
             const workflow = parseComfyWorkflowJson(await file.text());
-            const created = await createComfyWorkflow({ name: file.name, workflow });
+            const created = await uploadBackendWorkflow(token, file.name, workflow);
             updateComfyUiConfig("defaultWorkflowId", created.id);
             await refreshWorkflows(created.id);
-            if (backendReady) {
-                try {
-                    await uploadBackendWorkflow(token, created.id, workflow);
-                } catch {
-                    /* 静默 */
-                }
-            }
             message.success("ComfyUI workflow 已导入");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "导入失败");
+            message.error(workflowRequestMessage(error, "导入失败"));
         } finally {
             if (fileInputRef.current) fileInputRef.current.value = "";
         }
@@ -183,25 +109,22 @@ export default function ComfyUiPage() {
 
     const saveSelected = async () => {
         if (!selected) return;
+        if (!backendReady) {
+            message.warning("请先登录后端账号");
+            return;
+        }
         if (!selected.title.trim()) {
             message.error("请填写工作流名称");
             return;
         }
         setSaving(true);
         try {
-            const saved = await saveComfyWorkflow(selected);
-            updateComfyUiConfig("defaultWorkflowId", saved.id);
-            await refreshWorkflows(saved.id);
-            if (backendReady) {
-                try {
-                    await pushBackendWorkflowConfig(token, saved.id, { title: saved.title, fields: saved.fields });
-                } catch {
-                    /* 静默 */
-                }
-            }
+            await pushBackendWorkflowConfig(token, selected.id, { title: selected.title, fields: selected.fields });
+            updateComfyUiConfig("defaultWorkflowId", selected.id);
+            await refreshWorkflows(selected.id);
             message.success("工作流配置已保存");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存失败");
+            message.error(workflowRequestMessage(error, "保存失败"));
         } finally {
             setSaving(false);
         }
@@ -209,24 +132,26 @@ export default function ComfyUiPage() {
 
     const removeSelected = () => {
         if (!selected) return;
+        if (!backendReady) {
+            message.warning("请先登录后端账号");
+            return;
+        }
         modal.confirm({
             title: "删除工作流",
-            content: `确定删除「${selected.title}」吗？`,
+            content: `确定删除“${selected.title}”吗？`,
             okText: "删除",
             okButtonProps: { danger: true },
             cancelText: "取消",
             onOk: async () => {
-                await deleteComfyWorkflow(selected.id);
-                if (backendReady) {
-                    try {
-                        await deleteBackendWorkflow(token, selected.id);
-                    } catch {
-                        /* 静默 */
-                    }
+                try {
+                    await deleteBackendWorkflow(token, selected.id);
+                    if (comfyui.defaultWorkflowId === selected.id) updateComfyUiConfig("defaultWorkflowId", "");
+                    await refreshWorkflows("");
+                    message.success("工作流已删除");
+                } catch (error) {
+                    message.error(workflowRequestMessage(error, "删除失败"));
+                    throw error;
                 }
-                if (comfyui.defaultWorkflowId === selected.id) updateComfyUiConfig("defaultWorkflowId", "");
-                await refreshWorkflows("");
-                message.success("工作流已删除");
             },
         });
     };
@@ -272,12 +197,6 @@ export default function ComfyUiPage() {
                             </Button>
                             <Button type="primary" icon={<Save className="size-4" />} disabled={!selected} loading={saving} onClick={() => void saveSelected()}>
                                 保存配置
-                            </Button>
-                            <Button icon={<CloudDownload className="size-4" />} loading={syncing} onClick={() => void syncFromBackend()} disabled={!backendReady}>
-                                从后端拉取
-                            </Button>
-                            <Button icon={<CloudUpload className="size-4" />} loading={syncing} onClick={() => void syncToBackend()} disabled={!backendReady}>
-                                推送到后端
                             </Button>
                         </div>
                     </div>
@@ -459,4 +378,9 @@ function formatValue(value: unknown) {
 function numberOrNull(value: string | number | null) {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function workflowRequestMessage(error: unknown, fallback: string) {
+    const detail = error instanceof Error ? error.message : fallback;
+    return /(?:^|\D)403(?:\D|$)/.test(detail) ? "需要管理员权限" : detail || fallback;
 }

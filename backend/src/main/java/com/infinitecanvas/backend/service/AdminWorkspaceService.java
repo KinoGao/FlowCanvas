@@ -24,6 +24,7 @@ public class AdminWorkspaceService {
     private final CanvasProjectRepository projects;
     private final UserAssetRepository assets;
     private final UserFileRepository files;
+    private final UserGenerationLogRepository generationLogs;
     private final PasswordService passwords;
     private final ObjectMapper objectMapper;
     private final Path userFileDir;
@@ -35,6 +36,7 @@ public class AdminWorkspaceService {
             CanvasProjectRepository projects,
             UserAssetRepository assets,
             UserFileRepository files,
+            UserGenerationLogRepository generationLogs,
             PasswordService passwords,
             ObjectMapper objectMapper,
             @Value("${app.user-file-dir:./data/user-files}") String userFileDir
@@ -45,6 +47,7 @@ public class AdminWorkspaceService {
         this.projects = projects;
         this.assets = assets;
         this.files = files;
+        this.generationLogs = generationLogs;
         this.passwords = passwords;
         this.objectMapper = objectMapper;
         this.userFileDir = Paths.get(userFileDir).toAbsolutePath().normalize();
@@ -111,6 +114,7 @@ public class AdminWorkspaceService {
         projects.deleteByUserId(userId);
         assets.deleteByUserId(userId);
         files.deleteByUserId(userId);
+        generationLogs.deleteByUserId(userId);
         users.deleteById(userId);
         deleteDirectory(userFileDir.resolve(userId).normalize());
     }

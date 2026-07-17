@@ -19,6 +19,23 @@ export type ComfyOutputFile = {
     filename: string;
     subfolder?: string;
     type?: string;
+    format?: string;
+    mimeType?: string;
+    mime_type?: string;
+};
+
+type ComfyMediaKind = "image" | "video" | "audio";
+
+const COMFY_MEDIA_EXTENSIONS: Record<ComfyMediaKind, Set<string>> = {
+    image: new Set(["avif", "bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]),
+    video: new Set(["avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm", "wmv"]),
+    audio: new Set(["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "wave"]),
+};
+
+const COMFY_OUTPUT_KEY_HINTS: Record<ComfyMediaKind, Set<string>> = {
+    image: new Set(["image", "images"]),
+    video: new Set(["animated", "gif", "gifs", "video", "videos"]),
+    audio: new Set(["audio", "audios"]),
 };
 
 type ComfyRequestOptions = {
@@ -26,6 +43,18 @@ type ComfyRequestOptions = {
     body?: unknown;
     signal?: AbortSignal;
 };
+class ComfyRequestError extends Error {
+    constructor(
+        message: string,
+        readonly status: number,
+    ) {
+        super(message);
+        this.name = "ComfyRequestError";
+    }
+}
+
+const RETRYABLE_COMFY_STATUSES = new Set([502, 503, 504]);
+const MAX_CONSECUTIVE_HISTORY_FAILURES = 8;
 
 export async function testComfyConnection(config: ComfyUiConfig) {
     try {
@@ -57,25 +86,35 @@ export async function waitForComfyHistory(config: ComfyUiConfig, promptId: strin
     const timeoutMs = Math.max(10, Number(config.timeoutSeconds) || 300) * 1000;
     const intervalMs = Math.max(500, Number(config.pollIntervalMs) || 1200);
     const startedAt = Date.now();
+    let consecutiveFailures = 0;
     while (Date.now() - startedAt < timeoutMs) {
-        const history = await getComfyHistory(config, promptId, signal);
-        const item = history[promptId];
-        if (item?.outputs || item?.status?.completed) return item;
-        await sleep(intervalMs, signal);
+        try {
+            const history = await getComfyHistory(config, promptId, signal);
+            consecutiveFailures = 0;
+            const item = history[promptId];
+            if (item?.outputs || item?.status?.completed) return item;
+            await sleep(intervalMs, signal);
+        } catch (error) {
+            if (signal?.aborted || !isRetryableHistoryError(error)) throw error;
+            consecutiveFailures += 1;
+            if (consecutiveFailures > MAX_CONSECUTIVE_HISTORY_FAILURES) throw error;
+            const retryDelay = Math.min(5000, intervalMs * 2 ** Math.min(consecutiveFailures - 1, 3));
+            await sleep(retryDelay, signal);
+        }
     }
     throw new Error("ComfyUI 任务等待超时");
 }
 
 export function extractComfyOutputImages(history: ComfyHistoryItem) {
-    return extractComfyOutputFiles(history, ["images", "image"]);
+    return extractComfyOutputFiles(history, "image");
 }
 
 export function extractComfyOutputVideos(history: ComfyHistoryItem) {
-    return extractComfyOutputFiles(history, ["videos", "video", "gifs", "gif", "animated"]);
+    return extractComfyOutputFiles(history, "video");
 }
 
 export function extractComfyOutputAudios(history: ComfyHistoryItem) {
-    return extractComfyOutputFiles(history, ["audio", "audios"]);
+    return extractComfyOutputFiles(history, "audio");
 }
 
 export type ComfyUploadResult = {
@@ -95,7 +134,7 @@ export async function uploadComfyFile(config: ComfyUiConfig, blob: Blob, filenam
         const baseUrl = normalizeComfyBaseUrl(config.baseUrl);
         response = await fetch(`${baseUrl}/upload/image`, { method: "POST", body: formData, signal });
     }
-    if (!response.ok) throw new Error(await readComfyError(response));
+    if (!response.ok) throw new ComfyRequestError(await readComfyError(response), response.status);
     return response.json() as Promise<ComfyUploadResult>;
 }
 
@@ -137,18 +176,53 @@ async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: Com
                   signal: options.signal,
               })
             : await fetch(`${baseUrl}${path}`, init);
-    if (!response.ok) throw new Error(await readComfyError(response));
+    if (!response.ok) throw new ComfyRequestError(await readComfyError(response), response.status);
     return response.json() as Promise<T>;
 }
+function isRetryableHistoryError(error: unknown) {
+    return error instanceof TypeError || (error instanceof ComfyRequestError && RETRYABLE_COMFY_STATUSES.has(error.status));
+}
 
-function extractComfyOutputFiles(history: ComfyHistoryItem, keys: string[]) {
-    return Object.values(history.outputs || {}).flatMap((output) =>
-        keys.flatMap((key) => {
-            const value = output[key];
-            if (Array.isArray(value)) return value.filter(isComfyOutputFile);
-            return isComfyOutputFile(value) ? [value] : [];
-        }),
-    );
+function extractComfyOutputFiles(history: ComfyHistoryItem, kind: ComfyMediaKind) {
+    const files: ComfyOutputFile[] = [];
+    const seen = new Set<string>();
+    Object.values(history.outputs || {}).forEach((output) => {
+        Object.entries(output).forEach(([key, value]) => {
+            collectComfyOutputFiles(value).forEach((file) => {
+                if (detectComfyMediaKind(file, key) !== kind) return;
+                const identity = JSON.stringify([file.type || "output", file.subfolder || "", file.filename]);
+                if (seen.has(identity)) return;
+                seen.add(identity);
+                files.push(file);
+            });
+        });
+    });
+    return files;
+}
+
+function collectComfyOutputFiles(value: unknown): ComfyOutputFile[] {
+    if (isComfyOutputFile(value)) return [value];
+    if (Array.isArray(value)) return value.flatMap(collectComfyOutputFiles);
+    if (!value || typeof value !== "object") return [];
+    return Object.values(value).flatMap(collectComfyOutputFiles);
+}
+
+function detectComfyMediaKind(file: ComfyOutputFile, outputKey: string): ComfyMediaKind | undefined {
+    const extension = file.filename.split(/[?#]/, 1)[0].split(".").pop()?.toLowerCase();
+    if (extension) {
+        const extensionKind = (Object.keys(COMFY_MEDIA_EXTENSIONS) as ComfyMediaKind[]).find((kind) => COMFY_MEDIA_EXTENSIONS[kind].has(extension));
+        if (extensionKind) return extensionKind;
+    }
+
+    const format = [file.mimeType, file.mime_type, file.format].find((value) => typeof value === "string")?.toLowerCase();
+    if (format) {
+        if (format.startsWith("image/") || format.includes("image")) return "image";
+        if (format.startsWith("video/") || format.includes("video")) return "video";
+        if (format.startsWith("audio/") || format.includes("audio")) return "audio";
+    }
+
+    const normalizedKey = outputKey.toLowerCase();
+    return (Object.keys(COMFY_OUTPUT_KEY_HINTS) as ComfyMediaKind[]).find((kind) => COMFY_OUTPUT_KEY_HINTS[kind].has(normalizedKey));
 }
 
 function isComfyOutputFile(value: unknown): value is ComfyOutputFile {

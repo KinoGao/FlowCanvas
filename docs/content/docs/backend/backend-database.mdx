@@ -76,7 +76,7 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 
 ## 账号保存相关表
 
-账号保存模式用于“本地后端账号”保存通道。登录态使用后端签发的 Bearer token；注册账号需要提交 `REGISTRATION_CODE`（默认 `gycode`）。管理员登录额外提交 `ADMIN_CODE`（默认 `admincode`），并且账号必须拥有 `ADMIN` 角色；实例中尚无管理员时，首个通过管理员授权码登录的有效账号会初始化为管理员。旧 `AUTH_CODE` 仅保留给旧配置接口和开发兼容入口，不再作为用户数据或后台管理的共享身份。
+账号保存模式用于后端账号工作区，也是正常业务的唯一账号存储通道。登录态使用后端签发的 Bearer token；注册账号需要提交 `REGISTRATION_CODE`（默认 `gycode`）。管理员登录额外提交 `ADMIN_CODE`（默认 `admincode`），并且账号必须拥有 `ADMIN` 角色；实例中尚无管理员时，首个通过管理员授权码登录的有效账号会初始化为管理员。旧 `AUTH_CODE` 仅保留给旧配置接口和开发兼容入口，不再作为用户数据或后台管理的共享身份。
 
 ### users 表
 
@@ -102,7 +102,7 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 
 ### user_configs 表
 
-每个用户一行，保存当前保存通道下的完整配置 JSON，包括 AI 渠道/API Key、ComfyUI、偏好等配置。
+每个用户一行，保存该账号工作区的完整用户配置 JSON。全局模型厂商、私有 API Key、请求模型和能力目录由管理员配置管理，不下发到该表或浏览器。
 
 | 列名 | 类型 | 说明 |
 |---|---|---|
@@ -151,8 +151,22 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `relative_path` | VARCHAR | 相对 `USER_FILE_DIR` 的文件路径 |
 | `created_at` | TIMESTAMP | 上传时间 |
 
+### user_generation_logs 表
+
+按用户保存图片和视频生成记录。创作端的生成历史通过账号接口增删改查，不再把 localforage 作为正常业务数据源。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 后端记录 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `log_id` | VARCHAR | 前端生成记录 ID |
+| `kind` | VARCHAR | 记录类型，目前为 `image` 或 `video` |
+| `log_json` | TEXT | 生成记录完整 JSON |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
+
 ### 保存通道说明
 
-- `local`：沿用浏览器本地存储，不写入这些用户表。
-- `backend`：登录后读写 `user_configs`、`canvas_projects`、`assets` 和 `user_files`，不同账号数据隔离。
-- `webdav`：继续通过 WebDAV manifest 与文件同步；WebDAV 配置页和后端 WebDAV proxy 保留，不依赖本地后端账号。
+- `backend`：正常业务唯一账号存储。登录并完成 bootstrap 后读写 `user_configs`、`canvas_projects`、`assets`、`user_files` 和 `user_generation_logs`，不同账号数据隔离。未登录、工作区加载失败或后端不可用时，前端锁定用户页面，不回退浏览器数据。
+- `webdav`：用户显式选择的独立保存/同步通道，继续通过 WebDAV manifest 与文件同步；WebDAV 配置页和后端 WebDAV proxy 保留，不依赖后端账号工作区。
+- 浏览器 `localforage`：仅用于一次性旧数据迁移和 WebDAV 传输缓存，不是可选择的保存模式。旧数据成功导入账号后，以后端账号工作区为权威。

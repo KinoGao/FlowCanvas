@@ -2,7 +2,7 @@
 
 import { App, Alert, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
 import { Cloud, Database, LogIn, LogOut, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { loginUser, logoutUser, registerUser } from "@/services/api/auth";
@@ -21,7 +21,6 @@ type WebdavDomainProgress = {
 };
 
 const saveModeOptions: Array<{ label: string; value: SaveMode }> = [
-    { label: "本地浏览器", value: "local" },
     { label: "后端账号", value: "backend" },
     { label: "WebDAV 云端", value: "webdav" },
 ];
@@ -77,6 +76,10 @@ export function AppConfigModal() {
     const setSession = useUserStore((state) => state.setSession);
     const clearSession = useUserStore((state) => state.clearSession);
     const setSaveMode = useUserStore((state) => state.setSaveMode);
+
+    useEffect(() => {
+        if (isConfigOpen && !token) setActiveTab("account");
+    }, [isConfigOpen, token]);
 
     const closeModal = () => {
         clearPromptContinue();
@@ -203,7 +206,7 @@ export function AppConfigModal() {
                                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                                         <div>
                                             <div className="font-medium">保存位置</div>
-                                            <div className="text-xs text-gray-500">本地、后端账号和 WebDAV 可以共存，当前选择决定自动保存通道。</div>
+                                            <div className="text-xs text-gray-500">后端账号是默认工作区；WebDAV 作为独立的云端保存通道保留。</div>
                                         </div>
                                         <Segmented value={saveMode} options={saveModeOptions} onChange={(value) => changeSaveMode(value as SaveMode)} />
                                     </div>

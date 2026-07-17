@@ -3,7 +3,6 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
-import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
@@ -14,10 +13,12 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
-import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { deleteBackendGenerationLog, fetchBackendGenerationLogs, putBackendGenerationLog } from "@/services/api/backend-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
@@ -66,9 +67,6 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vqu
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-const LOG_STORE_KEY = "infinite-canvas:video_generation_logs";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
-
 export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,6 +77,7 @@ export default function VideoPage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const token = useUserStore((state) => state.token);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
@@ -106,8 +105,9 @@ export default function VideoPage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs();
-    }, []);
+        if (token) void refreshLogs();
+        else setLogs([]);
+    }, [token]);
 
     const addReferences = async (files?: FileList | null) => {
         const selectedFiles = Array.from(files || []);
@@ -265,30 +265,46 @@ export default function VideoPage() {
         setPreviewLog(null);
     };
 
-    const deleteSelectedLogs = () => {
-        const mediaKeys = logs
-            .filter((log) => selectedLogIds.includes(log.id))
-            .map((log) => log.video?.storageKey)
-            .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
-            setPreviewLog(null);
-            setResults([]);
+    const deleteSelectedLogs = async () => {
+        if (!token) {
+            message.error("请先登录后端账号");
+            return;
         }
-        setSelectedLogIds([]);
-        setDeleteConfirmOpen(false);
+        try {
+            await Promise.all(selectedLogIds.map((id) => deleteBackendGenerationLog(token, "video", id)));
+            await refreshLogs();
+            if (previewLog && selectedLogIds.includes(previewLog.id)) {
+                setPreviewLog(null);
+                setResults([]);
+            }
+            setSelectedLogIds([]);
+            setDeleteConfirmOpen(false);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除生成记录失败");
+        }
     };
 
     const saveLog = async (log: GenerationLog) => {
-        await logStore.setItem(log.id, serializeLog(log));
+        if (!token) throw new Error("请先登录后端账号");
+        await putBackendGenerationLog(token, "video", log.id, serializeLog(log));
         await refreshLogs();
     };
 
     const refreshLogs = async () => {
-        const nextLogs = await readStoredLogs();
-        setLogs(nextLogs);
-        resumePendingLogs(nextLogs);
-        return nextLogs;
+        if (!token) {
+            setLogs([]);
+            return [];
+        }
+        try {
+            const storedLogs = await fetchBackendGenerationLogs<Partial<GenerationLog>>(token, "video");
+            const nextLogs = (await Promise.all(storedLogs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            setLogs(nextLogs);
+            resumePendingLogs(nextLogs);
+            return nextLogs;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "加载生成记录失败");
+            return [];
+        }
     };
 
     const resumePendingLogs = (items: GenerationLog[]) => {
@@ -730,19 +746,6 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
             </div>
         </button>
     );
-}
-
-async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const logs: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            logs.push(value);
-        });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {

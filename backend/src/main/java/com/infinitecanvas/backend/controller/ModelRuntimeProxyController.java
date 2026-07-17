@@ -182,7 +182,9 @@ public class ModelRuntimeProxyController {
         if (containsRole(json, "reference_video") || containsRole(json, "reference_audio") || containsMediaInput(json, "video") || containsMediaInput(json, "audio")) return "all-in-one-reference";
         if (containsRole(json, "reference_image")) return "image-reference";
         if (containsRole(json, "last_frame") || hasFieldRecursive(json, "last_frame")) return "first-last-frame";
-        if (hasKeyframes(json) || countMediaInputs(json, "image") > 2) return "multi-frame";
+        int imageCount = countMediaInputs(json, "image");
+        if (hasKeyframes(json)) return imageCount <= 2 ? "first-last-frame" : "multi-frame";
+        if (imageCount > 2) return "multi-frame";
         if (containsRole(json, "first_frame") || containsImageInput(json)) return "image-to-video";
         return "text-to-video";
     }

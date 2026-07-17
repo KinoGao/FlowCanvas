@@ -70,6 +70,28 @@ public class UserDataController {
         return ApiResponse.ok();
     }
 
+    @GetMapping("/generation-logs")
+    public ApiResponse<List<Object>> getGenerationLogs(HttpServletRequest request, @RequestParam String kind) {
+        return ApiResponse.ok(dataService.getGenerationLogs(UserRequestContext.requireUser(request), kind));
+    }
+
+    @PutMapping("/generation-logs/{id}")
+    public ApiResponse<Void> saveGenerationLog(
+            HttpServletRequest request,
+            @RequestParam String kind,
+            @PathVariable String id,
+            @RequestBody Map<String, Object> body
+    ) {
+        dataService.saveGenerationLog(UserRequestContext.requireUser(request), kind, id, body.getOrDefault("log", body));
+        return ApiResponse.ok();
+    }
+
+    @DeleteMapping("/generation-logs/{id}")
+    public ApiResponse<Void> deleteGenerationLog(HttpServletRequest request, @RequestParam String kind, @PathVariable String id) {
+        dataService.deleteGenerationLog(UserRequestContext.requireUser(request), kind, id);
+        return ApiResponse.ok();
+    }
+
     @SuppressWarnings("unchecked")
     private List<Object> list(Object value) {
         if (value instanceof List<?> list) return (List<Object>) list;

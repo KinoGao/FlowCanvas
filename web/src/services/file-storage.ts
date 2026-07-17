@@ -12,9 +12,10 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const mediaBlobs = createBlobStorage(store);
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const blob = typeof input === "string" ? await fetchMediaBlob(input) : input;
     const { saveMode, token } = useUserStore.getState();
-    if (saveMode === "backend" && token) {
+    if (saveMode === "backend") {
+        if (!token) throw new Error("请先登录后端账号");
         const uploaded = await uploadBackendFile(token, blob, `${prefix}.${fileExtension(blob.type)}`);
         const url = backendFileUrl(uploaded.storageKey, token);
         const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
@@ -24,6 +25,17 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     const url = await mediaBlobs.setBlob(storageKey, blob);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
     return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
+}
+async function fetchMediaBlob(url: string) {
+    const response = await fetch(url);
+    const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+    if (!response.ok || contentType.includes("application/json")) {
+        const detail = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 240);
+        throw new Error(`Media download failed: HTTP ${response.status}${detail ? ` - ${detail}` : ""}`);
+    }
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("Media download failed: empty response");
+    return blob;
 }
 
 /** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */
@@ -53,7 +65,12 @@ export function getMediaBlob(storageKey: string) {
 }
 
 export function setMediaBlob(storageKey: string, blob: Blob) {
-    if (storageKey.startsWith("backend:")) return Promise.resolve(backendFileUrl(storageKey, useUserStore.getState().token));
+    const { saveMode, token } = useUserStore.getState();
+    if (storageKey.startsWith("backend:")) {
+        if (!token) throw new Error("请先登录后端账号");
+        return Promise.resolve(backendFileUrl(storageKey, token));
+    }
+    if (saveMode === "backend") throw new Error("后端工作区不允许写入浏览器媒体缓存");
     return mediaBlobs.setBlob(storageKey, blob);
 }
 

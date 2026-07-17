@@ -3,7 +3,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type SaveMode = "local" | "backend" | "webdav";
+export type SaveMode = "backend" | "webdav";
+export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
 
 export type LocalUser = {
     id: string;
@@ -17,12 +18,16 @@ type UserStore = {
     hydrated: boolean;
     user: LocalUser | null;
     token: string;
-    sessionOwnerId: string;
     saveMode: SaveMode;
+    workspaceStatus: WorkspaceStatus;
+    workspaceError: string;
     backendImportedAtByUser: Record<string, string>;
+    finishHydration: () => void;
     setSession: (user: LocalUser, token: string) => void;
+    updateUser: (user: LocalUser) => void;
     clearSession: () => void;
     setSaveMode: (saveMode: SaveMode) => void;
+    setWorkspaceState: (workspaceStatus: WorkspaceStatus, workspaceError?: string) => void;
     markBackendImported: (userId: string) => void;
 };
 
@@ -32,12 +37,16 @@ export const useUserStore = create<UserStore>()(
             hydrated: false,
             user: null,
             token: "",
-            sessionOwnerId: "",
-            saveMode: "local",
+            saveMode: "backend",
+            workspaceStatus: "idle",
+            workspaceError: "",
             backendImportedAtByUser: {},
-            setSession: (user, token) => set((state) => ({ user, token, sessionOwnerId: state.sessionOwnerId || createSessionOwnerId(), saveMode: "backend" })),
-            clearSession: () => set({ user: null, token: "", sessionOwnerId: "", saveMode: "local" }),
+            finishHydration: () => set({ hydrated: true }),
+            setSession: (user, token) => set({ user, token, saveMode: "backend", workspaceStatus: "loading", workspaceError: "" }),
+            updateUser: (user) => set({ user }),
+            clearSession: () => set({ user: null, token: "", saveMode: "backend", workspaceStatus: "idle", workspaceError: "" }),
             setSaveMode: (saveMode) => set({ saveMode }),
+            setWorkspaceState: (workspaceStatus, workspaceError = "") => set({ workspaceStatus, workspaceError }),
             markBackendImported: (userId) =>
                 set((state) => ({
                     backendImportedAtByUser: {
@@ -54,14 +63,17 @@ export const useUserStore = create<UserStore>()(
                 saveMode: state.saveMode,
                 backendImportedAtByUser: state.backendImportedAtByUser,
             }),
-            onRehydrateStorage: () => () => {
-                const state = useUserStore.getState();
-                useUserStore.setState({ hydrated: true, sessionOwnerId: state.token ? createSessionOwnerId() : "" });
+            merge: (persisted, current) => {
+                const saved = (persisted || {}) as Partial<UserStore>;
+                return {
+                    ...current,
+                    ...saved,
+                    saveMode: saved.saveMode === "webdav" ? "webdav" : "backend",
+                    workspaceStatus: "idle",
+                    workspaceError: "",
+                };
             },
+            onRehydrateStorage: (state) => () => state.finishHydration(),
         },
     ),
 );
-
-function createSessionOwnerId() {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}

@@ -6,8 +6,11 @@ import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
 import { readZip } from "@/lib/zip";
+import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
+import { replaceBackendStorageReferences, uploadBackendFile, type BackendUploadedFile } from "@/services/api/backend-storage";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
+import { useUserStore } from "@/stores/use-user-store";
 import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "./components/canvas-project-card";
 import type { CanvasExportFile } from "./export-types";
@@ -20,6 +23,12 @@ export default function CanvasPage() {
     const navigate = useNavigate();
     const inputRef = useRef<HTMLInputElement>(null);
     const hydrated = useCanvasStore((state) => state.hydrated);
+    const userHydrated = useUserStore((state) => state.hydrated);
+    const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
+    const saveMode = useUserStore((state) => state.saveMode);
+    const workspaceStatus = useUserStore((state) => state.workspaceStatus);
+    const backendWorkspaceReady = saveMode !== "backend" || (userHydrated && Boolean(user && token) && workspaceStatus === "ready");
     const projects = useCanvasStore((state) => state.projects);
     const createProject = useCanvasStore((state) => state.createProject);
     const importProject = useCanvasStore((state) => state.importProject);
@@ -37,17 +46,37 @@ export default function CanvasPage() {
             const projectFile = zip.get("projects.json");
             if (!projectFile) throw new Error("missing projects.json");
             const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
+            const packageFiles = new Map<string, { path: string; blob: Blob }>();
+            data.projects.forEach((project) =>
+                project.files.forEach((item) => {
+                    if (packageFiles.has(item.storageKey)) return;
+                    const blob = zip.get(item.path);
+                    if (!blob) throw new Error(`missing media file: ${item.path}`);
+                    packageFiles.set(item.storageKey, {
+                        path: item.path,
+                        blob: blob.type ? blob : blob.slice(0, blob.size, item.mimeType),
+                    });
+                }),
             );
-            data.projects.forEach((item) => importProject(item.project));
+
+            if (saveMode === "backend") {
+                if (!token) throw new Error("请先登录后端账号");
+                const uploads = new Map<string, BackendUploadedFile>();
+                await Promise.all(
+                    Array.from(packageFiles.entries()).map(async ([storageKey, item]) => {
+                        const uploaded = await uploadBackendFile(token, item.blob, item.path.split("/").pop() || "file");
+                        uploads.set(storageKey, uploaded);
+                    }),
+                );
+                data.projects.forEach((item) => importProject(replaceBackendStorageReferences(item.project, uploads, token)));
+            } else {
+                await Promise.all(
+                    Array.from(packageFiles.entries()).map(([storageKey, item]) =>
+                        storageKey.startsWith("image:") ? setImageBlob(storageKey, item.blob) : setMediaBlob(storageKey, item.blob),
+                    ),
+                );
+                data.projects.forEach((item) => importProject(item.project));
+            }
             message.success(`已导入 ${data.projects.length} 个画布`);
         } catch {
             message.error("导入失败，请选择有效的画布压缩包");
@@ -55,6 +84,8 @@ export default function CanvasPage() {
             if (inputRef.current) inputRef.current.value = "";
         }
     };
+
+    if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
 
     return (
         <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">

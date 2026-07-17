@@ -3,7 +3,6 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
-import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
@@ -17,8 +16,10 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteBackendGenerationLog, fetchBackendGenerationLogs, putBackendGenerationLog } from "@/services/api/backend-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 type GeneratedImage = {
@@ -63,10 +64,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-const LOG_STORE_KEY = "infinite-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
-const logStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
-
 export default function ImagePage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +74,7 @@ export default function ImagePage() {
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const token = useUserStore((state) => state.token);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -102,8 +101,9 @@ export default function ImagePage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs();
-    }, []);
+        if (token) void refreshLogs();
+        else setLogs([]);
+    }, [token]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -174,7 +174,7 @@ export default function ImagePage() {
                     return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),
             );
-            saveLog(
+            await saveLog(
                 buildLog({
                     prompt: text,
                     model,
@@ -239,22 +239,46 @@ export default function ImagePage() {
         setPreviewLog(null);
     };
 
-    const deleteSelectedLogs = () => {
-        const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
-        if (previewLog && selectedLogIds.includes(previewLog.id)) {
-            setPreviewLog(null);
-            setResults([]);
+    const deleteSelectedLogs = async () => {
+        if (!token) {
+            message.error("请先登录后端账号");
+            return;
         }
-        setSelectedLogIds([]);
-        setDeleteConfirmOpen(false);
+        try {
+            await Promise.all(selectedLogIds.map((id) => deleteBackendGenerationLog(token, "image", id)));
+            await refreshLogs();
+            if (previewLog && selectedLogIds.includes(previewLog.id)) {
+                setPreviewLog(null);
+                setResults([]);
+            }
+            setSelectedLogIds([]);
+            setDeleteConfirmOpen(false);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除生成记录失败");
+        }
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const saveLog = async (log: GenerationLog) => {
+        if (!token) throw new Error("请先登录后端账号");
+        await putBackendGenerationLog(token, "image", log.id, serializeLog(log));
+        await refreshLogs();
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => {
+        if (!token) {
+            setLogs([]);
+            return [];
+        }
+        try {
+            const storedLogs = await fetchBackendGenerationLogs<Partial<GenerationLog>>(token, "image");
+            const nextLogs = (await Promise.all(storedLogs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            setLogs(nextLogs);
+            return nextLogs;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "加载生成记录失败");
+            return [];
+        }
+    };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
@@ -678,20 +702,6 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
             </div>
         </button>
     );
-}
-
-async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            values.push(value);
-        });
-        const logs = await Promise.all(values.map(normalizeLog));
-        return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
 }
 
 async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {

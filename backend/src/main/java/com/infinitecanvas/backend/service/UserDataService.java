@@ -5,9 +5,11 @@ import com.infinitecanvas.backend.entity.CanvasProjectEntity;
 import com.infinitecanvas.backend.entity.User;
 import com.infinitecanvas.backend.entity.UserAsset;
 import com.infinitecanvas.backend.entity.UserConfig;
+import com.infinitecanvas.backend.entity.UserGenerationLog;
 import com.infinitecanvas.backend.repository.CanvasProjectRepository;
 import com.infinitecanvas.backend.repository.UserAssetRepository;
 import com.infinitecanvas.backend.repository.UserConfigRepository;
+import com.infinitecanvas.backend.repository.UserGenerationLogRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,11 +22,18 @@ public class UserDataService {
     private final UserConfigRepository configs;
     private final CanvasProjectRepository projects;
     private final UserAssetRepository assets;
+    private final UserGenerationLogRepository generationLogs;
 
-    public UserDataService(UserConfigRepository configs, CanvasProjectRepository projects, UserAssetRepository assets) {
+    public UserDataService(
+            UserConfigRepository configs,
+            CanvasProjectRepository projects,
+            UserAssetRepository assets,
+            UserGenerationLogRepository generationLogs
+    ) {
         this.configs = configs;
         this.projects = projects;
         this.assets = assets;
+        this.generationLogs = generationLogs;
     }
 
     @Transactional(readOnly = true)
@@ -81,6 +90,7 @@ public class UserDataService {
             if (deletedAt != null && !projectUpdatedAt.isAfter(deletedAt)) continue;
 
             CanvasProjectEntity entity = existing.get(id);
+            if (entity != null && shouldPreserveExistingProject(entity, project, projectUpdatedAt)) continue;
             if (entity == null) {
                 entity = new CanvasProjectEntity();
                 entity.setId(recordId(user.getId(), id));
@@ -142,6 +152,62 @@ public class UserDataService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public List<Object> getGenerationLogs(User user, String kind) {
+        String normalizedKind = normalizeGenerationKind(kind);
+        return generationLogs.findByUserIdAndKindOrderByCreatedAtDesc(user.getId(), normalizedKind).stream()
+                .map(item -> readJson(item.getLogJson()))
+                .toList();
+    }
+
+    @Transactional
+    public void saveGenerationLog(User user, String kind, String logId, Object value) {
+        String normalizedKind = normalizeGenerationKind(kind);
+        String normalizedLogId = string(logId);
+        if (normalizedLogId.isBlank()) throw new IllegalArgumentException("生成记录 ID 不能为空");
+
+        Map<String, Object> log = asMap(value);
+        log.put("id", normalizedLogId);
+        Instant now = Instant.now();
+        UserGenerationLog entity = generationLogs
+                .findByUserIdAndKindAndLogId(user.getId(), normalizedKind, normalizedLogId)
+                .orElseGet(() -> {
+                    UserGenerationLog item = new UserGenerationLog();
+                    item.setId(user.getId() + ":" + normalizedKind + ":" + normalizedLogId);
+                    item.setUser(user);
+                    item.setKind(normalizedKind);
+                    item.setLogId(normalizedLogId);
+                    item.setCreatedAt(parseEpochMillis(log.get("createdAt"), now));
+                    return item;
+                });
+        entity.setLogJson(writeJson(log));
+        entity.setUpdatedAt(now);
+        generationLogs.save(entity);
+    }
+
+    @Transactional
+    public void deleteGenerationLog(User user, String kind, String logId) {
+        generationLogs.deleteByUserIdAndKindAndLogId(user.getId(), normalizeGenerationKind(kind), string(logId));
+    }
+
+    private String normalizeGenerationKind(String kind) {
+        String normalized = string(kind).toLowerCase(Locale.ROOT);
+        if (!normalized.equals("image") && !normalized.equals("video")) {
+            throw new IllegalArgumentException("不支持的生成记录类型");
+        }
+        return normalized;
+    }
+
+    private Instant parseEpochMillis(Object value, Instant fallback) {
+        if (value instanceof Number number) {
+            try {
+                return Instant.ofEpochMilli(number.longValue());
+            } catch (Exception ignored) {
+            }
+        }
+        return parseInstant(value, fallback);
+    }
+
     public String writeJson(Object value) {
         try {
             return value instanceof String s ? s : objectMapper.writeValueAsString(value);
@@ -167,6 +233,29 @@ public class UserDataService {
     private Map<String, Object> withId(Map<String, Object> value, String id) {
         value.put("id", id);
         return value;
+    }
+
+    private boolean shouldPreserveExistingProject(CanvasProjectEntity entity, Map<String, Object> incoming, Instant incomingUpdatedAt) {
+        Object storedProject = readJson(entity.getProjectJson());
+        Instant storedUpdatedAt = storedProject instanceof Map<?, ?> map
+                ? parseInstant(map.get("updatedAt"), entity.getUpdatedAt())
+                : entity.getUpdatedAt();
+        if (storedUpdatedAt == null) return false;
+        if (storedUpdatedAt.isAfter(incomingUpdatedAt)) return true;
+        if (storedUpdatedAt.isBefore(incomingUpdatedAt)) return false;
+        return projectDetailScore(storedProject) >= projectDetailScore(incoming);
+    }
+
+    private long projectDetailScore(Object value) {
+        if (!(value instanceof Map<?, ?> map)) return 0;
+        long nodes = listSize(map.get("nodes"));
+        long connections = listSize(map.get("connections"));
+        long chatSessions = listSize(map.get("chatSessions"));
+        return nodes * 1_000_000L + connections * 10_000L + chatSessions * 100L + writeJson(value).length();
+    }
+
+    private int listSize(Object value) {
+        return value instanceof Collection<?> collection ? collection.size() : 0;
     }
 
     private String projectDataId(CanvasProjectEntity item) {

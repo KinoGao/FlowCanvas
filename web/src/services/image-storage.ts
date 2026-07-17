@@ -24,7 +24,8 @@ const imageBlobs = createBlobStorage(store);
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await fetchImageBlob(input) : input;
     const { saveMode, token } = useUserStore.getState();
-    if (saveMode === "backend" && token) {
+    if (saveMode === "backend") {
+        if (!token) throw new Error("请先登录后端账号");
         const uploaded = await uploadBackendFile(token, blob, "image.png");
         const url = backendFileUrl(uploaded.storageKey, token);
         const meta = await readImageMeta(url);
@@ -63,7 +64,12 @@ export function getImageBlob(storageKey: string) {
 }
 
 export function setImageBlob(storageKey: string, blob: Blob) {
-    if (storageKey.startsWith("backend:")) return Promise.resolve(backendFileUrl(storageKey, useUserStore.getState().token));
+    const { saveMode, token } = useUserStore.getState();
+    if (storageKey.startsWith("backend:")) {
+        if (!token) throw new Error("请先登录后端账号");
+        return Promise.resolve(backendFileUrl(storageKey, token));
+    }
+    if (saveMode === "backend") throw new Error("后端工作区不允许写入浏览器媒体缓存");
     return imageBlobs.setBlob(storageKey, blob);
 }
 

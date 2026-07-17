@@ -5,11 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
 import { saveAs } from "file-saver";
 
+import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
 import { uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 
 type AssetFormValues = {
@@ -39,6 +41,12 @@ export default function AssetsPage() {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
+    const userHydrated = useUserStore((state) => state.hydrated);
+    const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
+    const saveMode = useUserStore((state) => state.saveMode);
+    const workspaceStatus = useUserStore((state) => state.workspaceStatus);
+    const backendWorkspaceReady = saveMode !== "backend" || (userHydrated && Boolean(user && token) && workspaceStatus === "ready");
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);
     const updateAsset = useAssetStore((state) => state.updateAsset);
@@ -57,7 +65,7 @@ export default function AssetsPage() {
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
     const content = Form.useWatch("content", form) || "";
-    const validAssets = useMemo(() => assets.filter((asset) => asset.kind === "text" || asset.kind === "image" || asset.kind === "video"), [assets]);
+    const validAssets = assets;
 
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
@@ -166,7 +174,7 @@ export default function AssetsPage() {
     const importAssetZip = async (file?: File) => {
         if (!file) return;
         try {
-            const importedAssets = await readAssetPackage(file);
+            const importedAssets = await readAssetPackage(file, saveMode, token);
             importedAssets.forEach((asset) => {
                 const payload = { ...asset } as Record<string, unknown>;
                 delete payload.id;
@@ -188,6 +196,8 @@ export default function AssetsPage() {
         message.success("素材已删除");
         setDeletingAsset(null);
     };
+
+    if (!backendWorkspaceReady) return <BackendWorkspaceGate title="素材工作区" />;
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-stone-900 dark:text-stone-100">
