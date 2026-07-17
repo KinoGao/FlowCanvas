@@ -125,8 +125,8 @@ function ImageSettingsPortal({
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            onWheelCapture={(event) => event.stopPropagation()}
-            onWheel={(event) => event.stopPropagation()}
+            onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
+            onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
             <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
         </div>,

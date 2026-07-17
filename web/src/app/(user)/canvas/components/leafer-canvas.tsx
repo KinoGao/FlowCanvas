@@ -91,6 +91,7 @@ export function LeaferCanvas({
     const connectingParamsRef = useRef(connectingParams); connectingParamsRef.current = connectingParams;
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
+    const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
     const callbacksRef = useRef({ onViewportChange, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
     callbacksRef.current = { onViewportChange, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
 
@@ -202,7 +203,7 @@ export function LeaferCanvas({
                 ctrlKey: e.ctrlKey,
                 metaKey: e.metaKey,
             };
-            if (e.code === "Space" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+            if (e.code === "Space" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLElement && e.target.isContentEditable))) {
                 e.preventDefault();
                 isSpacePressedRef.current = true;
                 setIsSpacePressed(true);
@@ -335,6 +336,7 @@ export function LeaferCanvas({
             };
             event.currentTarget.setPointerCapture?.(event.pointerId);
             event.preventDefault();
+            document.body.style.userSelect = "none";
             return;
         }
 
@@ -347,6 +349,7 @@ export function LeaferCanvas({
                 const nextConnection = { nodeId, handleType };
                 frozenTempEdgeRef.current = null;
                 connectingParamsRef.current = nextConnection;
+                connectStartScreenRef.current = { x: event.clientX, y: event.clientY };
                 cb.onConnectStart?.(nodeId, handleType);
                 renderTempEdge(nextConnection, event.clientX, event.clientY);
                 event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -376,6 +379,8 @@ export function LeaferCanvas({
                         selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
                     };
                     cb.onNodeDragStart?.(nodeId);
+                    event.preventDefault();
+                    document.body.style.userSelect = "none";
                     event.currentTarget.setPointerCapture?.(event.pointerId);
                     return;
                 }
@@ -487,7 +492,7 @@ export function LeaferCanvas({
             cb.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
         }
 
-        if (drag.type === "select" && drag.selectRect && drag.selectRect.w > 3 && drag.selectRect.h > 3) {
+        if (drag.type === "select" && drag.selectRect && drag.selectRect.w > 5 && drag.selectRect.h > 5) {
             clearSelectionBox(leaferRef.current);
             const r = drag.selectRect;
             const hitIds = nodesRef.current.filter((n) => {
@@ -508,21 +513,31 @@ export function LeaferCanvas({
         }
 
         if (cp && !targetId) {
-            const pos = getCanvasPos(event.clientX, event.clientY);
-            frozenTempEdgeRef.current = { connection: cp, position: pos };
-            renderTempEdgeAtCanvasPoint(cp, pos);
-            cb.onConnectEnd?.(pos);
+            // 拖拽距离阈值：单击连接 handle（未拖动）不弹出创建节点菜单
+            const start = connectStartScreenRef.current;
+            const dragged = start ? Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5 : true;
+            if (dragged) {
+                const pos = getCanvasPos(event.clientX, event.clientY);
+                frozenTempEdgeRef.current = { connection: cp, position: pos };
+                renderTempEdgeAtCanvasPoint(cp, pos);
+                cb.onConnectEnd?.(pos);
+            } else {
+                clearTempEdge();
+                cb.onConnectEnd?.();
+            }
         } else {
             clearTempEdge();
             cb.onConnectEnd?.();
         }
         connectingParamsRef.current = null;
+        connectStartScreenRef.current = null;
 
         dragRef.current = {
             type: null, nodeId: "", startScreenX: 0, startScreenY: 0,
             startNodeX: 0, startNodeY: 0, startViewportX: 0, startViewportY: 0,
             selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
         };
+        document.body.style.userSelect = "";
     }, [clearTempEdge, findConnectionSnapTarget, getCanvasPos, renderTempEdgeAtCanvasPoint]);
 
     const handlePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -544,6 +559,7 @@ export function LeaferCanvas({
         connectingParamsRef.current = null;
         connectionTargetNodeIdRef.current = null;
         callbacksRef.current.onConnectionTargetChange?.(null);
+        document.body.style.userSelect = "";
     }, [clearTempEdge]);
 
     const handleContextMenu = useCallback((event: React.MouseEvent) => {
@@ -590,7 +606,7 @@ export function LeaferCanvas({
         <div
             ref={containerRef}
             className="relative h-full w-full select-none overflow-hidden"
-            style={{ ...backgroundStyle, cursor }}
+            style={{ ...backgroundStyle, cursor, touchAction: "none" }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

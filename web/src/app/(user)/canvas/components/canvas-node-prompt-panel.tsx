@@ -84,7 +84,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
-            onWheel={(event) => event.stopPropagation()}
+            onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
             <div className="relative">
                 <CanvasResourceMentionTextarea

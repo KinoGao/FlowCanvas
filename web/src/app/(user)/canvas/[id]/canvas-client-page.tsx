@@ -20,6 +20,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
@@ -28,6 +29,7 @@ import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
 import type { CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
 import type { CanvasImageMaskEditPayload } from "../components/canvas-node-mask-edit-dialog";
@@ -436,6 +438,8 @@ function ReactFlowCanvasPage() {
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const projectSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const restoredProjectKeyRef = useRef("");
+    const restoreGenerationRef = useRef(0);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
@@ -449,8 +453,13 @@ function ReactFlowCanvasPage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
-    const hydrated = useCanvasStore((state) => state.hydrated);
-    const canvasSessionExpired = useCanvasSingleOpenLock(projectId, hydrated);
+    const userHydrated = useUserStore((state) => state.hydrated);
+    const user = useUserStore((state) => state.user);
+    const token = useUserStore((state) => state.token);
+    const saveMode = useUserStore((state) => state.saveMode);
+    const workspaceStatus = useUserStore((state) => state.workspaceStatus);
+    const backendWorkspaceReady = saveMode !== "backend" || (userHydrated && Boolean(user && token) && workspaceStatus === "ready");
+    const canvasSessionExpired = useCanvasSingleOpenLock(projectId, backendWorkspaceReady);
     const createProject = useCanvasStore((state) => state.createProject);
     const openProject = useCanvasStore((state) => state.openProject);
     const updateProject = useCanvasStore((state) => state.updateProject);
@@ -469,7 +478,12 @@ function ReactFlowCanvasPage() {
             if (event.ctrlKey || event.metaKey) event.preventDefault();
         };
         shell.addEventListener("wheel", preventBrowserWheelZoom, { capture: true, passive: false });
-        return () => shell.removeEventListener("wheel", preventBrowserWheelZoom, { capture: true });
+        // window 层兜底：覆盖 portal 到 document.body 的 antd 弹层（Popover/Modal）
+        window.addEventListener("wheel", preventBrowserWheelZoom, { capture: true, passive: false });
+        return () => {
+            shell.removeEventListener("wheel", preventBrowserWheelZoom, { capture: true });
+            window.removeEventListener("wheel", preventBrowserWheelZoom, { capture: true });
+        };
     }, []);
 
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
@@ -617,7 +631,13 @@ function ReactFlowCanvasPage() {
     }, []);
 
     useEffect(() => {
-        if (!hydrated || canvasSessionExpired) return;
+        if (!backendWorkspaceReady || canvasSessionExpired) return;
+        const restoreKey = `${saveMode}:${user?.id || "anonymous"}:${projectId}`;
+        if (restoredProjectKeyRef.current === restoreKey) return;
+
+        const restoreGeneration = restoreGenerationRef.current + 1;
+        restoreGenerationRef.current = restoreGeneration;
+        let cancelled = false;
         setProjectLoaded(false);
         const project = openProject(projectId);
         if (!project) {
@@ -634,6 +654,8 @@ function ReactFlowCanvasPage() {
             const sourceNodes = currentGenerationNodeIds.size ? project.nodes : resetInterruptedGeneration(project.nodes);
             const restoredNodes = await hydrateCanvasImages(sourceNodes).then((items) => (currentGenerationNodeIds.size ? mergeActiveGenerationNodes(items, nodesRef.current, currentGenerationNodeIds) : items));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
+            if (cancelled || restoreGenerationRef.current !== restoreGeneration) return;
+
             setNodes(restoredNodes);
             setConnections(project.connections);
             setChatSessions(restoredSessions);
@@ -654,11 +676,16 @@ function ReactFlowCanvasPage() {
                 backgroundMode: project.backgroundMode,
                 showImageInfo: project.showImageInfo || false,
             };
+            restoredProjectKeyRef.current = restoreKey;
             setHistoryState({ canUndo: false, canRedo: false });
             setProjectLoaded(true);
         };
         void restore();
-    }, [canvasSessionExpired, hydrated, navigate, openProject, projectId]);
+        return () => {
+            cancelled = true;
+            if (restoreGenerationRef.current === restoreGeneration) restoreGenerationRef.current += 1;
+        };
+    }, [backendWorkspaceReady, canvasSessionExpired, navigate, openProject, projectId, saveMode, user?.id]);
 
     useEffect(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
@@ -1812,6 +1839,12 @@ function ReactFlowCanvasPage() {
             if (isModifierShortcut && !event.altKey && event.key === "0") {
                 event.preventDefault();
                 resetViewport();
+                return;
+            }
+
+            // 拦截浏览器原生快捷键，避免触发保存网页/打印对话框
+            if (isModifierShortcut && !event.altKey && (key === "s" || key === "p")) {
+                event.preventDefault();
                 return;
             }
 
@@ -3705,6 +3738,7 @@ function ReactFlowCanvasPage() {
         : null;
 
 
+    if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
     if (canvasSessionExpired) return <CanvasExpiredShell onBack={() => navigate("/canvas")} />;
     if (!projectLoaded) return <CanvasRefreshShell />;
 

@@ -50,6 +50,11 @@ type AgnesTask = {
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = { signal?: AbortSignal; generationMode?: VideoGenerationMode };
 
+/** 视频创建任务请求超时（毫秒） */
+const VIDEO_CREATE_TIMEOUT_MS = 60_000;
+/** 视频轮询单次请求超时（毫秒） */
+const VIDEO_POLL_TIMEOUT_MS = 30_000;
+
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
@@ -156,7 +161,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
     if (result.blob) return uploadMediaFile(result.blob, "video");
-    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+    if (result.url) return uploadMediaFile(await downloadVideoBlob(result.url), "video");
     throw new Error("视频接口没有返回可播放的视频");
 }
 
@@ -171,7 +176,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const files = await Promise.all(references.slice(0, 7).map(imageToFile));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -181,9 +186,9 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
 
 async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS });
             await assertVideoBlob(content.data);
             return { status: "completed", result: { blob: content.data } };
         }
@@ -232,7 +237,7 @@ async function createSeedanceTask(
     if (capability?.draft) payload.draft = draft;
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -247,7 +252,7 @@ async function createSeedanceTask(
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data);
         if (state.status === "succeeded") {
             const url = state.content?.video_url;
             if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
@@ -451,7 +456,7 @@ async function sendAgnesCreateRequest(config: AiConfig, model: string, prompt: s
     if (urls.length === 1) body.image = urls[0];
     else if (urls.length > 1) body.extra_body = { image: urls, mode: "keyframes" };
 
-    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data;
+    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data;
     if (created.error?.message) throw new Error(created.error.message);
     const taskId = created.video_id || created.task_id || created.id;
     if (!taskId) throw new Error("Agnes 视频接口没有返回任务 ID");
@@ -503,10 +508,10 @@ function isAgnesImageUrlError(error: unknown): boolean {
 
 async function pollAgnesVideoTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const taskResp = (await axios.get<AgnesTask>(agnesVideoPollUrl(config, task), { headers: aiHeaders(config), signal: options?.signal })).data;
+        const taskResp = (await axios.get<AgnesTask>(agnesVideoPollUrl(config, task), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data;
         if (taskResp.error?.message) return { status: "failed", error: taskResp.error.message };
         if (taskResp.status === "completed") {
-            const videoUrl = taskResp.remixed_from_video_id || taskResp.video_url || taskResp.url;
+            const videoUrl = [taskResp.video_url, taskResp.url, taskResp.remixed_from_video_id].find(isHttpUrl);
             if (!videoUrl) return { status: "failed", error: "Agnes 任务完成但没有返回视频 URL" };
             return { status: "completed", result: await videoResultFromUrl(rewriteThroughProxy(videoUrl, config.useProxy), options) };
         }
@@ -579,14 +584,40 @@ async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
 }
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
-    try {
-        const response = await axios.get<Blob>(url, { responseType: "blob", signal: options?.signal });
-        await assertVideoBlob(response.data);
-        return { blob: response.data };
-    } catch (error) {
-        if (axios.isCancel(error) || options?.signal?.aborted) throw error;
-        return { url, mimeType: "video/mp4" };
+    return { blob: await downloadVideoBlob(url, options) };
+}
+
+async function downloadVideoBlob(url: string, options?: RequestOptions) {
+    const directTarget = unwrapProxyTarget(url);
+    const candidates = Array.from(new Set([
+        url,
+        isHttpUrl(directTarget) ? apiUrl(`/api/ai-proxy?target=${encodeURIComponent(directTarget)}`) : "",
+    ].filter(Boolean)));
+    let lastError: unknown;
+    for (const candidate of candidates) {
+        try {
+            const response = await axios.get<Blob>(candidate, { responseType: "blob", signal: options?.signal, timeout: 60_000 });
+            await assertVideoBlob(response.data);
+            return response.data;
+        } catch (error) {
+            if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+            lastError = error;
+        }
     }
+    throw new Error(readAxiosError(lastError, "视频已生成，但下载或保存失败"));
+}
+
+function unwrapProxyTarget(url: string) {
+    try {
+        const parsed = new URL(url, window.location.origin);
+        return parsed.pathname.endsWith("/api/ai-proxy") ? parsed.searchParams.get("target") || url : url;
+    } catch {
+        return url;
+    }
+}
+
+function isHttpUrl(value: unknown): value is string {
+    return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
 
 function assertVideoConfig(config: AiConfig, model: string) {
@@ -648,7 +679,9 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { message?: string }; message?: string; msg?: string; code?: number }>(error)) {
+        if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
+        if (typeof responseData === "string" && responseData.trim()) return responseData.trim();
         return responseData?.msg || responseData?.message || responseData?.error?.message || statusMessage(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
@@ -662,8 +695,12 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
+    if (!blob.size) throw new Error("视频下载结果为空");
     const type = blob.type.toLowerCase();
-    if (!type.includes("json") && !type.startsWith("text/") && !type.includes("xml") && !type.includes("html")) return;
+    if (!type || type.startsWith("video/") || type.includes("octet-stream")) return;
+    if (!type.includes("json") && !type.startsWith("text/") && !type.includes("xml") && !type.includes("html")) {
+        throw new Error(`视频下载地址返回了不支持的文件类型：${type}`);
+    }
     let payload: { code?: number; msg?: string; error?: { message?: string } };
     try {
         payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };

@@ -11,6 +11,11 @@ import { imageToDataUrl, imageToFile } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
+/** 图像生成请求超时（毫秒），高分辨率生成可能需要较长时间 */
+const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
+/** 流式聊天请求超时（毫秒） */
+const STREAMING_CHAT_TIMEOUT_MS = 120_000;
+
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
     content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
@@ -293,6 +298,7 @@ function looksLikeImageSource(value: string) {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+        if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
         return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
     }
@@ -553,11 +559,13 @@ function mergeChatDeltaToolCall(toolCalls: ResponseToolCall[], delta: ChatDeltaT
 }
 
 async function requestStreamingChatCompletion(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
+    const timeoutSignal = AbortSignal.timeout(STREAMING_CHAT_TIMEOUT_MS);
+    const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
     const response = await fetch(aiApiUrl(config, "/chat/completions"), {
         method: "POST",
         headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
         body: JSON.stringify({ ...body, stream: true }),
-        signal: options?.signal,
+        signal,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
     if (!response.body) {
@@ -647,11 +655,13 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
 }
 
 async function requestGeminiStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
+    const timeoutSignal = AbortSignal.timeout(STREAMING_CHAT_TIMEOUT_MS);
+    const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
     const response = await fetch(`${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, {
         method: "POST",
         headers: geminiHeaders(config),
         body: JSON.stringify(body),
-        signal: options?.signal,
+        signal,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
     if (!response.body) {
@@ -739,7 +749,7 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
             ...toGeminiBody(config, [{ role: "user", content: prompt }], { generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }),
             contents: [{ role: "user", parts }],
         },
-        { headers: geminiHeaders(config), signal: options?.signal },
+        { headers: geminiHeaders(config), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
     );
     return parseGeminiImagePayload(response.data, config.useProxy);
 }
@@ -793,6 +803,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             {
                 headers: aiHeaders(requestConfig, "application/json"),
                 signal: options?.signal,
+                timeout: IMAGE_GENERATION_TIMEOUT_MS,
             },
         );
         const images = parseImagePayload(response.data, requestConfig.useProxy);
@@ -847,7 +858,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
         const images = parseImagePayload(response.data, requestConfig.useProxy);
         return images;
     } catch (error) {
@@ -867,7 +878,7 @@ async function requestAgnesImages(config: AiConfig, prompt: string, references: 
         };
         if (images.length) body.image = images.length === 1 ? images[0] : images;
         if (responseFormat === "b64_json" || config.imageResponseFormat === "url") body.response_format = responseFormat;
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
         return parseImagePayload(response.data, config.useProxy);
     } catch (error) {
         throw new Error(readAgnesImageError(error, size));
@@ -926,7 +937,7 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
             },
-            { headers: aiHeaders(config, "application/json"), signal: options?.signal },
+            { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
         );
         return parseImagePayload(response.data, config.useProxy);
     } catch (error) {
@@ -987,7 +998,7 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "useProxy">) {
     try {
         if (config.apiFormat === "gemini") {
-            const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
+            const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }), timeout: 15_000 });
             validateGeminiPayload(response.data);
             return (response.data.models || [])
                 .map((model) => model.name?.replace(/^models\//, ""))
@@ -998,6 +1009,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
             headers: {
                 Authorization: `Bearer ${config.apiKey}`,
             },
+            timeout: 15_000,
         });
         return (response.data.data || [])
             .map((model) => model.id)

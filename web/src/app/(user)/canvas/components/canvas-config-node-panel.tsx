@@ -35,7 +35,8 @@ const COMFY_AUTO_EXPAND_BASE = 250;
 const COMFY_AUTO_EXPAND_PER_FIELD = 88;
 const COMFY_AUTO_EXPAND_MAX = 800;
 
-const stopCanvasSelectInteraction = (event: { stopPropagation: () => void }) => {
+const stopCanvasSelectInteraction = (event: { stopPropagation: () => void; ctrlKey?: boolean; metaKey?: boolean }) => {
+    if (event.ctrlKey || event.metaKey) return; // Ctrl+滚轮放行给画布缩放
     event.stopPropagation();
 };
 

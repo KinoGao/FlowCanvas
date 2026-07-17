@@ -6,6 +6,9 @@ import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/
 
 type RequestOptions = { signal?: AbortSignal };
 
+/** 音频生成请求超时（毫秒） */
+const AUDIO_GENERATION_TIMEOUT_MS = 120_000;
+
 function aiApiUrl(config: AiConfig, path: string) {
     return buildApiUrl(config.baseUrl, path, config.useProxy);
 }
@@ -35,7 +38,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal },
+            { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal, timeout: AUDIO_GENERATION_TIMEOUT_MS },
         );
         await assertAudioBlob(response.data);
         return response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) });
@@ -71,6 +74,7 @@ async function assertAudioBlob(blob: Blob) {
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+        if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
         return responseData?.msg || responseData?.error?.message || statusMessage(error.response?.status, fallback);
     }

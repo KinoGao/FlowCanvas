@@ -540,6 +540,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     ref={panelRef}
                     className={cn("absolute left-1/2 top-full z-[70] max-h-[68vh] -translate-x-1/2 overflow-x-hidden overflow-y-auto pt-4 thin-scrollbar", panelWidthClass)}
                     onWheel={(event) => {
+                        if (event.ctrlKey || event.metaKey) return; // Ctrl+滚轮放行给画布缩放
                         const el = event.currentTarget;
                         if (el.scrollHeight <= el.clientHeight) return; // no overflow → let canvas scroll
                         const atTop = el.scrollTop === 0;
@@ -793,7 +794,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
-                    onWheel={(event) => event.stopPropagation()}
+                    onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 />
             ) : isEmpty && node.metadata?.canvasTool === "script" ? (
                 <TryActionList
@@ -823,7 +824,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                         event.stopPropagation();
                         onStartEditing?.();
                     }}
-                    onWheel={(event) => event.stopPropagation()}
+                    onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 >
                     {node.metadata?.content}
                 </div>
@@ -1085,8 +1086,27 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
 
 function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    const [failedSrc, setFailedSrc] = useState("");
+    const keepControlsInteractive = (event: React.PointerEvent<HTMLVideoElement> | React.MouseEvent<HTMLVideoElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (event.clientY >= rect.bottom - Math.min(48, rect.height * 0.3)) event.stopPropagation();
+    };
     if (!src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="空视频节点" theme={theme} />;
-    return <video src={src} controls preload="none" className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
+    return (
+        <video
+            src={src}
+            controls
+            preload="metadata"
+            draggable={false}
+            onDragStart={(event) => event.preventDefault()}
+            onPointerDown={keepControlsInteractive}
+            onClick={keepControlsInteractive}
+            onDoubleClick={keepControlsInteractive}
+            onError={() => setFailedSrc(src)}
+            className="h-full w-full rounded-[18px] bg-black object-contain"
+        />
+    );
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {

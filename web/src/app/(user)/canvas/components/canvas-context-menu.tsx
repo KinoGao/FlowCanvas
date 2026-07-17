@@ -37,8 +37,15 @@ export function CanvasNodeContextMenu({
             if (target instanceof Element && target.closest(".ant-popover")) return;
             onClose();
         };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
         window.addEventListener("pointerdown", close);
-        return () => window.removeEventListener("pointerdown", close);
+        window.addEventListener("keydown", closeOnEscape);
+        return () => {
+            window.removeEventListener("pointerdown", close);
+            window.removeEventListener("keydown", closeOnEscape);
+        };
     }, [onClose]);
 
     return (

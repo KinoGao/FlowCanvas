@@ -48,7 +48,7 @@ export function CanvasSizePicker({ value, className, onChange }: CanvasSizePicke
                 options={options}
                 popupMatchSelectWidth={false}
                 popupRender={(menu) => (
-                    <div onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onWheelCapture={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+                    <div onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }} onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}>
                         {menu}
                     </div>
                 )}
