@@ -7,11 +7,13 @@ import com.infinitecanvas.backend.service.UserFileService;
 import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Duration;
 import java.util.Map;
 
 @RestController
@@ -42,6 +44,9 @@ public class UserFileController {
         UserFile file = fileService.find(user, storageKey);
         Resource resource = file == null ? null : fileService.load(user, storageKey);
         if (file == null || resource == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType(file.getContentType())).body(resource);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePrivate().immutable())
+                .contentType(MediaType.parseMediaType(file.getContentType()))
+                .body(resource);
     }
 }

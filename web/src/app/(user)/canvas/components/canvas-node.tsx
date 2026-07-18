@@ -411,6 +411,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     );
 
     const shouldUseOverview = isOverview && !showPanel && !isEditingContent;
+    const shouldKeepMediaMounted = hasImageContent || hasVideoContent || hasAudioContent;
     const panelWidthClass =
         data.metadata?.canvasTool === "director"
             ? "w-[920px] max-w-[calc(100vw-48px)]"
@@ -487,7 +488,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         } as React.CSSProperties
                     }
                 >
-                    {shouldUseOverview ? (
+                    {shouldUseOverview && !shouldKeepMediaMounted ? (
                         <MediaAwareOverviewNodeContent node={data} theme={theme} />
                     ) : (
                         <NodeContent

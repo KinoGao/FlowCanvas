@@ -164,6 +164,13 @@ function defaultGenerationMode(type?: CanvasNodeType): CanvasNodeGenerationMode 
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
 
+function hasRetainableMedia(node: CanvasNodeData) {
+    return (
+        (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) &&
+        Boolean(node.metadata?.storageKey || node.metadata?.content)
+    );
+}
+
 function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
     const groups = nodes.filter((node) => node.type === CanvasNodeType.Group);
     if (!groups.length) return nodes;
@@ -556,6 +563,8 @@ function ReactFlowCanvasPage() {
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const multiNodeDragStartRef = useRef<{ anchorId: string; anchorPosition: Position; nodePositions: Map<string, Position> } | null>(null);
+    const retainedMediaNodeIdsRef = useRef(new Set<string>());
+    const [retainedMediaVersion, setRetainedMediaVersion] = useState(0);
 
     const setSelectedNodeIds = useCallback((nextValue: Set<string> | ((current: Set<string>) => Set<string>)) => {
         const next = typeof nextValue === "function" ? nextValue(selectedNodeIdsRef.current) : nextValue;
@@ -1062,6 +1071,33 @@ function ReactFlowCanvasPage() {
         return querySpatialIndex(nodeSpatialIndex, viewRect).map((entry) => entry.item);
     }, [isNodeDragging, nodeSpatialIndex, size.height, size.width, viewport]);
 
+    useEffect(() => {
+        const retainedIds = retainedMediaNodeIdsRef.current;
+        let changed = false;
+
+        visibleNodes.forEach((node) => {
+            if (!hasRetainableMedia(node) || retainedIds.has(node.id)) return;
+            retainedIds.add(node.id);
+            changed = true;
+        });
+
+        if (changed) setRetainedMediaVersion((version) => version + 1);
+    }, [visibleNodes]);
+
+    useEffect(() => {
+        const retainedIds = retainedMediaNodeIdsRef.current;
+        const existingIds = new Set(nodes.map((node) => node.id));
+        let changed = false;
+
+        retainedIds.forEach((id) => {
+            if (existingIds.has(id)) return;
+            retainedIds.delete(id);
+            changed = true;
+        });
+
+        if (changed) setRetainedMediaVersion((version) => version + 1);
+    }, [nodes]);
+
     // 实际渲染的节点列表：视口内可见节点 + 必须保持挂载的特殊节点（正在编辑/有对话框/有工具栏等）
     const renderedNodes = useMemo(() => {
         const visibleIds = new Set(visibleNodes.map((n) => n.id));
@@ -1072,12 +1108,14 @@ function ReactFlowCanvasPage() {
         }
         // 选中节点也需保持挂载（可能被拖拽出视口）
         selectedNodeIdsRef.current.forEach((id) => mustRenderIds.add(id));
+        // 已经进入过视口的媒体节点保持 DOM 挂载，避免平移回来时重新创建媒体元素和重复读取元数据
+        retainedMediaNodeIdsRef.current.forEach((id) => mustRenderIds.add(id));
         // 合并：视口内 + 必须挂载的，保持 Group 优先排序
         const extra = mustRenderIds.size
             ? visibleNodeItems.filter((n) => !visibleIds.has(n.id) && mustRenderIds.has(n.id))
             : [];
         return extra.length ? [...visibleNodes, ...extra] : visibleNodes;
-    }, [visibleNodes, visibleNodeItems, editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId]);
+    }, [visibleNodes, visibleNodeItems, editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId, retainedMediaVersion]);
 
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
