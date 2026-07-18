@@ -19,6 +19,7 @@ type LeaferCanvasProps = {
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
     onViewportChange: (viewport: ViewportTransform) => void;
+    onViewportPresentation?: (viewport: ViewportTransform) => void;
     onNodePointerDown?: (nodeId: string, modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean;
     onNodeDragStart?: (nodeId: string) => void;
     onNodeDrag?: (nodeId: string, position: { x: number; y: number }) => void;
@@ -57,6 +58,7 @@ export function LeaferCanvas({
     selectedNodeIds,
     selectedConnectionId,
     onViewportChange,
+    onViewportPresentation,
     onNodePointerDown,
     onNodeDragStart,
     onNodeDrag,
@@ -82,7 +84,9 @@ export function LeaferCanvas({
     const viewportRef = useRef(viewport);
     const committedViewportRef = useRef(viewport);
     const leaferContainerRef = useRef<HTMLDivElement>(null);
+    const viewportElementRef = useRef<HTMLDivElement>(null);
     const leaferRef = useRef<LUI.Leafer | null>(null);
+    const wheelCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const selectionModifiersRef = useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
 
@@ -92,8 +96,8 @@ export function LeaferCanvas({
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
-    const callbacksRef = useRef({ onViewportChange, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
-    callbacksRef.current = { onViewportChange, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
+    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
+    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
 
     // Drag state
     const dragRef = useRef<{
@@ -118,6 +122,48 @@ export function LeaferCanvas({
     const frozenTempEdgeRef = useRef<NonNullable<LeaferCanvasProps["pendingConnection"]>>(null);
     const previousPendingConnectionRef = useRef(pendingConnection ?? null);
 
+    const applyViewportPresentation = useCallback((next: ViewportTransform) => {
+        viewportRef.current = next;
+        scaleRef.current = next.k;
+
+        const viewportElement = viewportElementRef.current;
+        if (viewportElement) {
+            viewportElement.style.transform = viewportToCssTransform(next);
+            viewportElement.style.setProperty("--canvas-overview-inverse-scale", String(1 / Math.max(0.05, next.k)));
+        }
+        callbacksRef.current.onViewportPresentation?.(next);
+
+        const root = containerRef.current;
+        if (!root) return;
+        root.style.backgroundColor = theme.canvas.background;
+        if (backgroundMode === "blank") {
+            root.style.backgroundImage = "none";
+            root.style.backgroundSize = "";
+            root.style.backgroundPosition = "";
+            return;
+        }
+
+        const gap = Math.max(8, 56 * next.k);
+        root.style.backgroundSize = `${gap}px ${gap}px`;
+        root.style.backgroundPosition = `${next.x % gap}px ${next.y % gap}px`;
+        root.style.backgroundImage = backgroundMode === "dots"
+            ? `radial-gradient(circle, ${theme.canvas.dot} 1px, transparent 1.5px)`
+            : `linear-gradient(${theme.canvas.line} 1px, transparent 1px), linear-gradient(90deg, ${theme.canvas.line} 1px, transparent 1px)`;
+    }, [backgroundMode, containerRef, theme]);
+
+    const commitViewportChange = useCallback(() => {
+        wheelCommitTimerRef.current = null;
+        const next = viewportRef.current;
+        if (sameViewport(committedViewportRef.current, next)) return;
+        committedViewportRef.current = next;
+        callbacksRef.current.onViewportChange(next);
+    }, []);
+
+    const scheduleViewportCommit = useCallback(() => {
+        if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);
+        wheelCommitTimerRef.current = setTimeout(commitViewportChange, 100);
+    }, [commitViewportChange]);
+
     // Init LeaferJS
     useEffect(() => {
         const container = leaferContainerRef.current;
@@ -129,7 +175,6 @@ export function LeaferCanvas({
         const app = new LUI.Leafer({ view: container, start: true });
         app.config = { ...app.config, hittable: false };
         leaferRef.current = app;
-        drawBackground(app, backgroundMode, theme);
 
         return () => {
             app.destroy();
@@ -156,10 +201,9 @@ export function LeaferCanvas({
             const vp = viewportRef.current;
             if (!e.ctrlKey && !e.metaKey) {
                 const next = clampViewport({ x: vp.x - e.deltaX, y: vp.y - e.deltaY, k: vp.k }, rect.width, rect.height);
-                if (sameViewport(committedViewportRef.current, next)) return;
-                viewportRef.current = next;
-                committedViewportRef.current = next;
-                callbacksRef.current.onViewportChange(next);
+                if (sameViewport(vp, next)) return;
+                applyViewportPresentation(next);
+                scheduleViewportCommit();
                 return;
             }
             const mouseX = e.clientX - rect.left;
@@ -168,32 +212,24 @@ export function LeaferCanvas({
             const newK = Math.max(0.05, Math.min(5, vp.k * zoomFactor));
             const newX = mouseX - (mouseX - vp.x) * (newK / vp.k);
             const newY = mouseY - (mouseY - vp.y) * (newK / vp.k);
-            const next = { x: newX, y: newY, k: newK };
-            viewportRef.current = next;
-            scaleRef.current = next.k;
-            const clamped = clampViewport(next, rect.width, rect.height);
-            if (sameViewport(committedViewportRef.current, clamped)) return;
-            committedViewportRef.current = clamped;
-            callbacksRef.current.onViewportChange(clamped);
+            const next = clampViewport({ x: newX, y: newY, k: newK }, rect.width, rect.height);
+            if (sameViewport(vp, next)) return;
+            applyViewportPresentation(next);
+            scheduleViewportCommit();
         };
         el.addEventListener("wheel", onWheel, { passive: false });
         return () => el.removeEventListener("wheel", onWheel);
-    }, [containerRef]);
-
-    // Background redraw
-    useEffect(() => {
-        const app = leaferRef.current;
-        if (!app) return;
-        app.clear();
-        drawBackground(app, backgroundMode, theme);
-    }, [backgroundMode, theme]);
+    }, [applyViewportPresentation, containerRef, scheduleViewportCommit]);
 
     // Viewport sync
     useEffect(() => {
         committedViewportRef.current = viewport;
-        viewportRef.current = viewport;
-        scaleRef.current = viewport.k;
-    }, [viewport]);
+        applyViewportPresentation(viewport);
+    }, [applyViewportPresentation, viewport]);
+
+    useEffect(() => () => {
+        if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);
+    }, []);
 
     // Keyboard
     useEffect(() => {
@@ -443,14 +479,9 @@ export function LeaferCanvas({
                     y: drag.startViewportY + (event.clientY - drag.startScreenY),
                     k: vp.k,
                 };
-                viewportRef.current = next;
-                scaleRef.current = next.k;
                 const rect = containerRef.current?.getBoundingClientRect();
                 const clamped = rect ? clampViewport(next, rect.width, rect.height) : next;
-                if (!sameViewport(committedViewportRef.current, clamped)) {
-                    committedViewportRef.current = clamped;
-                    cb.onViewportChange(clamped);
-                }
+                if (!sameViewport(viewportRef.current, clamped)) applyViewportPresentation(clamped);
                 return;
             }
             if (drag.type === "select") {
@@ -479,7 +510,7 @@ export function LeaferCanvas({
                 }
             }
         }
-    }, [findConnectionSnapTarget, getCanvasPos, containerRef, renderTempEdgeAtCanvasPoint]);
+    }, [applyViewportPresentation, findConnectionSnapTarget, getCanvasPos, containerRef, renderTempEdgeAtCanvasPoint]);
 
     const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const drag = dragRef.current;
@@ -491,6 +522,7 @@ export function LeaferCanvas({
             const dy = (event.clientY - drag.startScreenY) / vp.k;
             cb.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
         }
+        if (drag.type === "pan") commitViewportChange();
 
         if (drag.type === "select" && drag.selectRect && drag.selectRect.w > 5 && drag.selectRect.h > 5) {
             clearSelectionBox(leaferRef.current);
@@ -538,7 +570,7 @@ export function LeaferCanvas({
             selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
         };
         document.body.style.userSelect = "";
-    }, [clearTempEdge, findConnectionSnapTarget, getCanvasPos, renderTempEdgeAtCanvasPoint]);
+    }, [clearTempEdge, commitViewportChange, findConnectionSnapTarget, getCanvasPos, renderTempEdgeAtCanvasPoint]);
 
     const handlePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const drag = dragRef.current;
@@ -548,6 +580,7 @@ export function LeaferCanvas({
             const dy = (event.clientY - drag.startScreenY) / vp.k;
             callbacksRef.current.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
         }
+        if (drag.type === "pan") commitViewportChange();
         if (drag.type === "select") clearSelectionBox(leaferRef.current);
         dragRef.current = {
             type: null, nodeId: "", startScreenX: 0, startScreenY: 0,
@@ -560,7 +593,7 @@ export function LeaferCanvas({
         connectionTargetNodeIdRef.current = null;
         callbacksRef.current.onConnectionTargetChange?.(null);
         document.body.style.userSelect = "";
-    }, [clearTempEdge]);
+    }, [clearTempEdge, commitViewportChange]);
 
     const handleContextMenu = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
@@ -637,7 +670,7 @@ export function LeaferCanvas({
                     style={{ opacity: 0, filter: "drop-shadow(0 0 5px rgba(103,232,249,.8))" }}
                 />
             </svg>
-            <div style={viewportStyle}>
+            <div ref={viewportElementRef} style={viewportStyle}>
                 <div ref={leaferContainerRef} className="absolute inset-0" />
                 <CanvasScaleCtx.Provider value={scaleRef}>
                     {children}
@@ -645,36 +678,6 @@ export function LeaferCanvas({
             </div>
         </div>
     );
-}
-
-function drawBackground(app: LUI.Leafer, mode: CanvasBackgroundMode, theme: (typeof canvasThemes)[keyof typeof canvasThemes]) {
-    app.clear();
-    if (mode === "blank") return;
-    const gap = 56;
-    const size = mode === "dots" ? 1.2 : 0.8;
-    const color = mode === "dots" ? theme.canvas.dot : theme.canvas.line;
-    const gridSize = 4000;
-    const half = gridSize / 2;
-    if (mode === "dots") {
-        for (let x = -half; x <= half; x += gap) {
-            for (let y = -half; y <= half; y += gap) {
-                const dot = new LUI.Rect({ x: x - size / 2, y: y - size / 2, width: size, height: size, fill: color });
-                dot.hittable = false;
-                app.add(dot);
-            }
-        }
-    } else {
-        for (let x = -half; x <= half; x += gap) {
-            const line = new LUI.Line({ points: [x, -half, x, half], stroke: color, strokeWidth: size });
-            line.hittable = false;
-            app.add(line);
-        }
-        for (let y = -half; y <= half; y += gap) {
-            const line = new LUI.Line({ points: [-half, y, half, y], stroke: color, strokeWidth: size });
-            line.hittable = false;
-            app.add(line);
-        }
-    }
 }
 
 let _selectionRect: LUI.Rect | null = null;

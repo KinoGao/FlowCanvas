@@ -430,6 +430,9 @@ function ReactFlowCanvasPage() {
     const projectId = params.id ?? "";
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasShellRef = useRef<HTMLElement>(null);
+    const composerOverlayRef = useRef<HTMLDivElement>(null);
+    const dialogNodeRef = useRef<CanvasNodeData | null>(null);
+    const composerWidthRef = useRef(0);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
@@ -3760,6 +3763,8 @@ function ReactFlowCanvasPage() {
     }, [dialogNodeId, visibleNodeItems]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
     const composerWidth = dialogNode ? Math.min(dialogNode.type === CanvasNodeType.Config ? 500 : 760, Math.max(dialogNode.type === CanvasNodeType.Config ? 420 : 520, composerShellWidth - 48)) : 0;
+    dialogNodeRef.current = dialogNode;
+    composerWidthRef.current = composerWidth;
     const composerPosition = dialogNode
         ? (() => {
               const shellRect = canvasShellRef.current?.getBoundingClientRect();
@@ -3787,7 +3792,36 @@ function ReactFlowCanvasPage() {
           })()
         : null;
 
+    const handleViewportPresentation = useCallback((next: ViewportTransform) => {
+        viewportRef.current = next;
+        const overlay = composerOverlayRef.current;
+        const node = dialogNodeRef.current;
+        if (!overlay || !node) return;
 
+        const shellRect = canvasShellRef.current?.getBoundingClientRect();
+        const containerRect = containerRef.current?.getBoundingClientRect();
+        const shellOffsetX = shellRect ? shellRect.left : containerRect?.left || 0;
+        const shellOffsetY = shellRect ? shellRect.top : containerRect?.top || 0;
+        const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
+        const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
+        const rawLeft = containerOffsetX + (node.position.x + node.width / 2) * next.k + next.x;
+        const nodeTop = containerOffsetY + node.position.y * next.k + next.y;
+        const nodeBottom = containerOffsetY + (node.position.y + node.height) * next.k + next.y;
+        const estimatedHeight = node.type === CanvasNodeType.Config ? 260 : 168;
+        const shellHeight = shellRect?.height || size.height || 900;
+        const dockSafeBottom = shellHeight - 104;
+        const rawTop = nodeBottom + estimatedHeight > dockSafeBottom && nodeTop > estimatedHeight + 24
+            ? nodeTop - estimatedHeight - 14
+            : nodeBottom;
+        const width = composerWidthRef.current;
+        const halfWidth = width / 2;
+        const minLeft = halfWidth + 24;
+        const shellWidth = shellRect?.width || size.width;
+        const maxLeft = Math.max(minLeft, shellWidth - halfWidth - 24);
+
+        overlay.style.left = `${clampNumber(rawLeft, minLeft, maxLeft) - halfWidth}px`;
+        overlay.style.top = `${rawTop}px`;
+    }, [size.height, size.width]);
     if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
     if (canvasSessionExpired) return <CanvasExpiredShell onBack={() => navigate("/canvas")} />;
     if (!projectLoaded) return <CanvasRefreshShell />;
@@ -3838,6 +3872,7 @@ function ReactFlowCanvasPage() {
                     selectedNodeIds={selectedNodeIds}
                     selectedConnectionId={selectedConnectionId}
                     onViewportChange={handleReactFlowViewportChange}
+                    onViewportPresentation={handleViewportPresentation}
                     onNodePointerDown={handleLeaferNodePointerDown}
                     onNodeDragStart={handleLeaferNodeDragStart}
                     onNodeDrag={handleLeaferNodeDrag}
@@ -3987,6 +4022,7 @@ function ReactFlowCanvasPage() {
 
                 {dialogNode && composerPosition ? (
                     <div
+                        ref={composerOverlayRef}
                         data-canvas-no-zoom
                         className="pointer-events-none absolute z-[70] pt-4"
                         style={{

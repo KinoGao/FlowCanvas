@@ -998,6 +998,7 @@ function TryActionList({ theme, actions }: { theme: (typeof canvasThemes)[keyof 
                     <button
                         key={action.label}
                         type="button"
+                        data-canvas-no-zoom
                         className="max-w-full rounded-md px-1 py-0.5 text-left text-[12px] leading-5 transition"
                         style={{ color: theme.node.text }}
                         onClick={(event) => {
