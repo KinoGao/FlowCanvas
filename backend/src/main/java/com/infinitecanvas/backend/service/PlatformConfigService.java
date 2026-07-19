@@ -33,11 +33,11 @@ public class PlatformConfigService {
     private static final Set<String> IMAGE_QUALITIES = Set.of("low", "standard", "high");
     private static final Set<String> IMAGE_RESOLUTIONS = Set.of("1k", "2k", "4k");
     private static final Set<String> IMAGE_RATIOS = Set.of("1:1", "3:4", "4:5", "1:2", "4:3", "21:9", "2:1", "3:2", "9:21", "9:16", "2:3", "16:9", "5:4");
-    private static final Set<Integer> IMAGE_COUNTS = Set.of(1, 2, 4);
     private static final Set<String> VIDEO_MODES = Set.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame", "image-reference", "multi-frame");
     private final PlatformConfigRepository repository;
     private final ObjectMapper objectMapper;
     private final ModelCapabilitiesProperties defaults;
+    private final VolcengineModelCapabilityCatalog officialCapabilityCatalog;
     private final String configuredComfyUrl;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
 
@@ -45,22 +45,36 @@ public class PlatformConfigService {
             PlatformConfigRepository repository,
             ObjectMapper objectMapper,
             ModelCapabilitiesProperties defaults,
+            VolcengineModelCapabilityCatalog officialCapabilityCatalog,
             @Value("${app.comfyui-base-url:}") String configuredComfyUrl
     ) {
         this.repository = repository;
         this.objectMapper = objectMapper;
         this.defaults = defaults;
+        this.officialCapabilityCatalog = officialCapabilityCatalog;
         this.configuredComfyUrl = configuredComfyUrl == null ? "" : configuredComfyUrl.trim();
     }
 
     public PlatformConfigDocument getAdminConfig() {
-        return repository.findById(1L).map(this::read).orElseGet(this::defaultDocument);
+        return repository.findById(1L).map(entity -> {
+            PlatformConfigDocument document = read(entity);
+            if (officialCapabilityCatalog.reconcileConfirmedModels(document)) {
+                normalizeAndValidate(document);
+                persist(entity, document);
+            }
+            return document;
+        }).orElseGet(this::defaultDocument);
     }
 
     @Transactional
     public PlatformConfigDocument save(PlatformConfigDocument document) {
         normalizeAndValidate(document);
         PlatformConfigEntity entity = repository.findById(1L).orElseGet(PlatformConfigEntity::new);
+        persist(entity, document);
+        return document;
+    }
+
+    private void persist(PlatformConfigEntity entity, PlatformConfigDocument document) {
         try {
             entity.setData(objectMapper.writeValueAsString(document));
         } catch (JsonProcessingException e) {
@@ -68,7 +82,6 @@ public class PlatformConfigService {
         }
         entity.setUpdatedAt(Instant.now());
         repository.save(entity);
-        return document;
     }
 
     public RuntimeConfigResponse runtimeConfig() {
@@ -158,7 +171,15 @@ public class PlatformConfigService {
         return configuredComfyUrl;
     }
 
+    public List<PlatformConfigDocument.Model> publishedImageModels() {
+        return publishedModels("image");
+    }
+
     public List<PlatformConfigDocument.Model> publishedVideoModels() {
+        return publishedModels("video");
+    }
+
+    private List<PlatformConfigDocument.Model> publishedModels(String category) {
         PlatformConfigDocument document = getAdminConfig();
         Set<String> runtimeProviderIds = document.getProviders().stream()
                 .filter(PlatformConfigDocument.Provider::isEnabled)
@@ -168,7 +189,7 @@ public class PlatformConfigService {
         return document.getModels().stream()
                 .filter(PlatformConfigDocument.Model::isEnabled)
                 .filter(PlatformConfigDocument.Model::isPublished)
-                .filter(item -> "video".equals(item.getCategory()))
+                .filter(item -> category.equals(item.getCategory()))
                 .filter(item -> runtimeProviderIds.contains(item.getProviderId()))
                 .toList();
     }
@@ -177,6 +198,7 @@ public class PlatformConfigService {
         try {
             PlatformConfigDocument document = objectMapper.readValue(entity.getData(), PlatformConfigDocument.class);
             migrateLegacyCapabilities(document);
+            document.getModels().forEach(officialCapabilityCatalog::applyOfficialTemplate);
             return document;
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("平台配置解析失败", e);
@@ -209,6 +231,7 @@ public class PlatformConfigService {
             capabilities.setRatios(List.copyOf(source.getRatios()));
             capabilities.setResolutions(List.copyOf(source.getResolutions()));
             capabilities.setDurations(List.copyOf(source.getDurations()));
+            capabilities.setFrameRates(List.copyOf(source.getFrameRates()));
             capabilities.setCounts(List.copyOf(source.getCounts()));
             capabilities.setGenerateAudio(source.isGenerateAudio());
             capabilities.setWatermark(source.isWatermark());
@@ -249,6 +272,7 @@ public class PlatformConfigService {
             model.setCategory(CATEGORIES.contains(model.getCategory()) ? model.getCategory() : "image");
             model.setRequestAdapter(blank(model.getRequestAdapter()) ? "openai" : model.getRequestAdapter().trim());
             model.setModelPatterns(cleanStrings(model.getModelPatterns()));
+            officialCapabilityCatalog.applyOfficialTemplate(model);
             normalizeCapabilities(model);
             return model.getId();
         }).collect(Collectors.toSet());
@@ -266,15 +290,17 @@ public class PlatformConfigService {
         PlatformConfigDocument.VideoCapabilities video = item.getVideoCapabilities();
         return new RuntimeConfigResponse.Model(
                 item.getId(), item.getDisplayName(), item.getCategory(), item.getRequestAdapter(),
-                List.copyOf(item.getModelPatterns()),
+                List.of(item.getId()),
                 text == null ? null : new RuntimeConfigResponse.TextCapabilities(List.copyOf(text.getModes())),
                 image == null ? null : new RuntimeConfigResponse.ImageCapabilities(
                         List.copyOf(image.getModes()), List.copyOf(image.getQualities()), List.copyOf(image.getResolutions()),
-                        List.copyOf(image.getRatios()), List.copyOf(image.getCounts())
+                        List.copyOf(image.getRatios()), List.copyOf(image.getCounts()), image.getMaxImages(),
+                        image.getMaxOutputs(), image.getMaxTotalImages(), image.isSequentialImageGeneration(),
+                        image.isWatermark(), image.getDocumentationUrl(), image.getOfficialTemplate()
                 ),
                 video == null ? null : new RuntimeConfigResponse.VideoCapabilities(
                         List.copyOf(video.getModes()), List.copyOf(video.getRatios()), List.copyOf(video.getResolutions()),
-                        List.copyOf(video.getDurations()), List.copyOf(video.getCounts()), video.isGenerateAudio(),
+                        List.copyOf(video.getDurations()), List.copyOf(video.getFrameRates()), List.copyOf(video.getCounts()), video.isGenerateAudio(),
                         video.isWatermark(), video.isDraft(), video.getMaxImages(), video.getMaxVideos(), video.getMaxAudios()
                 )
         );
@@ -330,7 +356,13 @@ public class PlatformConfigService {
                 capabilities.setQualities(cleanAllowedStrings(capabilities.getQualities(), IMAGE_QUALITIES));
                 capabilities.setResolutions(cleanAllowedStringsLowercase(capabilities.getResolutions(), IMAGE_RESOLUTIONS));
                 capabilities.setRatios(cleanAllowedStrings(capabilities.getRatios(), IMAGE_RATIOS));
-                capabilities.setCounts(allowedIntegers(capabilities.getCounts(), IMAGE_COUNTS));
+                capabilities.setCounts(positiveIntegers(capabilities.getCounts()));
+                capabilities.setMaxImages(Math.max(0, capabilities.getMaxImages()));
+                capabilities.setMaxOutputs(Math.max(0, capabilities.getMaxOutputs()));
+                capabilities.setMaxTotalImages(Math.max(0, capabilities.getMaxTotalImages()));
+                capabilities.setDocumentationUrl(cleanOptional(capabilities.getDocumentationUrl()));
+                capabilities.setOfficialTemplate(cleanOptional(capabilities.getOfficialTemplate()));
+                normalizeImageCapabilityLimits(capabilities);
                 if (model.isPublished() && capabilities.getModes().isEmpty()) throw new IllegalArgumentException("已发布的图像模型必须至少配置一种生成能力: " + model.getId());
                 model.setTextCapabilities(null);
                 model.setImageCapabilities(capabilities);
@@ -342,6 +374,7 @@ public class PlatformConfigService {
                 capabilities.setRatios(cleanStrings(capabilities.getRatios()));
                 capabilities.setResolutions(cleanStrings(capabilities.getResolutions()));
                 capabilities.setDurations(positiveIntegers(capabilities.getDurations()));
+                capabilities.setFrameRates(positiveIntegers(capabilities.getFrameRates()));
                 capabilities.setCounts(positiveIntegers(capabilities.getCounts()));
                 capabilities.setMaxImages(Math.max(0, capabilities.getMaxImages()));
                 capabilities.setMaxVideos(Math.max(0, capabilities.getMaxVideos()));
@@ -354,6 +387,21 @@ public class PlatformConfigService {
             }
             default -> throw new IllegalArgumentException("不支持的模型分类: " + model.getCategory());
         }
+    }
+
+    private void normalizeImageCapabilityLimits(PlatformConfigDocument.ImageCapabilities capabilities) {
+        int configuredMax = capabilities.getCounts().stream().mapToInt(Integer::intValue).max().orElse(0);
+        if (capabilities.getMaxOutputs() == 0 && configuredMax > 0) capabilities.setMaxOutputs(configuredMax);
+        if (capabilities.getMaxTotalImages() > 0) {
+            capabilities.setMaxOutputs(Math.min(capabilities.getMaxOutputs(), capabilities.getMaxTotalImages()));
+            capabilities.setMaxImages(Math.min(capabilities.getMaxImages(), Math.max(0, capabilities.getMaxTotalImages() - 1)));
+        }
+        int outputLimit = capabilities.getMaxOutputs();
+        int totalLimit = capabilities.getMaxTotalImages();
+        capabilities.setCounts(capabilities.getCounts().stream()
+                .filter(count -> outputLimit == 0 || count <= outputLimit)
+                .filter(count -> totalLimit == 0 || count <= totalLimit)
+                .toList());
     }
 
     private void validateVideoCapabilityLimits(String modelId, PlatformConfigDocument.VideoCapabilities capabilities) {
@@ -402,6 +450,10 @@ public class PlatformConfigService {
     private String required(String value, String label) {
         if (blank(value)) throw new IllegalArgumentException(label + "不能为空");
         return value.trim();
+    }
+
+    private String cleanOptional(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private List<String> cleanStrings(List<String> values) {

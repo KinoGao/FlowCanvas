@@ -120,8 +120,15 @@ public class ModelRuntimeProxyController {
         if ("image".equals(model.getCategory())) {
             String mode = path.toLowerCase(Locale.ROOT).contains("/images/edits") ? "image-edit" : multipartFileCount(payload, "image") > 0 ? "image-to-image" : "text-to-image";
             validateRequiredMode(mode, model.getImageCapabilities() == null ? null : model.getImageCapabilities().getModes(), "图像生成模式");
-            validateMultipartString(payload, "quality", model.getImageCapabilities().getQualities(), "画质");
-            validateMultipartInteger(payload, "n", model.getImageCapabilities().getCounts(), "生成数量");
+            PlatformConfigDocument.ImageCapabilities capabilities = model.getImageCapabilities();
+            validateMultipartString(payload, "quality", capabilities.getQualities(), "画质");
+            validateMultipartInteger(payload, "n", capabilities.getCounts(), "生成数量");
+            int inputCount = multipartFileCount(payload, "image");
+            int outputCount = multipartPositiveInteger(payload, "n", 1, "生成数量");
+            validateReferenceLimit(inputCount, capabilities.getMaxImages(), "参考图片");
+            validateConfiguredLimit(outputCount, capabilities.getMaxOutputs(), "生成图片");
+            validateConfiguredLimit(inputCount + outputCount, capabilities.getMaxTotalImages(), "输入与输出图片总数");
+            validateMultipartFlag(payload, "watermark", capabilities.isWatermark(), "添加水印");
         } else if ("video".equals(model.getCategory())) {
             int references = multipartFileCount(payload, "input_reference");
             String mode = references > 0 ? "image-to-video" : "text-to-video";
@@ -158,7 +165,14 @@ public class ModelRuntimeProxyController {
         validateString(json, List.of("quality"), capabilities.getQualities(), "画质");
         validateStringIgnoreCase(json, List.of("resolution", "size_quality"), capabilities.getResolutions(), "清晰度");
         validateString(json, List.of("ratio", "aspect_ratio"), capabilities.getRatios(), "画面比例");
-        validateInteger(json, List.of("n", "count"), capabilities.getCounts(), "生成数量");
+        int inputCount = countMediaInputs(json, "image");
+        int outputCount = requestedImageOutputCount(json);
+        validateAllowedInteger(outputCount, capabilities.getCounts(), "生成数量");
+        validateReferenceLimit(inputCount, capabilities.getMaxImages(), "参考图片");
+        validateConfiguredLimit(outputCount, capabilities.getMaxOutputs(), "生成图片");
+        validateConfiguredLimit(inputCount + outputCount, capabilities.getMaxTotalImages(), "输入与输出图片总数");
+        validateSequentialImageGeneration(json, capabilities.isSequentialImageGeneration());
+        validateFlag(json, List.of("watermark"), capabilities.isWatermark(), "添加水印");
     }
 
     private void validateVideo(ObjectNode json, PlatformConfigDocument.VideoCapabilities capabilities) {
@@ -169,6 +183,7 @@ public class ModelRuntimeProxyController {
         validateString(json, List.of("ratio", "aspect_ratio"), capabilities.getRatios(), "画面比例");
         validateString(json, List.of("resolution", "quality"), capabilities.getResolutions(), "分辨率");
         validateInteger(json, List.of("duration", "seconds"), capabilities.getDurations(), "时长");
+        validateInteger(json, List.of("frame_rate", "fps"), capabilities.getFrameRates(), "帧率");
         validateInteger(json, List.of("n", "count"), capabilities.getCounts(), "生成数量");
         validateFlag(json, List.of("generate_audio", "audio"), capabilities.isGenerateAudio(), "生成音频");
         validateFlag(json, List.of("watermark"), capabilities.isWatermark(), "添加水印");
@@ -299,6 +314,51 @@ public class ModelRuntimeProxyController {
             for (JsonNode item : node) if (hasKeyframes(item)) return true;
         }
         return false;
+    }
+
+    private int requestedImageOutputCount(ObjectNode json) {
+        JsonNode options = json.path("sequential_image_generation_options");
+        JsonNode sequentialCount = options.isObject() ? options.get("max_images") : null;
+        JsonNode value = sequentialCount != null ? sequentialCount : first(json, List.of("n", "count"));
+        if (value == null || value.isNull()) return 1;
+        if (!value.canConvertToInt() || value.asInt() < 1) throw new IllegalArgumentException("生成数量必须是正整数");
+        return value.asInt();
+    }
+
+    private void validateAllowedInteger(int value, List<Integer> allowed, String label) {
+        if (allowed != null && !allowed.isEmpty() && !allowed.contains(value)) {
+            throw new IllegalArgumentException(label + "不受当前模型支持: " + value);
+        }
+    }
+
+    private void validateConfiguredLimit(int count, int max, String label) {
+        if (max > 0 && count > max) throw new IllegalArgumentException(label + "数量超过当前模型上限: " + max);
+    }
+
+    private void validateSequentialImageGeneration(ObjectNode json, boolean supported) {
+        JsonNode value = json.get("sequential_image_generation");
+        if (value == null || value.isNull()) return;
+        boolean requested = value.isBoolean() ? value.asBoolean() : !Set.of("", "false", "off", "none", "disabled").contains(value.asText("").toLowerCase(Locale.ROOT));
+        if (requested && !supported) throw new IllegalArgumentException("当前模型不支持连续多图生成");
+    }
+
+    private int multipartPositiveInteger(String payload, String name, int fallback, String label) {
+        String value = multipartField(payload, name);
+        if (value == null || value.isBlank()) return fallback;
+        try {
+            int number = Integer.parseInt(value);
+            if (number < 1) throw new NumberFormatException();
+            return number;
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(label + "必须是正整数");
+        }
+    }
+
+    private void validateMultipartFlag(String payload, String name, boolean supported, String label) {
+        String value = multipartField(payload, name);
+        if (value != null && Boolean.parseBoolean(value) && !supported) {
+            throw new IllegalArgumentException("当前模型不支持" + label);
+        }
     }
 
     private void validateReferenceLimit(int count, int max, String label) {

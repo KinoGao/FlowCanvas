@@ -43,6 +43,13 @@ export function defaultImageCapabilities(): ImageCapabilities {
         resolutions: ["1k"],
         ratios: ["1:1", "16:9", "9:16"],
         counts: [1],
+        maxImages: 0,
+        maxOutputs: 1,
+        maxTotalImages: 0,
+        sequentialImageGeneration: false,
+        watermark: false,
+        documentationUrl: "",
+        officialTemplate: "",
     };
 }
 
@@ -52,6 +59,7 @@ export function defaultVideoCapabilities(): VideoCapabilities {
         ratios: ["16:9", "9:16"],
         resolutions: ["720p", "1080p"],
         durations: [5],
+        frameRates: [],
         counts: [1],
         generateAudio: false,
         watermark: false,
@@ -112,11 +120,17 @@ export function normalizeModel(model: PlatformModel): PlatformModel {
         modelPatterns: cleanStrings(normalized.modelPatterns),
         textCapabilities: normalized.textCapabilities ? { modes: cleanStrings(normalized.textCapabilities.modes) as TextCapabilities["modes"] } : null,
         imageCapabilities: normalized.imageCapabilities ? {
+            ...normalized.imageCapabilities,
             modes: cleanStrings(normalized.imageCapabilities.modes) as ImageCapabilities["modes"],
             qualities: cleanStrings(normalized.imageCapabilities.qualities) as ImageCapabilities["qualities"],
             resolutions: cleanStrings(normalized.imageCapabilities.resolutions.map((value) => value.toLowerCase())) as ImageCapabilities["resolutions"],
             ratios: cleanStrings(normalized.imageCapabilities.ratios),
             counts: cleanNumbers(normalized.imageCapabilities.counts),
+            maxImages: Math.max(0, normalized.imageCapabilities.maxImages || 0),
+            maxOutputs: Math.max(0, normalized.imageCapabilities.maxOutputs || 0),
+            maxTotalImages: Math.max(0, normalized.imageCapabilities.maxTotalImages || 0),
+            documentationUrl: normalized.imageCapabilities.documentationUrl.trim(),
+            officialTemplate: normalized.imageCapabilities.officialTemplate.trim(),
         } : null,
         videoCapabilities: normalized.videoCapabilities ? {
             ...normalized.videoCapabilities,
@@ -124,6 +138,7 @@ export function normalizeModel(model: PlatformModel): PlatformModel {
             ratios: cleanStrings(normalized.videoCapabilities.ratios),
             resolutions: cleanStrings(normalized.videoCapabilities.resolutions),
             durations: cleanNumbers(normalized.videoCapabilities.durations),
+            frameRates: cleanNumbers(normalized.videoCapabilities.frameRates || []),
             counts: cleanNumbers(normalized.videoCapabilities.counts),
             maxImages: Math.max(0, normalized.videoCapabilities.maxImages || 0),
             maxVideos: Math.max(0, normalized.videoCapabilities.maxVideos || 0),
@@ -158,7 +173,7 @@ function cloneImage(value: ImageCapabilities): ImageCapabilities {
 }
 
 function cloneVideo(value: VideoCapabilities): VideoCapabilities {
-    return { ...value, modes: [...value.modes], ratios: [...value.ratios], resolutions: [...value.resolutions], durations: [...value.durations], counts: [...value.counts] };
+    return { ...value, modes: [...value.modes], ratios: [...value.ratios], resolutions: [...value.resolutions], durations: [...value.durations], frameRates: [...(value.frameRates || [])], counts: [...value.counts] };
 }
 
 function cleanStrings(values: readonly string[]) {

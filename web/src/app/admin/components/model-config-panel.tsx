@@ -12,7 +12,6 @@ const TEXT_MODES = [{ value: "text", label: "纯文本" }, { value: "vision", la
 const IMAGE_MODES = [{ value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "图生图" }, { value: "image-edit", label: "图像编辑" }];
 const IMAGE_QUALITIES = [{ value: "low", label: "低画质" }, { value: "standard", label: "标准画质" }, { value: "high", label: "高画质" }];
 const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"].map((value) => ({ value, label: value.toUpperCase() }));
-const IMAGE_COUNTS = [1, 2, 4].map((value) => ({ value, label: value + " 张" }));
 const VIDEO_MODES = [
     { value: "text-to-video", label: "文生视频" }, { value: "all-in-one-reference", label: "全能参考" },
     { value: "image-to-video", label: "图生视频" }, { value: "first-last-frame", label: "首尾帧" },
@@ -110,7 +109,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
 
 function ProviderDrawer(props: { draft: PlatformProvider | null; onChange: (value: PlatformProvider | null) => void; onClose: () => void; onSave: () => void }) {
     const update = (patch: Partial<PlatformProvider>) => props.draft && props.onChange({ ...props.draft, ...patch });
-    return <Drawer width={560} title="模型厂商" open={Boolean(props.draft)} onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}>{props.draft ? <Form layout="vertical">
+    return <Drawer size="default" title="模型厂商" open={Boolean(props.draft)} onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}>{props.draft ? <Form layout="vertical">
         <Form.Item label="厂商 ID" required><Input value={props.draft.id} placeholder="例如 volcengine" onChange={(event) => update({ id: event.target.value })} /></Form.Item>
         <Form.Item label="厂商名称" required><Input value={props.draft.name} placeholder="例如 火山方舟" onChange={(event) => update({ name: event.target.value })} /></Form.Item>
         <Form.Item label="接口地址" required><Input value={props.draft.baseUrl} placeholder="https://ark.cn-beijing.volces.com/api/v3" onChange={(event) => update({ baseUrl: event.target.value })} /></Form.Item>
@@ -132,7 +131,7 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
     const updateImage = (patch: Partial<ImageCapabilities>) => draft.imageCapabilities && update({ imageCapabilities: { ...draft.imageCapabilities, ...patch } });
     const updateVideo = (patch: Partial<VideoCapabilities>) => draft.videoCapabilities && update({ videoCapabilities: { ...draft.videoCapabilities, ...patch } });
     const discoveredOptions = (props.discovered[draft.providerId] || []).map((value) => ({ value, label: value }));
-    return <Drawer width={760} title="模型分类与能力" open onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}><Form layout="vertical">
+    return <Drawer size="large" title="模型分类与能力" open onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}><Form layout="vertical">
         <Form.Item label="模型分类" required><Segmented block value={draft.category} options={CATEGORY_OPTIONS} onChange={(category) => props.onChange(applyModelCategory(draft, category as ModelCategory))} /></Form.Item>
         <div className="grid gap-x-4 md:grid-cols-2">
             <Form.Item label="稳定模型 ID" required><Input value={draft.id} placeholder="前端使用，例如 seedance-2-pro" onChange={(event) => update({ id: event.target.value })} /></Form.Item>
@@ -154,12 +153,17 @@ function TextCapabilityForm(props: { value: TextCapabilities; onChange: (patch: 
 }
 
 function ImageCapabilityForm(props: { value: ImageCapabilities; onChange: (patch: Partial<ImageCapabilities>) => void }) {
-    return <CapabilitySection title="图像能力" description="画质、清晰度、比例和生成数量会约束画布选项，并由后端复核请求。">
+    const hasOfficialTemplate = Boolean(props.value.officialTemplate);
+    return <CapabilitySection title="图像能力" description="画质、清晰度、比例和生成数量会约束画布选项，并由后端复核请求。命中官方模板后，保存时以后端目录为准。">
         <Field label="生成方式"><Checkbox.Group options={IMAGE_MODES} value={props.value.modes} onChange={(modes) => props.onChange({ modes: modes as ImageCapabilities["modes"] })} /></Field>
         <Field label="画质"><Checkbox.Group options={IMAGE_QUALITIES} value={props.value.qualities} onChange={(qualities) => props.onChange({ qualities: qualities as ImageCapabilities["qualities"] })} /></Field>
         <Field label="清晰度"><Checkbox.Group options={IMAGE_RESOLUTIONS} value={props.value.resolutions} onChange={(resolutions) => props.onChange({ resolutions: resolutions as ImageCapabilities["resolutions"] })} /></Field>
         <Field label="比例"><Checkbox.Group options={IMAGE_RATIOS.map((value) => ({ value, label: value }))} value={props.value.ratios} onChange={(ratios) => props.onChange({ ratios: ratios as string[] })} /></Field>
-        <Field label="生成数量"><Checkbox.Group options={IMAGE_COUNTS} value={props.value.counts} onChange={(counts) => props.onChange({ counts: counts as number[] })} /></Field>
+        <Form.Item label="生成数量"><Select mode="tags" tokenSeparators={[","]} value={props.value.counts.map(String)} onChange={(values) => props.onChange({ counts: numberTags(values) })} placeholder="例如 1, 2, 4" /></Form.Item>
+        <div className="grid gap-3 md:grid-cols-3"><Form.Item label="最多参考图片"><InputNumber min={0} className="w-full" value={props.value.maxImages} onChange={(value) => props.onChange({ maxImages: numberOr(value, 0) })} /></Form.Item><Form.Item label="最多输出图片"><InputNumber min={0} className="w-full" value={props.value.maxOutputs} onChange={(value) => props.onChange({ maxOutputs: numberOr(value, 0) })} /></Form.Item><Form.Item label="输入与输出总上限"><InputNumber min={0} className="w-full" value={props.value.maxTotalImages} onChange={(value) => props.onChange({ maxTotalImages: numberOr(value, 0) })} /></Form.Item></div>
+        <div className="grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-2"><Toggle label="支持连续多图生成" checked={props.value.sequentialImageGeneration} onChange={(sequentialImageGeneration) => props.onChange({ sequentialImageGeneration })} /><Toggle label="支持添加水印" checked={props.value.watermark} onChange={(watermark) => props.onChange({ watermark })} /></div>
+        <div className="grid gap-x-4 md:grid-cols-2"><Form.Item label="官方能力模板"><Input value={props.value.officialTemplate} readOnly placeholder="未匹配官方模板" status={hasOfficialTemplate ? undefined : "warning"} /></Form.Item><Form.Item label="官方文档"><Input value={props.value.documentationUrl} readOnly placeholder="暂无官方文档" /></Form.Item></div>
+        {hasOfficialTemplate ? <p className="m-0 text-xs leading-5 text-gray-500">该模型已匹配后端官方能力模板。保存配置时，分类、适配器、模型匹配规则和能力参数会由后端重新校准。</p> : null}
     </CapabilitySection>;
 }
 

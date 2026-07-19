@@ -256,6 +256,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                         ) : mode === "image" ? (
                             <CanvasImageSettingsPopover
                                 config={config}
+                                referenceCount={inputSummary.imageCount}
                                 placement="topRight"
                                 autoAdjustOverflow={false}
                                 buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"

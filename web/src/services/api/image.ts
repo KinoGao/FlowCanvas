@@ -7,6 +7,11 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { isSeedreamImageModel, resolveSeedreamSize, seedreamEditError, seedreamGenerationError, seedreamSupportsOutputFormat } from "@/lib/seedream-image";
 import { uploadImageToCurrentBackend } from "@/services/api/backend";
+import {
+    resolveImageModelCapabilityForRequest,
+    type ImageGenerationMode,
+    type ImageModelCapability,
+} from "@/services/api/model-capabilities";
 import { imageToDataUrl, imageToFile } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -786,8 +791,11 @@ function parseGeminiImagePayload(payload: GeminiPayload, useProxy?: boolean) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const capability = await resolveImageModelCapabilityForRequest(modelOptionName(selectedModel));
+    validateImageCapability(capability, "text-to-image", 0, n);
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImages(requestConfig, prompt, [], n, options);
@@ -810,7 +818,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
-                n,
+                ...imageOutputCountPayload(capability, n),
+                ...(capability ? { _flowcanvas_mode: "text-to-image" } : {}),
                 ...(!seedream && quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
@@ -829,15 +838,19 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
+    const capability = await resolveImageModelCapabilityForRequest(modelOptionName(selectedModel));
+    const generationMode = resolveImageEditMode(capability, Boolean(mask));
+    validateImageCapability(capability, generationMode, references.length, n);
     const seedream = isSeedreamImageModel(requestConfig.model);
     if (seedream) {
         if (mask) throw new Error("当前 Seedream/SeedEdit 接入暂不支持蒙版编辑");
         const seedreamError = seedreamEditError(requestConfig.model, references.length);
         if (seedreamError) throw new Error(seedreamError);
-        return requestSeedreamImages(requestConfig, requestPrompt, references, n, config.quality, config.size, options);
+        return requestSeedreamImages(requestConfig, requestPrompt, references, n, config.quality, config.size, generationMode, capability, options);
     }
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
@@ -937,7 +950,7 @@ function readAgnesImageError(error: unknown, size: string | undefined) {
     return message;
 }
 
-async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, quality: string, size: string, options?: RequestOptions) {
+async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, quality: string, size: string, mode: ImageGenerationMode, capability: ImageModelCapability | null, options?: RequestOptions) {
     try {
         const requestSize = resolveSeedreamSize(config.model, quality, size);
         const useB64Json = shouldUseB64JsonResponse(config, config.model);
@@ -948,7 +961,8 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),
                 image: imageUrls.length === 1 ? imageUrls[0] : imageUrls,
-                n,
+                ...imageOutputCountPayload(capability, n),
+                ...(capability ? { _flowcanvas_mode: mode } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
             },
@@ -958,6 +972,44 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
+}
+
+function resolveImageEditMode(capability: ImageModelCapability | null, hasMask: boolean): ImageGenerationMode {
+    if (hasMask) return "image-edit";
+    if (!capability || capability.modes.includes("image-to-image")) return "image-to-image";
+    return capability.modes.includes("image-edit") ? "image-edit" : "image-to-image";
+}
+
+function validateImageCapability(capability: ImageModelCapability | null, mode: ImageGenerationMode, inputCount: number, outputCount: number) {
+    if (!capability) return;
+    if (!capability.modes.includes(mode)) throw new Error(`当前模型不支持${imageModeLabel(mode)}`);
+    if (capability.counts.length && !capability.counts.includes(outputCount)) {
+        throw new Error(`当前模型仅支持生成 ${capability.counts.join(" / ")} 张图片`);
+    }
+    if (capability.maxImages > 0 && inputCount > capability.maxImages) {
+        throw new Error(`当前模型最多支持 ${capability.maxImages} 张参考图片`);
+    }
+    if (capability.maxOutputs > 0 && outputCount > capability.maxOutputs) {
+        throw new Error(`当前模型单次最多生成 ${capability.maxOutputs} 张图片`);
+    }
+    if (capability.maxTotalImages > 0 && inputCount + outputCount > capability.maxTotalImages) {
+        throw new Error(`当前模型输入与输出图片总数不能超过 ${capability.maxTotalImages} 张`);
+    }
+}
+
+function imageOutputCountPayload(capability: ImageModelCapability | null, count: number) {
+    if (!capability?.sequentialImageGeneration) return { n: count };
+    if (count <= 1) return {};
+    return {
+        sequential_image_generation: "auto",
+        sequential_image_generation_options: { max_images: count },
+    };
+}
+
+function imageModeLabel(mode: ImageGenerationMode) {
+    if (mode === "text-to-image") return "文生图";
+    if (mode === "image-to-image") return "图生图";
+    return "图像编辑";
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {

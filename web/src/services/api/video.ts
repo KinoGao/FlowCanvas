@@ -678,10 +678,10 @@ function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; message?: string; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<string | { error?: { message?: string }; message?: string; msg?: string; code?: number }>(error)) {
         if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
-        if (typeof responseData === "string" && responseData.trim()) return responseData.trim();
+        if (typeof responseData === "string") return responseData.trim() || statusMessage(error.response?.status, fallback);
         return responseData?.msg || responseData?.message || normalizeUpstreamMessage(responseData?.error?.message) || statusMessage(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";

@@ -107,7 +107,7 @@ export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilitie
         return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: true, inputVideo: false, inputAudio: false, generateAudio: true, resolutions: ["480p", "720p", "1080p"] };
     }
     if (value.includes("1-0-pro-fast")) {
-        return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p"] };
+        return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: false, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p", "1080p"] };
     }
     if (value.includes("1-0-pro")) {
         return { textToVideo: true, imageToVideoFirst: true, imageToVideoFirstLast: true, inputVideo: false, inputAudio: false, generateAudio: false, resolutions: ["480p", "720p", "1080p"] };

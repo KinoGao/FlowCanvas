@@ -3,8 +3,10 @@
 import { type ReactNode, useState } from "react";
 import { ConfigProvider, Switch } from "antd";
 
+import { useImageModelCapability } from "@/hooks/use-image-model-capability";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { isSeedreamImageModel, seedreamCapabilitiesForModel } from "@/lib/seedream-image";
+import type { ImageModelCapability } from "@/services/api/model-capabilities";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -39,15 +41,26 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     quickCount?: number;
+    referenceCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, referenceCount = 0 }: ImageSettingsPanelProps) {
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
     const model = config.model || config.imageModel;
+    const { capability: imageCapability } = useImageModelCapability(model);
     const seedream = isSeedreamImageModel(model);
     const seedreamCapabilities = seedream ? seedreamCapabilitiesForModel(model) : null;
-    const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const configuredCountLimit = imageCapability?.counts.length ? Math.max(...imageCapability.counts) : 0;
+    const totalOutputLimit = imageCapability?.maxTotalImages
+        ? Math.max(1, imageCapability.maxTotalImages - Math.max(0, referenceCount))
+        : 0;
+    const effectiveMaxCount = smallestPositive(maxCount, imageCapability?.maxOutputs || 0, configuredCountLimit, totalOutputLimit) || maxCount;
+    const allowedCounts = imageCapability?.counts.filter((value) => value <= effectiveMaxCount) || [];
+    const count = Math.max(1, Math.min(effectiveMaxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const quickCounts = allowedCounts.length
+        ? allowedCounts.slice(0, quickCount)
+        : Array.from({ length: Math.min(quickCount, effectiveMaxCount) }, (_, index) => index + 1);
     const activeSize = config.size || "auto";
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
@@ -80,7 +93,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingTitle color={theme.node.muted}>质量</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {qualityOptions.map((item) => (
-                            <OptionPill key={item.value} selected={quality === item.value} disabled={seedreamQualityDisabled(item.value, seedreamCapabilities)} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
+                            <OptionPill key={item.value} selected={quality === item.value} disabled={imageQualityDisabled(item.value, imageCapability, seedreamCapabilities)} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
@@ -108,7 +121,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
                         {aspectOptions.map((item) => {
-                            const disabled = seedreamSizeDisabled(item.value, seedreamCapabilities);
+                            const disabled = imageSizeDisabled(item.value, imageCapability, seedreamCapabilities);
                             return (
                                 <button
                                     key={item.value}
@@ -129,12 +142,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {Array.from({ length: quickCount }, (_, index) => index + 1).map((value) => (
+                        {quickCounts.map((value) => (
                             <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
-                                {value} 张
+                                {value} ?
                             </OptionPill>
                         ))}
-                        <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
+                        <CountInput value={count} max={effectiveMaxCount} theme={theme} onChange={(value) => onConfigChange("count", String(nearestAllowedCount(value || 1, allowedCounts, effectiveMaxCount)))} />
                     </div>
                 </div>
             </div>
@@ -178,19 +191,50 @@ function OptionPill({ selected, disabled, theme, onClick, children }: { selected
     );
 }
 
-function seedreamQualityDisabled(value: string, capabilities: ReturnType<typeof seedreamCapabilitiesForModel> | null) {
-    if (!capabilities || value === "auto") return false;
-    if (value === "high") return !capabilities.resolutions.includes("4K");
-    if (value === "medium") return !capabilities.resolutions.includes("2K");
-    if (value === "low") return !capabilities.resolutions.includes("1K") && !capabilities.resolutions.includes("adaptive");
+function imageQualityDisabled(
+    value: string,
+    capability: ImageModelCapability | null,
+    fallback: ReturnType<typeof seedreamCapabilitiesForModel> | null,
+) {
+    if (value === "auto") return false;
+    if (capability) {
+        const quality = value === "medium" ? "standard" : value;
+        return capability.qualities.length > 0 && !capability.qualities.includes(quality);
+    }
+    if (!fallback) return false;
+    if (value === "high") return !fallback.resolutions.includes("4K");
+    if (value === "medium") return !fallback.resolutions.includes("2K");
+    return !fallback.resolutions.includes("1K") && !fallback.resolutions.includes("adaptive");
+}
+
+function imageSizeDisabled(
+    value: string,
+    capability: ImageModelCapability | null,
+    fallback: ReturnType<typeof seedreamCapabilitiesForModel> | null,
+) {
+    if (capability) {
+        if (value === "auto") return false;
+        const match = value.toLowerCase().match(/^([^ -]+)(?:-(1k|2k|4k))?$/);
+        const ratio = match?.[1] || "";
+        const resolution = match?.[2] || "";
+        if (capability.ratios.length > 0 && ratio && !capability.ratios.includes(ratio)) return true;
+        return capability.resolutions.length > 0 && !!resolution && !capability.resolutions.map((item) => item.toLowerCase()).includes(resolution);
+    }
+    if (!fallback) return false;
+    if (value.includes("4k")) return !fallback.resolutions.includes("4K");
+    if (value.includes("2k")) return !fallback.resolutions.includes("2K");
     return false;
 }
 
-function seedreamSizeDisabled(value: string, capabilities: ReturnType<typeof seedreamCapabilitiesForModel> | null) {
-    if (!capabilities) return false;
-    if (value.includes("4k")) return !capabilities.resolutions.includes("4K");
-    if (value.includes("2k")) return !capabilities.resolutions.includes("2K");
-    return false;
+function smallestPositive(...values: number[]) {
+    const positive = values.filter((value) => Number.isFinite(value) && value > 0);
+    return positive.length ? Math.min(...positive) : 0;
+}
+
+function nearestAllowedCount(value: number, allowed: number[], max: number) {
+    const normalized = Math.max(1, Math.min(max, Math.floor(Math.abs(value) || 1)));
+    if (!allowed.length || allowed.includes(normalized)) return normalized;
+    return allowed.reduce((best, current) => Math.abs(current - normalized) < Math.abs(best - normalized) ? current : best, allowed[0]);
 }
 
 function DimensionInput({ prefix, value, disabled, theme, alignToStep, onChange }: { prefix: string; value: number; disabled: boolean; theme: CanvasTheme; alignToStep: boolean; onChange: (value: number | null) => void }) {

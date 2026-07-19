@@ -24,6 +24,13 @@ export type ImageCapabilities = {
     resolutions: Array<"1k" | "2k" | "4k">;
     ratios: string[];
     counts: number[];
+    maxImages: number;
+    maxOutputs: number;
+    maxTotalImages: number;
+    sequentialImageGeneration: boolean;
+    watermark: boolean;
+    documentationUrl: string;
+    officialTemplate: string;
 };
 
 export type VideoCapabilities = {
@@ -31,6 +38,7 @@ export type VideoCapabilities = {
     ratios: string[];
     resolutions: string[];
     durations: number[];
+    frameRates: number[];
     counts: number[];
     generateAudio: boolean;
     watermark: boolean;

@@ -24,6 +24,7 @@ public class ModelCapabilitiesProperties {
         private List<String> ratios = new ArrayList<>();
         private List<String> resolutions = new ArrayList<>();
         private List<Integer> durations = new ArrayList<>();
+        private List<Integer> frameRates = new ArrayList<>();
         private List<Integer> counts = new ArrayList<>();
         private boolean generateAudio;
         private boolean watermark;
@@ -50,6 +51,8 @@ public class ModelCapabilitiesProperties {
         public void setResolutions(List<String> resolutions) { this.resolutions = resolutions; }
         public List<Integer> getDurations() { return durations; }
         public void setDurations(List<Integer> durations) { this.durations = durations; }
+        public List<Integer> getFrameRates() { return frameRates; }
+        public void setFrameRates(List<Integer> frameRates) { this.frameRates = frameRates; }
         public List<Integer> getCounts() { return counts; }
         public void setCounts(List<Integer> counts) { this.counts = counts; }
         public boolean isGenerateAudio() { return generateAudio; }

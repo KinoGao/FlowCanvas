@@ -2,22 +2,22 @@ package com.infinitecanvas.backend.dto;
 
 import java.util.List;
 
-public record VideoModelCapabilityResponse(
+public record ImageModelCapabilityResponse(
         String id,
         String provider,
         String requestAdapter,
         List<String> modelPatterns,
         List<String> modes,
-        List<String> ratios,
+        List<String> qualities,
         List<String> resolutions,
-        List<Integer> durations,
-        List<Integer> frameRates,
+        List<String> ratios,
         List<Integer> counts,
-        boolean generateAudio,
-        boolean watermark,
-        boolean draft,
         int maxImages,
-        int maxVideos,
-        int maxAudios
+        int maxOutputs,
+        int maxTotalImages,
+        boolean sequentialImageGeneration,
+        boolean watermark,
+        String documentationUrl,
+        String officialTemplate
 ) {
 }

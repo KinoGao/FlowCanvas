@@ -20,13 +20,21 @@ public record RuntimeConfigResponse(List<Provider> providers, ComfyUi comfyui) {
             List<String> qualities,
             List<String> resolutions,
             List<String> ratios,
-            List<Integer> counts
+            List<Integer> counts,
+            int maxImages,
+            int maxOutputs,
+            int maxTotalImages,
+            boolean sequentialImageGeneration,
+            boolean watermark,
+            String documentationUrl,
+            String officialTemplate
     ) {}
     public record VideoCapabilities(
             List<String> modes,
             List<String> ratios,
             List<String> resolutions,
             List<Integer> durations,
+            List<Integer> frameRates,
             List<Integer> counts,
             boolean generateAudio,
             boolean watermark,

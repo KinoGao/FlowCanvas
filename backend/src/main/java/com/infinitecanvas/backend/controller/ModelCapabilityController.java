@@ -1,6 +1,7 @@
 package com.infinitecanvas.backend.controller;
 
 import com.infinitecanvas.backend.dto.ApiResponse;
+import com.infinitecanvas.backend.dto.ImageModelCapabilityResponse;
 import com.infinitecanvas.backend.dto.VideoModelCapabilityResponse;
 import com.infinitecanvas.backend.service.ModelCapabilityService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,6 +17,11 @@ public class ModelCapabilityController {
 
     public ModelCapabilityController(ModelCapabilityService capabilityService) {
         this.capabilityService = capabilityService;
+    }
+
+    @GetMapping("/image")
+    public ApiResponse<List<ImageModelCapabilityResponse>> imageCapabilities() {
+        return ApiResponse.ok(capabilityService.imageCapabilities());
     }
 
     @GetMapping("/video")

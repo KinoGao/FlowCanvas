@@ -118,6 +118,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             </div>
                             <CanvasImageSettingsPopover
                                 config={config}
+                                referenceCount={mentionReferences.filter((reference) => reference.active && reference.kind === "image").length}
                                 placement="topLeft"
                                 buttonClassName="!h-8 !max-w-[150px] !justify-start !rounded-[8px] !border-transparent !px-2.5"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}

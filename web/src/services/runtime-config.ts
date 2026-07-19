@@ -1,5 +1,5 @@
 import { apiUrl } from "@/constant/env";
-import { invalidateVideoModelCapabilities } from "@/services/api/model-capabilities";
+import { invalidateImageModelCapabilities, invalidateVideoModelCapabilities } from "@/services/api/model-capabilities";
 import { fetchRuntimeConfig } from "@/services/api/platform-admin";
 import { encodeChannelModel, type ModelCapability, useConfigStore } from "@/stores/use-config-store";
 
@@ -8,6 +8,7 @@ const capabilities: ModelCapability[] = ["image", "video", "text", "audio"];
 
 export async function refreshRuntimeConfig() {
     const runtime = await fetchRuntimeConfig();
+    invalidateImageModelCapabilities();
     invalidateVideoModelCapabilities();
     const channels = runtime.providers.flatMap((provider) => provider.models.map((model) => ({
         id: `${provider.id}:${model.id}`,

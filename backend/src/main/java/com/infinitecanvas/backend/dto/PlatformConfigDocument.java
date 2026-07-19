@@ -135,6 +135,13 @@ public class PlatformConfigDocument {
         private List<String> resolutions = new ArrayList<>();
         private List<String> ratios = new ArrayList<>();
         private List<Integer> counts = new ArrayList<>();
+        private int maxImages;
+        private int maxOutputs;
+        private int maxTotalImages;
+        private boolean sequentialImageGeneration;
+        private boolean watermark;
+        private String documentationUrl = "";
+        private String officialTemplate = "";
 
         public List<String> getModes() { return modes; }
         public void setModes(List<String> modes) { this.modes = modes == null ? new ArrayList<>() : modes; }
@@ -146,6 +153,20 @@ public class PlatformConfigDocument {
         public void setRatios(List<String> ratios) { this.ratios = ratios == null ? new ArrayList<>() : ratios; }
         public List<Integer> getCounts() { return counts; }
         public void setCounts(List<Integer> counts) { this.counts = counts == null ? new ArrayList<>() : counts; }
+        public int getMaxImages() { return maxImages; }
+        public void setMaxImages(int maxImages) { this.maxImages = maxImages; }
+        public int getMaxOutputs() { return maxOutputs; }
+        public void setMaxOutputs(int maxOutputs) { this.maxOutputs = maxOutputs; }
+        public int getMaxTotalImages() { return maxTotalImages; }
+        public void setMaxTotalImages(int maxTotalImages) { this.maxTotalImages = maxTotalImages; }
+        public boolean isSequentialImageGeneration() { return sequentialImageGeneration; }
+        public void setSequentialImageGeneration(boolean sequentialImageGeneration) { this.sequentialImageGeneration = sequentialImageGeneration; }
+        public boolean isWatermark() { return watermark; }
+        public void setWatermark(boolean watermark) { this.watermark = watermark; }
+        public String getDocumentationUrl() { return documentationUrl; }
+        public void setDocumentationUrl(String documentationUrl) { this.documentationUrl = documentationUrl; }
+        public String getOfficialTemplate() { return officialTemplate; }
+        public void setOfficialTemplate(String officialTemplate) { this.officialTemplate = officialTemplate; }
     }
 
     public static class VideoCapabilities {
@@ -153,6 +174,7 @@ public class PlatformConfigDocument {
         private List<String> ratios = new ArrayList<>();
         private List<String> resolutions = new ArrayList<>();
         private List<Integer> durations = new ArrayList<>();
+        private List<Integer> frameRates = new ArrayList<>();
         private List<Integer> counts = new ArrayList<>();
         private boolean generateAudio;
         private boolean watermark;
@@ -169,6 +191,8 @@ public class PlatformConfigDocument {
         public void setResolutions(List<String> resolutions) { this.resolutions = resolutions == null ? new ArrayList<>() : resolutions; }
         public List<Integer> getDurations() { return durations; }
         public void setDurations(List<Integer> durations) { this.durations = durations == null ? new ArrayList<>() : durations; }
+        public List<Integer> getFrameRates() { return frameRates; }
+        public void setFrameRates(List<Integer> frameRates) { this.frameRates = frameRates == null ? new ArrayList<>() : frameRates; }
         public List<Integer> getCounts() { return counts; }
         public void setCounts(List<Integer> counts) { this.counts = counts == null ? new ArrayList<>() : counts; }
         public boolean isGenerateAudio() { return generateAudio; }
