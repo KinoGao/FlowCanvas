@@ -155,7 +155,11 @@ function TextCapabilityForm(props: { value: TextCapabilities; onChange: (patch: 
 function ImageCapabilityForm(props: { value: ImageCapabilities; onChange: (patch: Partial<ImageCapabilities>) => void }) {
     const hasOfficialTemplate = Boolean(props.value.officialTemplate);
     return <CapabilitySection title="图像能力" description="画质、清晰度、比例和生成数量会约束画布选项，并由后端复核请求。命中官方模板后，保存时以后端目录为准。">
-        <Field label="生成方式"><Checkbox.Group options={IMAGE_MODES} value={props.value.modes} onChange={(modes) => props.onChange({ modes: modes as ImageCapabilities["modes"] })} /></Field>
+        <Field label="生成方式"><Checkbox.Group options={IMAGE_MODES} value={props.value.modes} onChange={(modes) => {
+            const selected = modes as ImageCapabilities["modes"];
+            const minimumImages = selected.includes("image-to-image") || selected.includes("image-edit") ? 1 : 0;
+            props.onChange({ modes: selected, maxImages: Math.max(props.value.maxImages, minimumImages) });
+        }} /></Field>
         <Field label="画质"><Checkbox.Group options={IMAGE_QUALITIES} value={props.value.qualities} onChange={(qualities) => props.onChange({ qualities: qualities as ImageCapabilities["qualities"] })} /></Field>
         <Field label="清晰度"><Checkbox.Group options={IMAGE_RESOLUTIONS} value={props.value.resolutions} onChange={(resolutions) => props.onChange({ resolutions: resolutions as ImageCapabilities["resolutions"] })} /></Field>
         <Field label="比例"><Checkbox.Group options={IMAGE_RATIOS.map((value) => ({ value, label: value }))} value={props.value.ratios} onChange={(ratios) => props.onChange({ ratios: ratios as string[] })} /></Field>
@@ -171,7 +175,7 @@ function VideoCapabilityForm(props: { value: VideoCapabilities; onChange: (patch
     return <CapabilitySection title="视频能力" description="参考方式和输入数量决定画布菜单是否可用；有声开关只在模型明确支持时开放。">
         <Field label="生成方式"><Checkbox.Group options={VIDEO_MODES} value={props.value.modes} onChange={(modes) => {
             const selected = modes as VideoCapabilities["modes"];
-            const minimumImages = selected.includes("first-last-frame") || selected.includes("multi-frame") ? 2 : selected.includes("image-to-video") || selected.includes("image-reference") ? 1 : 0;
+            const minimumImages = selected.includes("multi-frame") ? 3 : selected.includes("first-last-frame") ? 2 : selected.includes("image-to-video") || selected.includes("image-reference") ? 1 : 0;
             props.onChange({ modes: selected, maxImages: Math.max(props.value.maxImages, minimumImages) });
         }} /></Field>
         <div className="grid gap-x-4 md:grid-cols-2"><Form.Item label="画面比例"><Select mode="tags" tokenSeparators={[","]} value={props.value.ratios} onChange={(ratios) => props.onChange({ ratios })} /></Form.Item><Form.Item label="分辨率"><Select mode="tags" tokenSeparators={[","]} value={props.value.resolutions} onChange={(resolutions) => props.onChange({ resolutions })} /></Form.Item><Form.Item label="时长（秒）"><Select mode="tags" tokenSeparators={[","]} value={props.value.durations.map(String)} onChange={(values) => props.onChange({ durations: numberTags(values) })} /></Form.Item><Form.Item label="生成数量"><Select mode="tags" tokenSeparators={[","]} value={props.value.counts.map(String)} onChange={(values) => props.onChange({ counts: numberTags(values) })} /></Form.Item></div>

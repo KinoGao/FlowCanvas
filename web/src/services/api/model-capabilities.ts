@@ -1,7 +1,8 @@
 import { apiUrl } from '@/constant/env';
+import { queryClient } from '@/lib/query-client';
 
 export type ImageGenerationMode = 'text-to-image' | 'image-to-image' | 'image-edit';
-export type VideoGenerationMode = 'text-to-video' | 'all-in-one-reference' | 'image-to-video' | 'first-last-frame' | 'image-reference';
+export type VideoGenerationMode = 'text-to-video' | 'all-in-one-reference' | 'image-to-video' | 'first-last-frame' | 'image-reference' | 'multi-frame';
 
 export type ImageModelCapability = {
     id: string;
@@ -43,43 +44,23 @@ export type VideoModelCapability = {
 
 type ApiResponse<T> = { code: number; data: T; msg?: string };
 
-let cachedImageCapabilities: ImageModelCapability[] | null = null;
-let loadingImageCapabilities: Promise<ImageModelCapability[]> | null = null;
-let cachedVideoCapabilities: VideoModelCapability[] | null = null;
-let loadingVideoCapabilities: Promise<VideoModelCapability[]> | null = null;
+export const IMAGE_MODEL_CAPABILITIES_QUERY_KEY = ['image-model-capabilities'] as const;
+export const VIDEO_MODEL_CAPABILITIES_QUERY_KEY = ['video-model-capabilities'] as const;
 
 export function invalidateImageModelCapabilities() {
-    cachedImageCapabilities = null;
-    loadingImageCapabilities = null;
+    void queryClient.invalidateQueries({ queryKey: IMAGE_MODEL_CAPABILITIES_QUERY_KEY });
 }
 
 export function invalidateVideoModelCapabilities() {
-    cachedVideoCapabilities = null;
-    loadingVideoCapabilities = null;
+    void queryClient.invalidateQueries({ queryKey: VIDEO_MODEL_CAPABILITIES_QUERY_KEY });
 }
 
 export async function fetchImageModelCapabilities() {
-    if (cachedImageCapabilities) return cachedImageCapabilities;
-    if (loadingImageCapabilities) return loadingImageCapabilities;
-    loadingImageCapabilities = fetchCapabilities<ImageModelCapability>('/api/model-capabilities/image', '图片').then((capabilities) => {
-        cachedImageCapabilities = capabilities;
-        return capabilities;
-    }).finally(() => {
-        loadingImageCapabilities = null;
-    });
-    return loadingImageCapabilities;
+    return fetchCapabilities<ImageModelCapability>('/api/model-capabilities/image', '图片');
 }
 
 export async function fetchVideoModelCapabilities() {
-    if (cachedVideoCapabilities) return cachedVideoCapabilities;
-    if (loadingVideoCapabilities) return loadingVideoCapabilities;
-    loadingVideoCapabilities = fetchCapabilities<VideoModelCapability>('/api/model-capabilities/video', '视频').then((capabilities) => {
-        cachedVideoCapabilities = capabilities;
-        return capabilities;
-    }).finally(() => {
-        loadingVideoCapabilities = null;
-    });
-    return loadingVideoCapabilities;
+    return fetchCapabilities<VideoModelCapability>('/api/model-capabilities/video', '视频');
 }
 
 export function resolveImageModelCapability(capabilities: ImageModelCapability[] | undefined, model: string) {
@@ -91,19 +72,21 @@ export function resolveVideoModelCapability(capabilities: VideoModelCapability[]
 }
 
 export async function resolveImageModelCapabilityForRequest(model: string) {
-    try {
-        return resolveImageModelCapability(await fetchImageModelCapabilities(), model);
-    } catch {
-        return null;
-    }
+    const capabilities = await queryClient.fetchQuery({
+        queryKey: IMAGE_MODEL_CAPABILITIES_QUERY_KEY,
+        queryFn: fetchImageModelCapabilities,
+        staleTime: 5 * 60_000,
+    });
+    return resolveImageModelCapability(capabilities, model);
 }
 
 export async function resolveVideoModelCapabilityForRequest(model: string) {
-    try {
-        return resolveVideoModelCapability(await fetchVideoModelCapabilities(), model);
-    } catch {
-        return null;
-    }
+    const capabilities = await queryClient.fetchQuery({
+        queryKey: VIDEO_MODEL_CAPABILITIES_QUERY_KEY,
+        queryFn: fetchVideoModelCapabilities,
+        staleTime: 5 * 60_000,
+    });
+    return resolveVideoModelCapability(capabilities, model);
 }
 
 async function fetchCapabilities<T>(endpoint: string, label: string) {

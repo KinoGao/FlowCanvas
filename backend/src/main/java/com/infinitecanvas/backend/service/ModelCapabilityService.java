@@ -19,7 +19,7 @@ public class ModelCapabilityService {
         return platformConfigService.publishedImageModels().stream().map(item -> {
             PlatformConfigDocument.ImageCapabilities capabilities = item.getImageCapabilities();
             return new ImageModelCapabilityResponse(
-                    item.getId(), item.getProviderId(), item.getRequestAdapter(), modelPatterns(item),
+                    item.getId(), item.getProviderId(), item.getRequestAdapter(), platformConfigService.runtimeModelPatterns(item),
                     List.copyOf(capabilities.getModes()), List.copyOf(capabilities.getQualities()),
                     List.copyOf(capabilities.getResolutions()), List.copyOf(capabilities.getRatios()),
                     List.copyOf(capabilities.getCounts()), capabilities.getMaxImages(), capabilities.getMaxOutputs(),
@@ -34,7 +34,7 @@ public class ModelCapabilityService {
             PlatformConfigDocument.VideoCapabilities capabilities = item.getVideoCapabilities();
             return new VideoModelCapabilityResponse(
                     item.getId(), item.getProviderId(), item.getRequestAdapter(),
-                    modelPatterns(item),
+                    platformConfigService.runtimeModelPatterns(item),
                     List.copyOf(capabilities.getModes()), List.copyOf(capabilities.getRatios()),
                     List.copyOf(capabilities.getResolutions()), List.copyOf(capabilities.getDurations()),
                     List.copyOf(capabilities.getFrameRates()), List.copyOf(capabilities.getCounts()),
@@ -44,7 +44,4 @@ public class ModelCapabilityService {
         }).toList();
     }
 
-    private List<String> modelPatterns(PlatformConfigDocument.Model item) {
-        return List.of(item.getId());
-    }
 }

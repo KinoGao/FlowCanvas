@@ -36,6 +36,7 @@ public class AuthFilter implements Filter {
                 || path.equals("/api/auth/login")
                 || path.equals("/api/auth/admin-login")
                 || path.equals("/api/auth/register")
+                || ("GET".equalsIgnoreCase(method) && path.startsWith("/api/user/files/"))
                 || path.startsWith("/api/public-image/");
     }
 
@@ -53,17 +54,6 @@ public class AuthFilter implements Filter {
 
         String token = bearerToken(req);
 
-
-        if (token != null) {
-            var user = authService.authenticate(token);
-            if (user.isPresent()) {
-                req.setAttribute(UserRequestContext.USER_ATTR, user.get());
-                chain.doFilter(request, response);
-                return;
-            }
-        }
-
-        if (token == null) token = req.getParameter("token");
         if (token != null) {
             var user = authService.authenticate(token);
             if (user.isPresent()) {

@@ -23,10 +23,11 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     onSubmit?: () => void;
     containerClassName?: string;
     highlightLabels?: boolean;
+    "data-canvas-no-zoom"?: boolean | "true" | "false";
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
-    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props },
+    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, "data-canvas-no-zoom": canvasNoZoom, ...props },
     forwardedRef,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -109,6 +110,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
 
     return (
         <div
+            data-canvas-no-zoom={canvasNoZoom}
             className={`nodrag nopan relative h-full w-full ${containerClassName || ""}`}
             onPointerDownCapture={stopCanvasInteraction}
             onMouseDownCapture={stopCanvasInteraction}
@@ -249,6 +251,7 @@ function MentionMenu({
     return createPortal(
         <div
             data-canvas-resource-mention-menu="true"
+            data-canvas-no-zoom
             className="fixed z-[120] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl backdrop-blur-md"
             style={{ left, top, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={stopCanvasInteraction}

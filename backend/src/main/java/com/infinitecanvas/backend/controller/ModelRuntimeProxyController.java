@@ -94,7 +94,7 @@ public class ModelRuntimeProxyController {
         }
     }
 
-    private byte[] validateAndRewriteJson(byte[] body, String path, PlatformConfigDocument.Model model, boolean gemini) {
+    byte[] validateAndRewriteJson(byte[] body, String path, PlatformConfigDocument.Model model, boolean gemini) {
         try {
             JsonNode parsed = objectMapper.readTree(body);
             if (!(parsed instanceof ObjectNode json)) throw new IllegalArgumentException("请求体必须是 JSON 对象");
@@ -115,7 +115,7 @@ public class ModelRuntimeProxyController {
         }
     }
 
-    private byte[] validateAndRewriteMultipart(byte[] body, String path, PlatformConfigDocument.Model model) {
+    byte[] validateAndRewriteMultipart(byte[] body, String path, PlatformConfigDocument.Model model) {
         String payload = new String(body, StandardCharsets.ISO_8859_1);
         if ("image".equals(model.getCategory())) {
             String mode = path.toLowerCase(Locale.ROOT).contains("/images/edits") ? "image-edit" : multipartFileCount(payload, "image") > 0 ? "image-to-image" : "text-to-image";
@@ -130,12 +130,23 @@ public class ModelRuntimeProxyController {
             validateConfiguredLimit(inputCount + outputCount, capabilities.getMaxTotalImages(), "输入与输出图片总数");
             validateMultipartFlag(payload, "watermark", capabilities.isWatermark(), "添加水印");
         } else if ("video".equals(model.getCategory())) {
+            PlatformConfigDocument.VideoCapabilities capabilities = model.getVideoCapabilities();
+            if (capabilities == null) throw new IllegalArgumentException("视频模型尚未配置能力");
             int references = multipartFileCount(payload, "input_reference");
-            String mode = references > 0 ? "image-to-video" : "text-to-video";
-            validateRequiredMode(mode, model.getVideoCapabilities() == null ? null : model.getVideoCapabilities().getModes(), "视频生成模式");
-            validateMultipartInteger(payload, "seconds", model.getVideoCapabilities().getDurations(), "时长");
-            validateMultipartString(payload, "resolution_name", model.getVideoCapabilities().getResolutions(), "分辨率");
-            validateReferenceLimit(references, model.getVideoCapabilities().getMaxImages(), "参考图片");
+            String mode = multipartField(payload, "_flowcanvas_mode");
+            if (mode == null || mode.isBlank()) {
+                mode = references > 2 ? "multi-frame"
+                        : references == 2 ? "first-last-frame"
+                        : references == 1 ? "image-to-video"
+                        : "text-to-video";
+            } else {
+                mode = mode.trim();
+            }
+            validateRequiredMode(mode, capabilities.getModes(), "视频生成模式");
+            validateMultipartInteger(payload, "seconds", capabilities.getDurations(), "时长");
+            validateMultipartString(payload, "resolution_name", capabilities.getResolutions(), "分辨率");
+            validateReferenceLimit(references, capabilities.getMaxImages(), "参考图片");
+            payload = removeMultipartField(payload, "_flowcanvas_mode");
         } else if (!"text".equals(model.getCategory())) {
             throw new IllegalArgumentException("不支持的模型分类: " + model.getCategory());
         }
@@ -414,6 +425,28 @@ public class ModelRuntimeProxyController {
         Matcher matcher = pattern.matcher(payload);
         if (!matcher.find()) throw new IllegalArgumentException("multipart 请求缺少 " + name + " 字段");
         return matcher.replaceFirst(Matcher.quoteReplacement(matcher.group(1) + value));
+    }
+
+    private String removeMultipartField(String payload, String name) {
+        int firstLineEnd = payload.indexOf("\r\n");
+        if (firstLineEnd <= 0 || !payload.startsWith("--")) return payload;
+        String boundary = payload.substring(0, firstLineEnd);
+        int partStart = 0;
+        while (partStart >= 0 && partStart < payload.length()) {
+            int headerStart = partStart + boundary.length() + 2;
+            if (headerStart >= payload.length() || payload.startsWith("--", partStart + boundary.length())) break;
+            int headerEnd = payload.indexOf("\r\n\r\n", headerStart);
+            if (headerEnd < 0) break;
+            String headers = payload.substring(headerStart, headerEnd);
+            int nextBoundaryPrefix = payload.indexOf("\r\n" + boundary, headerEnd + 4);
+            if (nextBoundaryPrefix < 0) break;
+            Pattern disposition = Pattern.compile("(?s).*Content-Disposition:[^\r\n]*name=\"" + Pattern.quote(name) + "\"[^\r\n]*.*");
+            if (disposition.matcher(headers).matches()) {
+                return payload.substring(0, partStart) + payload.substring(nextBoundaryPrefix + 2);
+            }
+            partStart = nextBoundaryPrefix + 2;
+        }
+        return payload;
     }
 
     private void validateMultipartString(String payload, String name, List<String> allowed, String label) {

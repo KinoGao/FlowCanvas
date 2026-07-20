@@ -302,9 +302,12 @@ function looksLikeImageSource(value: string) {
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number } | string>(error)) {
         if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") return "请求超时，请检查网络或稍后重试";
         const responseData = error.response?.data;
+        if (typeof responseData === "string") {
+            return normalizeUpstreamMessage(responseData) || responseData.trim() || readStatusError(error.response?.status, fallback);
+        }
         return responseData?.msg || normalizeUpstreamMessage(responseData?.error?.message) || readStatusError(error.response?.status, fallback);
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
@@ -986,7 +989,7 @@ function validateImageCapability(capability: ImageModelCapability | null, mode: 
     if (capability.counts.length && !capability.counts.includes(outputCount)) {
         throw new Error(`当前模型仅支持生成 ${capability.counts.join(" / ")} 张图片`);
     }
-    if (capability.maxImages > 0 && inputCount > capability.maxImages) {
+    if (inputCount > capability.maxImages) {
         throw new Error(`当前模型最多支持 ${capability.maxImages} 张参考图片`);
     }
     if (capability.maxOutputs > 0 && outputCount > capability.maxOutputs) {

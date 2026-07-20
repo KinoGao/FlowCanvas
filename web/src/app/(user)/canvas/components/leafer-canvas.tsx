@@ -21,6 +21,7 @@ type LeaferCanvasProps = {
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportPresentation?: (viewport: ViewportTransform) => void;
     onNodePointerDown?: (nodeId: string, modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean;
+    onNodeTap?: (nodeId: string) => void;
     onNodeDragStart?: (nodeId: string) => void;
     onNodeDrag?: (nodeId: string, position: { x: number; y: number }) => void;
     onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
@@ -60,6 +61,7 @@ export function LeaferCanvas({
     onViewportChange,
     onViewportPresentation,
     onNodePointerDown,
+    onNodeTap,
     onNodeDragStart,
     onNodeDrag,
     onNodeDragStop,
@@ -96,8 +98,8 @@ export function LeaferCanvas({
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
-    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
-    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
+    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
+    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
 
     // Drag state
     const dragRef = useRef<{
@@ -129,7 +131,6 @@ export function LeaferCanvas({
         const viewportElement = viewportElementRef.current;
         if (viewportElement) {
             viewportElement.style.transform = viewportToCssTransform(next);
-            viewportElement.style.setProperty("--canvas-overview-inverse-scale", String(1 / Math.max(0.05, next.k)));
         }
         callbacksRef.current.onViewportPresentation?.(next);
 
@@ -199,16 +200,15 @@ export function LeaferCanvas({
             e.preventDefault();
             const rect = el.getBoundingClientRect();
             const vp = viewportRef.current;
-            if (!e.ctrlKey && !e.metaKey) {
-                const next = clampViewport({ x: vp.x - e.deltaX, y: vp.y - e.deltaY, k: vp.k }, rect.width, rect.height);
-                if (sameViewport(vp, next)) return;
-                applyViewportPresentation(next);
-                scheduleViewportCommit();
-                return;
-            }
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-            const zoomFactor = Math.exp(-Math.max(-80, Math.min(80, e.deltaY)) * 0.0025);
+            const deltaScale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+                ? 16
+                : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+                    ? Math.max(rect.height, 1)
+                    : 1;
+            const wheelDelta = Math.max(-120, Math.min(120, e.deltaY * deltaScale));
+            const zoomFactor = Math.exp(-wheelDelta * 0.0025);
             const newK = Math.max(0.05, Math.min(5, vp.k * zoomFactor));
             const newX = mouseX - (mouseX - vp.x) * (newK / vp.k);
             const newY = mouseY - (mouseY - vp.y) * (newK / vp.k);
@@ -455,7 +455,6 @@ export function LeaferCanvas({
     const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const drag = dragRef.current;
         const cb = callbacksRef.current;
-
         if (drag.type === "node") {
             const vp = viewportRef.current;
             const dx = (event.clientX - drag.startScreenX) / vp.k;
@@ -518,9 +517,11 @@ export function LeaferCanvas({
         const vp = viewportRef.current;
 
         if (drag.type === "node") {
+            const moved = Math.hypot(event.clientX - drag.startScreenX, event.clientY - drag.startScreenY);
             const dx = (event.clientX - drag.startScreenX) / vp.k;
             const dy = (event.clientY - drag.startScreenY) / vp.k;
             cb.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
+            if (moved <= 5) cb.onNodeTap?.(drag.nodeId);
         }
         if (drag.type === "pan") commitViewportChange();
 
@@ -610,7 +611,6 @@ export function LeaferCanvas({
         height: 1,
         overflow: "visible",
         willChange: "transform",
-        "--canvas-overview-inverse-scale": String(1 / Math.max(0.05, viewport.k)),
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
     const backgroundStyle = useMemo<React.CSSProperties>(() => {

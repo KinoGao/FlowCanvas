@@ -30,9 +30,7 @@ type CanvasNodeHoverToolbarProps = {
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
     onSplit: (node: CanvasNodeData) => void;
-    onUpscale: (node: CanvasNodeData) => void;
-    onSuperResolve: (node: CanvasNodeData) => void;
-    onAngle: (node: CanvasNodeData) => void;
+    onUpscale: (node: CanvasNodeData) => void;    onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
@@ -68,9 +66,7 @@ export function CanvasNodeHoverToolbar({
     onMaskEdit,
     onCrop,
     onSplit,
-    onUpscale,
-    onSuperResolve,
-    onAngle,
+    onUpscale,    onAngle,
     onViewImage,
     onReversePrompt,
     onRetry,
@@ -129,7 +125,7 @@ export function CanvasNodeHoverToolbar({
         }
         copyText(prompt, "提示词已复制");
     };
-    const imageTools = buildImageToolbarTools(currentNode, { onUpload, onMarkPanorama360, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
+    const imageTools = buildImageToolbarTools(currentNode, { onUpload, onMarkPanorama360, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
 
     function openImageToolSettings() {
         onKeep(currentNode.id);

@@ -96,16 +96,19 @@ function VideoSettingsPortal({
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
-    const width = 356;
     const gap = 8;
     const margin = 12;
+    const width = Math.max(280, Math.min(620, window.innerWidth - margin * 2));
     const alignRight = placement?.endsWith("Right");
     const alignCenter = placement === "top" || placement === "bottom";
     const left = alignCenter ? buttonRect.left + buttonRect.width / 2 - width / 2 : alignRight ? buttonRect.right - width : buttonRect.left;
     const prefersTop = placement?.startsWith("top");
     const availableAbove = buttonRect.top - gap - margin;
     const availableBelow = window.innerHeight - buttonRect.bottom - gap - margin;
-    const topPlacement = prefersTop ? availableAbove >= 360 || availableAbove >= availableBelow : availableBelow < 360 && availableAbove > availableBelow;
+    const comfortableHeight = 340;
+    const topPlacement = prefersTop
+        ? availableAbove >= comfortableHeight || availableAbove >= availableBelow
+        : availableBelow < comfortableHeight && availableAbove > availableBelow;
     const availableHeight = topPlacement ? availableAbove : availableBelow;
     const style = {
         position: "fixed",
@@ -113,18 +116,18 @@ function VideoSettingsPortal({
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap } : { top: buttonRect.bottom + gap }),
-        maxHeight: Math.max(180, Math.min(560, availableHeight)),
+        maxHeight: Math.max(160, Math.min(520, availableHeight)),
         background: theme.toolbar.panel,
-        borderRadius: 18,
+        borderRadius: 14,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
-        padding: 18,
+        padding: 14,
         overflowY: "auto",
         color: theme.node.text,
     } as const;
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover [&::-webkit-scrollbar]:hidden" style={{ ...style, scrollbarWidth: "none" }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" variant="composer" />
+            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-3" variant="composer" />
         </div>,
         document.body,
     );

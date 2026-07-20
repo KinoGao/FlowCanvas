@@ -24,6 +24,8 @@ app:
   auth-code: ${AUTH_CODE:gycode}
   registration-code: ${REGISTRATION_CODE:${AUTH_CODE:gycode}}
   admin-code: ${ADMIN_CODE:admincode}
+  media-signing-secret: ${MEDIA_SIGNING_SECRET:${ADMIN_CODE:admincode}}
+  media-url-ttl-seconds: ${MEDIA_URL_TTL_SECONDS:43200}
   public-base-url: ${PUBLIC_BASE_URL:}
   comfyui-base-url: ${COMFYUI_BASE_URL:}
   public-image-dir: ${PUBLIC_IMAGE_DIR:./data/public-images}

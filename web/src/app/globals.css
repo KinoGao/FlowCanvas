@@ -542,12 +542,28 @@
     }
 
     .creative-os-dock-button:hover {
-        transform: translateY(-2px) scale(1.04);
+        transform: translateX(-2px) scale(1.04);
     }
 
     .creative-os-panel {
         border-radius: 8px !important;
-        transform-origin: bottom center;
+        transform-origin: right center;
+    }
+
+    .canvas-toolbar-popover {
+        bottom: auto;
+        left: auto !important;
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
+        right: 72px;
+        transform: none;
+    }
+
+    .canvas-toolbar-tip {
+        bottom: auto;
+        left: auto !important;
+        right: 72px;
+        transform: translateY(-50%);
     }
 
     .creative-os-menu-item {
@@ -686,8 +702,30 @@
             display: none;
         }
 
+        .creative-os-dock-button:hover {
+            transform: translateY(-2px) scale(1.04);
+        }
+
         .creative-os-panel {
             max-width: calc(100vw - 24px);
+            transform-origin: bottom center;
+        }
+
+        .canvas-toolbar-popover {
+            bottom: 72px;
+            left: 50% !important;
+            max-height: calc(100vh - 96px);
+            right: auto;
+            top: auto !important;
+            transform: translateX(-50%);
+        }
+
+        .canvas-toolbar-tip {
+            bottom: 72px;
+            left: 50% !important;
+            right: auto;
+            top: auto !important;
+            transform: translateX(-50%);
         }
     }
 
@@ -743,6 +781,20 @@
     .canvas-flow-edge-hover {
         animation-duration: 700ms;
         animation-iteration-count: 2;
+    }
+
+    .canvas-connection-line {
+        transition: stroke 140ms ease, stroke-width 140ms ease, opacity 140ms ease;
+    }
+
+    .canvas-connection-flow {
+        opacity: 1;
+    }
+
+    .canvas-connection-group.is-hovered .canvas-connection-line {
+        stroke: #e0e4e8;
+        stroke-width: 3;
+        opacity: 1;
     }
 
     @keyframes canvas-flow-edge {

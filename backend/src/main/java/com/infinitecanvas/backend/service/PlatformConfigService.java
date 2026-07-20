@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -290,7 +291,7 @@ public class PlatformConfigService {
         PlatformConfigDocument.VideoCapabilities video = item.getVideoCapabilities();
         return new RuntimeConfigResponse.Model(
                 item.getId(), item.getDisplayName(), item.getCategory(), item.getRequestAdapter(),
-                List.of(item.getId()),
+                runtimeModelPatterns(item),
                 text == null ? null : new RuntimeConfigResponse.TextCapabilities(List.copyOf(text.getModes())),
                 image == null ? null : new RuntimeConfigResponse.ImageCapabilities(
                         List.copyOf(image.getModes()), List.copyOf(image.getQualities()), List.copyOf(image.getResolutions()),
@@ -304,6 +305,39 @@ public class PlatformConfigService {
                         video.isWatermark(), video.isDraft(), video.getMaxImages(), video.getMaxVideos(), video.getMaxAudios()
                 )
         );
+    }
+
+    List<String> runtimeModelPatterns(PlatformConfigDocument.Model item) {
+        LinkedHashSet<String> patterns = new LinkedHashSet<>();
+        addRuntimePattern(patterns, item.getId());
+        addRuntimePattern(patterns, item.getRequestModel());
+        item.getModelPatterns().forEach(value -> addRuntimePattern(patterns, value));
+        legacyRuntimeModelAliases(item.getRequestModel()).forEach(value -> addRuntimePattern(patterns, value));
+        return List.copyOf(patterns);
+    }
+
+    private List<String> legacyRuntimeModelAliases(String requestModel) {
+        String model = cleanOptional(requestModel).toLowerCase();
+        if (model.startsWith("doubao-seedance-1-0-lite-t2v")) {
+            return List.of("seedance-lite-t2v", "seedance-1.0-lite-t2v", "seedance-1-0-lite-t2v");
+        }
+        if (model.startsWith("doubao-seedance-1-0-lite-i2v")) {
+            return List.of("seedance-lite-i2v", "seedance-1.0-lite-i2v", "seedance-1-0-lite-i2v");
+        }
+        if (model.startsWith("doubao-seedance-1-0-pro-fast")) {
+            return List.of("seedance-1-pro-fast", "seedance-1.0-pro-fast", "seedance-1-0-pro-fast");
+        }
+        if (model.startsWith("doubao-seedance-1-0-pro")) {
+            return List.of("seedance-1-pro", "seedance-1.0-pro", "seedance-1-0-pro");
+        }
+        if (model.startsWith("doubao-seedance-1-5-pro")) {
+            return List.of("seedance-1.5-pro", "seedance-1-5-pro");
+        }
+        return List.of();
+    }
+
+    private void addRuntimePattern(LinkedHashSet<String> patterns, String value) {
+        if (value != null && !value.isBlank()) patterns.add(value.trim());
     }
 
     private void migrateLegacyCapabilities(PlatformConfigDocument document) {
@@ -363,6 +397,7 @@ public class PlatformConfigService {
                 capabilities.setDocumentationUrl(cleanOptional(capabilities.getDocumentationUrl()));
                 capabilities.setOfficialTemplate(cleanOptional(capabilities.getOfficialTemplate()));
                 normalizeImageCapabilityLimits(capabilities);
+                validateImageCapabilityLimits(model.getId(), capabilities);
                 if (model.isPublished() && capabilities.getModes().isEmpty()) throw new IllegalArgumentException("已发布的图像模型必须至少配置一种生成能力: " + model.getId());
                 model.setTextCapabilities(null);
                 model.setImageCapabilities(capabilities);
@@ -402,6 +437,13 @@ public class PlatformConfigService {
                 .filter(count -> outputLimit == 0 || count <= outputLimit)
                 .filter(count -> totalLimit == 0 || count <= totalLimit)
                 .toList());
+    }
+
+    private void validateImageCapabilityLimits(String modelId, PlatformConfigDocument.ImageCapabilities capabilities) {
+        Set<String> modes = Set.copyOf(capabilities.getModes());
+        if ((modes.contains("image-to-image") || modes.contains("image-edit")) && capabilities.getMaxImages() < 1) {
+            throw new IllegalArgumentException("图像模型启用图生图或图像编辑时，最多参考图片必须至少为 1: " + modelId);
+        }
     }
 
     private void validateVideoCapabilityLimits(String modelId, PlatformConfigDocument.VideoCapabilities capabilities) {

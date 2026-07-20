@@ -1,3 +1,4 @@
+import type { VideoGenerationMode } from "@/services/api/model-capabilities";
 import type { DirectorProject } from "./director/storyai/editor/schema/directorProject";
 
 export type Position = {
@@ -23,6 +24,14 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "comfyui";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasNodeActionIntent =
+    | "text-to-video"
+    | "text-to-audio"
+    | "image-to-panorama"
+    | "script-edit"
+    | "script-to-storyboard"
+    | "script-to-video"
+    | "script-to-audio";
 export type CanvasBaseMetadata = {
     content?: string;
     composerContent?: string;
@@ -59,7 +68,7 @@ export type CanvasGenerationMetadata = {
     generateAudio?: string;
     watermark?: string;
     draft?: string;
-    videoGenerationMode?: "text-to-video" | "all-in-one-reference" | "image-to-video" | "first-last-frame" | "image-reference";
+    videoGenerationMode?: VideoGenerationMode;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

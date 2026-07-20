@@ -2,11 +2,11 @@
 
 import { type ReactNode } from "react";
 import { Switch } from "antd";
+import { LoaderCircle, TriangleAlert } from "lucide-react";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import {
     boolConfig,
-    isSeedanceVideoConfig,
     normalizeResolutionToken,
     normalizeSeedanceDuration,
     normalizeSeedanceRatio,
@@ -48,77 +48,28 @@ type VideoSettingsPanelProps = {
 };
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", variant = "default" }: VideoSettingsPanelProps) {
-    const { capability } = useVideoModelCapability(config.model || config.videoModel);
+    const { capability, isLoading, isFetching } = useVideoModelCapability(config.model || config.videoModel);
     if (capability) {
         return <CapabilityVideoSettingsPanel capability={capability} config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} variant={variant} />;
     }
-    if (isSeedanceVideoConfig(config)) {
-        return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} variant={variant} />;
-    }
+    return <VideoCapabilityStatus loading={isLoading || isFetching} theme={theme} showTitle={showTitle} className={className} />;
+}
 
-    const seconds = config.videoSeconds || "6";
-    const size = normalizeVideoSizeValue(config.size);
-    const dimensions = readSizeDimensions(size);
-    const resolution = normalizeVideoResolutionValue(config.vquality);
-    if (variant === "composer") return <ComposerVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} className={className} />;
-    const updateDimension = (key: "width" | "height", value: number | null) => {
-        const next = Math.max(1, Math.floor(value || dimensions[key] || 720));
-        onConfigChange("size", `${key === "width" ? next : dimensions.width}x${key === "height" ? next : dimensions.height}`);
-    };
-
+function VideoCapabilityStatus({ loading, theme, showTitle, className }: Pick<VideoSettingsPanelProps, "theme" | "showTitle" | "className"> & { loading: boolean }) {
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
-                <SettingGroup title="清晰度" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {resolutionOptions.map((item) => (
-                            <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
-                                {item.label}
-                            </OptionPill>
-                        ))}
-                        <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />
-                    </div>
-                </SettingGroup>
-                <SettingGroup title="尺寸" color={theme.node.muted}>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("width", value)} />
-                        <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("height", value)} />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {sizeOptions.map((item) => (
-                            <button
-                                key={item.value}
-                                type="button"
-                                className="flex h-[78px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
-                                style={{ borderColor: size === item.value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={() => onConfigChange("size", item.value)}
-                            >
-                                <SizePreview width={item.width} height={item.height} color={theme.node.text} />
-                                <span>{item.label}</span>
-                                {item.value === "auto" ? null : <span className="text-[11px] leading-none opacity-55">{item.value}</span>}
-                            </button>
-                        ))}
-                    </div>
-                </SettingGroup>
-                <SettingGroup title="秒数" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {secondOptions.map((value) => (
-                            <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
-                                {value}s
-                            </OptionPill>
-                        ))}
-                        <NumberInput value={seconds} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
-                    </div>
-                </SettingGroup>
+                <div className="flex items-start gap-2.5 rounded-xl border px-3 py-3 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                    {loading ? <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin" /> : <TriangleAlert className="mt-0.5 size-4 shrink-0" />}
+                    <span>{loading ? "正在读取当前模型的视频能力，参数暂时锁定。" : "当前模型未配置视频能力，请在后台启用并发布该模型。"}</span>
+                </div>
             </div>
         </ImageSettingsTheme>
     );
 }
 
-function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps & { capability: VideoModelCapability }) {
+function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, theme, showTitle, className, variant = "default" }: VideoSettingsPanelProps & { capability: VideoModelCapability }) {
     const ratio = supportedValue(normalizeSeedanceRatio(config.size), capability.ratios);
     const resolution = supportedValue(normalizeResolutionToken(config.vquality), capability.resolutions);
     const duration = supportedNumber(Number(config.videoSeconds), capability.durations);
@@ -126,56 +77,74 @@ function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, them
     const generateAudio = boolConfig(config.videoGenerateAudio, true);
     const watermark = boolConfig(config.videoWatermark, false);
     const draft = boolConfig(config.videoDraft, false);
+    const compact = variant === "composer";
     const hasOutputControls = capability.generateAudio || capability.watermark || capability.draft || capability.counts.length > 1;
+    const ratioControls = capability.ratios.length ? (
+        <SettingGroup title="比例" color={theme.node.muted} compact={compact}>
+            <div className="grid grid-cols-3 gap-2">
+                {capability.ratios.map((value) => (
+                    <button key={value} type="button" className={`flex ${compact ? "h-12" : "h-[62px]"} flex-col items-center justify-center gap-1 rounded-lg border text-xs transition hover:opacity-80`} style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, background: ratio === value ? theme.node.fill : "transparent", color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
+                        <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
+                        <span>{videoRatioLabel(value)}</span>
+                    </button>
+                ))}
+            </div>
+        </SettingGroup>
+    ) : null;
+    const resolutionControls = capability.resolutions.length ? (
+        <SettingGroup title="清晰度" color={theme.node.muted} compact={compact}>
+            <div className="grid grid-cols-3 gap-2">
+                {capability.resolutions.map((value) => (
+                    <OptionPill key={value} selected={resolution === value} disabled={draft && value !== "480p"} theme={theme} compact={compact} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>
+                ))}
+            </div>
+        </SettingGroup>
+    ) : null;
+    const durationControls = capability.durations.length ? (
+        <SettingGroup title="视频时长" color={theme.node.muted} compact={compact}>
+            <div className={`grid ${compact ? "grid-cols-5" : "grid-cols-4"} gap-2`}>
+                {capability.durations.map((value) => (
+                    <OptionPill key={value} selected={duration === value} theme={theme} compact={compact} onClick={() => onConfigChange("videoSeconds", String(value))}>{value === -1 ? "智能时长" : `${value}s`}</OptionPill>
+                ))}
+            </div>
+        </SettingGroup>
+    ) : null;
+    const outputControls = hasOutputControls ? (
+        <SettingGroup title="输出" color={theme.node.muted} compact={compact}>
+            <div className={`grid ${compact ? "gap-1 px-2 py-1.5" : "gap-2 p-2.5"} rounded-xl border`} style={{ borderColor: theme.node.stroke }}>
+                {capability.generateAudio ? <SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
+                {capability.watermark ? <SwitchRow label="添加水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}
+                {capability.draft ? <SwitchRow label="样片模式" checked={draft} theme={theme} onChange={(checked) => { onConfigChange("videoDraft", String(checked)); if (checked) onConfigChange("vquality", "480p"); }} /> : null}
+                {capability.counts.length > 1 ? (
+                    <div className="grid grid-cols-3 gap-2">
+                        {capability.counts.map((value) => <OptionPill key={value} selected={count === value} theme={theme} compact={compact} onClick={() => onConfigChange("count", String(value))}>{value}个</OptionPill>)}
+                    </div>
+                ) : null}
+            </div>
+        </SettingGroup>
+    ) : null;
 
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
-                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
-                {capability.ratios.length ? (
-                    <SettingGroup title="比例" color={theme.node.muted}>
-                        <div className="grid grid-cols-3 gap-2.5">
-                            {capability.ratios.map((value) => (
-                                <button key={value} type="button" className="flex h-[62px] flex-col items-center justify-center gap-1 rounded-lg border text-xs transition hover:opacity-80" style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, background: ratio === value ? theme.node.fill : "transparent", color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
-                                    <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
-                                    <span>{videoRatioLabel(value)}</span>
-                                </button>
-                            ))}
+                {showTitle ? <div className={compact ? "text-base font-semibold" : "text-lg font-semibold"}>视频设置</div> : null}
+                {compact ? (
+                    <div className="grid grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] items-start gap-x-4 gap-y-3 max-[580px]:grid-cols-1">
+                        {ratioControls}
+                        <div className="grid content-start gap-3">
+                            {resolutionControls}
+                            {durationControls}
+                            {outputControls}
                         </div>
-                    </SettingGroup>
-                ) : null}
-                {capability.resolutions.length ? (
-                    <SettingGroup title="清晰度" color={theme.node.muted}>
-                        <div className="grid grid-cols-3 gap-2.5">
-                            {capability.resolutions.map((value) => (
-                                <OptionPill key={value} selected={resolution === value} disabled={draft && value !== "480p"} theme={theme} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>
-                            ))}
-                        </div>
-                    </SettingGroup>
-                ) : null}
-                {capability.durations.length ? (
-                    <SettingGroup title="视频时长" color={theme.node.muted}>
-                        <div className="grid grid-cols-4 gap-2.5">
-                            {capability.durations.map((value) => (
-                                <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>{value === -1 ? "智能时长" : `${value}s`}</OptionPill>
-                            ))}
-                        </div>
-                    </SettingGroup>
-                ) : null}
-                {hasOutputControls ? (
-                    <SettingGroup title="输出" color={theme.node.muted}>
-                        <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
-                            {capability.generateAudio ? <SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
-                            {capability.watermark ? <SwitchRow label="添加水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}
-                            {capability.draft ? <SwitchRow label="样片模式" checked={draft} theme={theme} onChange={(checked) => { onConfigChange("videoDraft", String(checked)); if (checked) onConfigChange("vquality", "480p"); }} /> : null}
-                            {capability.counts.length > 1 ? (
-                                <div className="grid grid-cols-3 gap-2">
-                                    {capability.counts.map((value) => <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>{value}个</OptionPill>)}
-                                </div>
-                            ) : null}
-                        </div>
-                    </SettingGroup>
-                ) : null}
+                    </div>
+                ) : (
+                    <>
+                        {ratioControls}
+                        {resolutionControls}
+                        {durationControls}
+                        {outputControls}
+                    </>
+                )}
             </div>
         </ImageSettingsTheme>
     );
@@ -358,12 +327,12 @@ export function normalizeVideoResolutionValue(value: string) {
     return value.replace(/p$/i, "") || "720";
 }
 
-function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
+function OptionPill({ selected, disabled = false, theme, compact = false, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; compact?: boolean; onClick: () => void; children: ReactNode }) {
     return (
         <button
             type="button"
             disabled={disabled}
-            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35"
+            className={`${compact ? "h-8 text-xs" : "h-9 text-sm"} cursor-pointer rounded-full border px-2 transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35`}
             style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClick}
@@ -373,9 +342,9 @@ function OptionPill({ selected, disabled = false, theme, onClick, children }: { 
     );
 }
 
-function SettingGroup({ title, color, children }: { title: string; color: string; children: ReactNode }) {
+function SettingGroup({ title, color, compact = false, children }: { title: string; color: string; compact?: boolean; children: ReactNode }) {
     return (
-        <div className="space-y-2.5">
+        <div className={compact ? "space-y-1.5" : "space-y-2.5"}>
             <div className="text-xs font-medium" style={{ color }}>
                 {title}
             </div>

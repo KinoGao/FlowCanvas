@@ -2,7 +2,7 @@
 
 import localforage from "localforage";
 import { nanoid } from "nanoid";
-import { backendFileUrl, uploadBackendFile } from "@/services/api/backend-storage";
+import { peekBackendFileUrl, resolveBackendFileUrl, uploadBackendFile } from "@/services/api/backend-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import { createBlobStorage } from "./blob-storage";
 
@@ -17,7 +17,7 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file"): Pr
     if (saveMode === "backend") {
         if (!token) throw new Error("请先登录后端账号");
         const uploaded = await uploadBackendFile(token, blob, `${prefix}.${fileExtension(blob.type)}`);
-        const url = backendFileUrl(uploaded.storageKey, token);
+        const url = uploaded.url;
         const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
         return { url, storageKey: uploaded.storageKey, bytes: uploaded.bytes, mimeType: uploaded.mimeType || blob.type || "application/octet-stream", ...meta };
     }
@@ -42,7 +42,7 @@ async function fetchMediaBlob(url: string) {
 export function peekCachedMediaUrl(storageKey?: string): string | undefined {
     if (storageKey?.startsWith("backend:")) {
         const token = useUserStore.getState().token;
-        return token ? backendFileUrl(storageKey, token) : undefined;
+        return token ? peekBackendFileUrl(storageKey, token) : undefined;
     }
     return mediaBlobs.peekUrl(storageKey);
 }
@@ -50,7 +50,7 @@ export function peekCachedMediaUrl(storageKey?: string): string | undefined {
 export function resolveMediaUrl(storageKey?: string, fallback = "") {
     if (storageKey?.startsWith("backend:")) {
         const token = useUserStore.getState().token;
-        return Promise.resolve(token ? backendFileUrl(storageKey, token) : fallback);
+        return token ? resolveBackendFileUrl(storageKey, token) : Promise.resolve(fallback);
     }
     return mediaBlobs.resolveUrl(storageKey, fallback);
 }
@@ -59,7 +59,9 @@ export function getMediaBlob(storageKey: string) {
     if (storageKey.startsWith("backend:")) {
         const token = useUserStore.getState().token;
         if (!token) return Promise.resolve(null);
-        return fetch(backendFileUrl(storageKey, token)).then((response) => (response.ok ? response.blob() : null));
+        return resolveBackendFileUrl(storageKey, token)
+            .then((url) => fetch(url))
+            .then((response) => (response.ok ? response.blob() : null));
     }
     return mediaBlobs.getBlob(storageKey);
 }
@@ -68,7 +70,7 @@ export function setMediaBlob(storageKey: string, blob: Blob) {
     const { saveMode, token } = useUserStore.getState();
     if (storageKey.startsWith("backend:")) {
         if (!token) throw new Error("请先登录后端账号");
-        return Promise.resolve(backendFileUrl(storageKey, token));
+        return resolveBackendFileUrl(storageKey, token);
     }
     if (saveMode === "backend") throw new Error("后端工作区不允许写入浏览器媒体缓存");
     return mediaBlobs.setBlob(storageKey, blob);

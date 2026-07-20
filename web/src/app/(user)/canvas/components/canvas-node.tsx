@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Music2, RefreshCw, Settings2, Star, Video } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Settings2, Star, Video, Volume2, VolumeX } from "lucide-react";
 import * as THREE from "three";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -13,9 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { imageToDataUrl, peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
-import { peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
+import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeData, type Position as CanvasPosition } from "../types";
+import { CanvasNodeType, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useCanvasScaleRef } from "./canvas-scale-context";
 
@@ -44,9 +44,16 @@ function useLazyMediaUrl(storageKey: string | undefined, content: string | undef
         const peek = type === "image" ? peekCachedImageUrl : peekCachedMediaUrl;
         let cancelled = false;
         setUrl(peek(storageKey) ?? "");
-        resolve(storageKey, content?.startsWith("blob:") ? "" : (content ?? "")).then((resolved) => {
-            if (!cancelled) setUrl(resolved);
-        });
+        resolve(storageKey, content?.startsWith("blob:") ? "" : (content ?? ""))
+            .then((resolved) => {
+                if (!cancelled) setUrl(resolved);
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setUrl("");
+                    console.error("[canvas-media] resolve failed", { storageKey, error });
+                }
+            });
         return () => {
             cancelled = true;
         };
@@ -87,11 +94,13 @@ export type CanvasNodeProps = {
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onOpenComposer?: (node: CanvasNodeData) => void;
+    onNodeAction?: (node: CanvasNodeData, intent: CanvasNodeActionIntent) => void;
     onUpload?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onViewImage?: (node: CanvasNodeData) => void;
-    onGroupAction?: (node: CanvasNodeData, action: "run" | "toolbox" | "storyboard" | "ungroup" | "download") => void;
+    onGroupAction?: (node: CanvasNodeData, action: "storyboard" | "ungroup") => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -113,11 +122,13 @@ type NodeContentRendererProps = {
     onStartEditing?: () => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
     onOpenComposer?: () => void;
+    onNodeAction?: (intent: CanvasNodeActionIntent) => void;
     onUpload?: () => void;
-    onGroupAction?: (node: CanvasNodeData, action: "run" | "toolbox" | "storyboard" | "ungroup" | "download") => void;
+    onGroupAction?: (node: CanvasNodeData, action: "storyboard" | "ungroup") => void;
 };
 
 /** Custom memo comparator: skip function props (renderPanel, renderNodeContent, callbacks)
@@ -178,9 +189,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     onToggleBatch,
     onSetBatchPrimary,
     onOpenComposer,
+    onNodeAction,
     onUpload,
     onRetry,
     onGenerateImage,
+    onCaptureVideoFrame,
     onViewImage,
     onGroupAction,
     onContextMenu,
@@ -199,8 +212,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const nodeRef = useRef<HTMLDivElement>(null);
-    const mediaClickTimerRef = useRef<number | null>(null);
-    const mediaClickRef = useRef({ count: 0, lastAt: 0 });
     const resizeFrameRef = useRef<number | null>(null);
     const resizeRef = useRef({
         isResizing: false,
@@ -367,7 +378,6 @@ export const CanvasNode = React.memo(function CanvasNode({
 
     useEffect(() => {
         return () => {
-            if (mediaClickTimerRef.current) window.clearTimeout(mediaClickTimerRef.current);
             if (resizeFrameRef.current) cancelAnimationFrame(resizeFrameRef.current);
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
@@ -378,40 +388,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         };
     }, [handleResizeMove, handleResizeUp]);
 
-    const clearMediaClickTimer = useCallback(() => {
-        if (!mediaClickTimerRef.current) return;
-        window.clearTimeout(mediaClickTimerRef.current);
-        mediaClickTimerRef.current = null;
-    }, []);
-
-    const handleMediaClick = useCallback(
-        (event: React.MouseEvent) => {
-            if (data.type !== CanvasNodeType.Image || !hasImageContent) return;
-            const now = Date.now();
-            if (now - mediaClickRef.current.lastAt > 750) mediaClickRef.current.count = 0;
-            mediaClickRef.current.count += 1;
-            mediaClickRef.current.lastAt = now;
-
-            if (mediaClickRef.current.count === 2) {
-                event.stopPropagation();
-                clearMediaClickTimer();
-                mediaClickTimerRef.current = window.setTimeout(() => {
-                    mediaClickTimerRef.current = null;
-                    mediaClickRef.current.count = 0;
-                    onOpenComposer?.(data);
-                }, 760);
-            } else if (mediaClickRef.current.count >= 3) {
-                event.stopPropagation();
-                clearMediaClickTimer();
-                mediaClickRef.current.count = 0;
-                onViewImage?.(data);
-            }
-        },
-        [clearMediaClickTimer, data, hasImageContent, isBatchRoot, onOpenComposer, onViewImage],
-    );
-
     const shouldUseOverview = isOverview && !showPanel && !isEditingContent;
-    const shouldKeepMediaMounted = hasImageContent || hasVideoContent || hasAudioContent;
     const panelWidthClass =
         data.metadata?.canvasTool === "director"
             ? "w-[920px] max-w-[calc(100vw-48px)]"
@@ -444,25 +421,20 @@ export const CanvasNode = React.memo(function CanvasNode({
             <Card
                 className="creative-os-node relative h-full w-full overflow-visible rounded-[8px] border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
-                    background: isGroup ? theme.ui.controlFill : shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.panel : "rgba(14,14,14,.45)",
+                    background: isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
                     borderColor: isGroup
                         ? isSelected
                             ? theme.ui.accent
                             : theme.ui.hairline
-                        : shouldUseOverview
-                          ? isRelated
-                              ? theme.ui.accent
-                              : theme.ui.hairline
-                          : hasImageContent
+                        : hasImageContent
                             ? imageBorderColor
                             : isActive
                               ? theme.ui.accent
                               : isRelated
                                 ? theme.ui.accent
                                 : theme.ui.hairline,
-                    boxShadow: isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : shouldUseOverview ? undefined : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
+                    boxShadow: isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
-                onClick={handleMediaClick}
                 onDoubleClick={(event) => {
                     if (data.type === CanvasNodeType.Image && hasImageContent) return;
                     if (isBatchRoot) {
@@ -479,7 +451,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
-                            background: shouldUseOverview || (!hasImageContent && !hasVideoContent) ? theme.node.panel : "transparent",
+                            background: !hasImageContent && !hasVideoContent ? theme.node.panel : "transparent",
                             "--batch-from-x": `${batchMotion?.x || 0}px`,
                             "--batch-from-y": `${batchMotion?.y || 0}px`,
                             "--batch-from-rotate": `${6 + (batchMotion?.index || 0) * 4}deg`,
@@ -488,38 +460,36 @@ export const CanvasNode = React.memo(function CanvasNode({
                         } as React.CSSProperties
                     }
                 >
-                    {shouldUseOverview && !shouldKeepMediaMounted ? (
-                        <MediaAwareOverviewNodeContent node={data} theme={theme} />
-                    ) : (
-                        <NodeContent
-                            node={data}
-                            theme={theme}
-                            isSelected={isSelected}
-                            isEditingContent={isEditingContent}
-                            textareaRef={textareaRef}
-                            isBatchRoot={isBatchRoot}
-                            batchCount={batchCount}
-                            batchExpanded={batchExpanded}
-                            batchOpening={batchOpening}
-                            batchRecovering={batchRecovering}
-                            renderNodeContent={renderNodeContent}
-                            mentionReferences={mentionReferences}
-                            onStartEditing={() => setIsEditingContent(true)}
-                            onContentChange={onContentChange}
-                            onStopEditing={() => setIsEditingContent(false)}
-                            onRetry={onRetry}
-                            onGenerateImage={onGenerateImage}
-                            onOpenComposer={() => onOpenComposer?.(data)}
-                            onUpload={() => onUpload?.(data)}
-                            onToggleBatch={() => onToggleBatch?.(data.id)}
-                            onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
-                            onGroupAction={onGroupAction}
-                        />
-                    )}
+                    <NodeContent
+                    node={data}
+                    theme={theme}
+                    isSelected={isSelected}
+                    isEditingContent={isEditingContent}
+                    textareaRef={textareaRef}
+                    isBatchRoot={isBatchRoot}
+                    batchCount={batchCount}
+                    batchExpanded={batchExpanded}
+                    batchOpening={batchOpening}
+                    batchRecovering={batchRecovering}
+                    renderNodeContent={renderNodeContent}
+                    mentionReferences={mentionReferences}
+                    onStartEditing={() => setIsEditingContent(true)}
+                    onContentChange={onContentChange}
+                    onStopEditing={() => setIsEditingContent(false)}
+                    onRetry={onRetry}
+                    onGenerateImage={onGenerateImage}
+                    onCaptureVideoFrame={onCaptureVideoFrame}
+                    onOpenComposer={() => onOpenComposer?.(data)}
+                    onNodeAction={(intent) => onNodeAction?.(data, intent)}
+                    onUpload={() => onUpload?.(data)}
+                    onToggleBatch={() => onToggleBatch?.(data.id)}
+                    onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
+                    onGroupAction={onGroupAction}
+                    />
                 </div>
 
-                {!isGroup ? <NodeTitleBadge node={data} theme={theme} overview={isOverview} /> : null}
-                {isGroup ? <GroupTitleEditor node={data} theme={theme} overview={isOverview} onTitleChange={onTitleChange} /> : null}
+                {!isGroup ? <NodeTitleBadge node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
+                {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
@@ -557,84 +527,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     );
 }, canvasNodePropsEqual);
 
-function MediaAwareOverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const hasMedia = Boolean(node.metadata?.content || node.metadata?.storageKey);
-    if (hasMedia && node.type === CanvasNodeType.Image) return <OverviewImageContent node={node} theme={theme} />;
-    if (hasMedia && node.type === CanvasNodeType.Video) return <OverviewVideoContent node={node} theme={theme} />;
-    if (hasMedia && node.type === CanvasNodeType.Audio) return <OverviewAudioContent node={node} theme={theme} />;
-    return <OverviewNodeContent node={node} theme={theme} />;
-}
-
-function OverviewImageContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "image");
-    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
-    return (
-        <div className="relative h-full w-full overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }}>
-            <img
-                src={src}
-                alt={node.title}
-                draggable={false}
-                decoding="async"
-                onDragStart={(event) => event.preventDefault()}
-                className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-            />
-        </div>
-    );
-}
-
-function OverviewVideoContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
-    return (
-        <div className="relative h-full w-full overflow-hidden rounded-[inherit] bg-black">
-            <video src={src} muted playsInline preload="metadata" className="pointer-events-none h-full w-full select-none object-contain" />
-            <div className="pointer-events-none absolute left-2 top-2 grid size-7 place-items-center rounded-md bg-black/45 text-white/80">
-                <Video className="size-3.5" />
-            </div>
-        </div>
-    );
-}
-
-function OverviewAudioContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src) return <OverviewNodeContent node={node} theme={theme} />;
-    return (
-        <div className="flex h-full w-full flex-col justify-center gap-3 overflow-hidden rounded-[inherit] px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
-            <div className="flex min-w-0 items-center gap-2 text-xs font-medium opacity-80">
-                <Music2 className="size-4 shrink-0" />
-                <span className="truncate">{node.title || "\u97f3\u9891"}</span>
-            </div>
-            <div className="flex h-8 items-end gap-1 overflow-hidden rounded-md px-2 py-1.5" style={{ background: theme.toolbar.panel }}>
-                {Array.from({ length: 24 }).map((_, index) => (
-                    <span
-                        key={index}
-                        className="w-1 shrink-0 rounded-full"
-                        style={{
-                            height: `${28 + ((index * 17) % 52)}%`,
-                            background: index % 3 === 0 ? theme.node.activeStroke : theme.node.placeholder,
-                            opacity: index % 3 === 0 ? 0.8 : 0.35,
-                        }}
-                    />
-                ))}
-            </div>
-            <audio src={src} preload="none" className="hidden" />
-        </div>
-    );
-}
-
-function OverviewNodeContent({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
-    const title = node.title || node.metadata?.prompt || node.metadata?.content || (node.type === CanvasNodeType.Config ? "配置节点" : "节点");
-    return (
-        <div className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3 py-2" style={{ color: theme.node.text }}>
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
-                <Icon className="size-4" />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-xs font-medium opacity-75">{title}</span>
-        </div>
-    );
-}
-
 function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.type === CanvasNodeType.Group) return <GroupContent {...props} />;
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
@@ -659,23 +551,27 @@ const nodeContentRenderers = {
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
     const isStoryboard = node.metadata?.groupVariant === "storyboard";
-    const actions: Array<{ key: "run" | "toolbox" | "storyboard" | "ungroup" | "download"; label: string }> = [
-        { key: "run", label: "整组执行" },
-        { key: "toolbox", label: "添加到工具箱" },
-        { key: "storyboard", label: isStoryboard ? "已是分镜组" : "转分镜组" },
-        { key: "ungroup", label: "解组" },
-        { key: "download", label: "批量下载" },
+    const actions: Array<{ key: "storyboard" | "ungroup"; label: string; disabled?: boolean }> = [
+        { key: "storyboard", label: isStoryboard ? "已设为分镜组" : "设为分镜组", disabled: isStoryboard },
+        { key: "ungroup", label: "解散组" },
     ];
 
     return (
         <div className="relative h-full w-full rounded-[inherit]">
             {isSelected ? (
-                <div className="absolute -top-11 left-0 flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border border-white/10 bg-[#1f1f1f]/95 px-1.5 py-1 text-xs text-white/75 shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur">
+                <div
+                    data-canvas-no-zoom
+                    className="pointer-events-auto absolute left-2 top-2 z-[60] flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border border-white/10 bg-[#1f1f1f]/95 px-1.5 py-1 text-xs text-white/75 shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                >
                     {actions.map((action) => (
                         <button
                             key={action.key}
                             type="button"
-                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:bg-white/10 hover:text-white"
+                            disabled={action.disabled}
+                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-45"
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onGroupAction?.(node, action.key);
@@ -753,9 +649,9 @@ function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; th
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
     const fontSize = node.metadata?.fontSize || 14;
-    const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+    const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.72)}px`, letterSpacing: 0, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
     const isEmpty = !node.metadata?.content?.trim();
 
     return (
@@ -783,7 +679,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
-                    className="nodrag nopan thin-scrollbar block h-full w-full resize-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent pl-4 pr-14 pt-0 pb-4 m-0 font-mono outline-none select-text appearance-none"
+                    className="nodrag nopan thin-scrollbar m-0 block h-full w-full resize-none appearance-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent px-5 pb-5 pr-16 pt-0 outline-none select-text"
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
@@ -801,25 +697,24 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                 <TryActionList
                     theme={theme}
                     actions={[
-                        { label: "自己编写脚本", onClick: onOpenComposer || onStartEditing },
-                        { label: "拆成分镜", onClick: onOpenComposer },
-                        { label: "脚本生视频", onClick: onOpenComposer },
-                        { label: "生成旁白", onClick: onOpenComposer },
+                        { label: "自己编写脚本", onClick: () => onNodeAction?.("script-edit") },
+                        { label: "拆成分镜", onClick: () => onNodeAction?.("script-to-storyboard") },
+                        { label: "脚本生视频", onClick: () => onNodeAction?.("script-to-video") },
+                        { label: "生成旁白", onClick: () => onNodeAction?.("script-to-audio") },
                     ]}
                 />
             ) : isEmpty ? (
                 <TryActionList
                     theme={theme}
                     actions={[
-                        { label: "自己编写内容", onClick: onOpenComposer || onStartEditing },
-                        { label: "文生视频", onClick: onOpenComposer },
-                        { label: "图片反推提示词", onClick: onOpenComposer },
-                        { label: "文字生音乐", onClick: onOpenComposer },
+                        { label: "自己编写内容", onClick: onStartEditing },
+                        { label: "文生视频", onClick: () => onNodeAction?.("text-to-video") },
+                        { label: "文字生音乐", onClick: () => onNodeAction?.("text-to-audio") },
                     ]}
                 />
             ) : (
                 <div
-                    className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent pl-4 pr-14 pt-0 pb-4 font-mono"
+                    className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-5 pb-5 pr-16 pt-0"
                     style={textStyle}
                     onDoubleClick={(event) => {
                         event.stopPropagation();
@@ -887,34 +782,86 @@ function DirectorContent({ theme, onOpenComposer }: NodeContentRendererProps) {
     );
 }
 
-function NodeTitleBadge({ node, theme, overview }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; overview: boolean }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
-    return (
-        <div
-            className={cn("pointer-events-none absolute left-0 z-30 flex max-w-[220px] items-center gap-1 text-[11px] leading-4", overview ? "top-0 rounded-md border px-1.5 py-1" : "-top-[22px] max-w-full")}
-            style={{
-                color: theme.node.label,
-                background: overview ? theme.toolbar.panel : "transparent",
-                borderColor: overview ? theme.toolbar.border : "transparent",
-                transform: overview ? "scale(var(--canvas-overview-inverse-scale, 1))" : undefined,
-                transformOrigin: "top left",
-            }}
-        >
-            <Icon className="size-3 shrink-0 opacity-65" />
-            <span className="truncate">{node.title || "未命名节点"}</span>
-        </div>
-    );
-}
-
-function GroupTitleEditor({
+function NodeTitleBadge({
     node,
     theme,
-    overview,
     onTitleChange,
 }: {
     node: CanvasNodeData;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    overview: boolean;
+    onTitleChange: (nodeId: string, title: string) => void;
+}) {
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const fallbackTitle = "未命名节点";
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState("");
+    const cancelRef = useRef(false);
+    const commit = () => {
+        if (cancelRef.current) {
+            cancelRef.current = false;
+            return;
+        }
+        onTitleChange(node.id, draft.trim() || fallbackTitle);
+        setEditing(false);
+    };
+
+    return (
+        <div
+            className="absolute -top-[24px] left-0 z-30 flex max-w-full items-center gap-1 text-[11px] leading-4"
+            style={{ color: theme.node.label }}
+        >
+            <Icon className="pointer-events-none size-3 shrink-0 opacity-65" />
+            {editing ? (
+                <input
+                    autoFocus
+                    data-canvas-no-zoom
+                    value={draft}
+                    maxLength={64}
+                    aria-label="节点名称"
+                    className="h-6 min-w-24 max-w-52 select-text rounded-md border px-1.5 text-[11px] outline-none"
+                    style={{ color: theme.node.text, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onBlur={commit}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                        event.stopPropagation();
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            commit();
+                        }
+                        if (event.key === "Escape") {
+                            cancelRef.current = true;
+                            setEditing(false);
+                        }
+                    }}
+                />
+            ) : (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    title="双击重命名"
+                    className="min-w-0 max-w-full cursor-default truncate text-left"
+                    onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        cancelRef.current = false;
+                        setDraft(node.title || fallbackTitle);
+                        setEditing(true);
+                    }}
+                >
+                    {node.title || fallbackTitle}
+                </button>
+            )}
+        </div>
+    );
+}
+function GroupTitleEditor({
+    node,
+    theme,
+    onTitleChange,
+}: {
+    node: CanvasNodeData;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
     const [editing, setEditing] = useState(false);
@@ -936,13 +883,7 @@ function GroupTitleEditor({
     };
 
     return (
-        <div
-            className={cn("absolute z-40 max-w-[70%]", overview ? "bottom-full right-0" : "right-2 top-2")}
-            style={{
-                transform: overview ? "scale(var(--canvas-overview-inverse-scale, 1))" : undefined,
-                transformOrigin: overview ? "bottom right" : "top right",
-            }}
-        >
+        <div className="absolute right-2 top-2 z-40 max-w-[70%]">
             {editing ? (
                 <input
                     autoFocus
@@ -1056,13 +997,13 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onOpenComposer, onUpload }: NodeContentRendererProps) {
+function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload }: NodeContentRendererProps) {
     if (node.metadata?.canvasTool === "panorama360") {
         return (
             <TryActionList
                 theme={theme}
                 actions={[
-                    { label: "生成360全景", onClick: onOpenComposer },
+                    { label: "生成360全景", onClick: () => onNodeAction?.("image-to-panorama") },
                     { label: "上传360图片", onClick: onUpload },
                 ]}
             />
@@ -1071,10 +1012,7 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
     const content = (
         <TryActionList
             theme={theme}
-            actions={[
-                { label: "图生图", onClick: onOpenComposer },
-                { label: "图片高清", onClick: onOpenComposer },
-            ]}
+            actions={[{ label: "上传图片", onClick: onUpload }]}
         />
     );
     if (isBatchRoot)
@@ -1086,28 +1024,221 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
     return content;
 }
 
-function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
+function formatVideoTime(seconds: number) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const minutes = Math.floor(seconds / 60);
+    const remaining = Math.floor(seconds % 60);
+    return `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "seeked") {
+    return new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            video.removeEventListener(eventName, handleSuccess);
+            video.removeEventListener("error", handleError);
+        };
+        const handleSuccess = () => {
+            cleanup();
+            resolve();
+        };
+        const handleError = () => {
+            cleanup();
+            reject(new Error("视频帧读取失败"));
+        };
+        video.addEventListener(eventName, handleSuccess, { once: true });
+        video.addEventListener("error", handleError, { once: true });
+    });
+}
+
+function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const [failedSrc, setFailedSrc] = useState("");
-    const keepControlsInteractive = (event: React.PointerEvent<HTMLVideoElement> | React.MouseEvent<HTMLVideoElement>) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        if (event.clientY >= rect.bottom - Math.min(48, rect.height * 0.3)) event.stopPropagation();
-    };
+    const [playing, setPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [muted, setMuted] = useState(false);
+    const [volume, setVolume] = useState(1);
+    const [capturing, setCapturing] = useState<"first" | "current" | "last" | null>(null);
+    const [captureFailed, setCaptureFailed] = useState(false);
+
+    const stopControlEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+    const togglePlayback = useCallback(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.paused) void video.play();
+        else video.pause();
+    }, []);
+    const toggleFullscreen = useCallback(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void container.requestFullscreen();
+    }, []);
+    const captureFrame = useCallback(
+        async (kind: "first" | "current" | "last") => {
+            const visibleVideo = videoRef.current;
+            if (!visibleVideo || !onCaptureVideoFrame || capturing) return;
+            setCapturing(kind);
+            setCaptureFailed(false);
+            let captureVideo = visibleVideo;
+            let objectUrl = "";
+            let temporaryVideo: HTMLVideoElement | null = null;
+            const restoreTime = visibleVideo.currentTime;
+            try {
+                const storageKey = node.metadata?.storageKey;
+                if (storageKey) {
+                    const blob = await getMediaBlob(storageKey);
+                    if (blob) {
+                        objectUrl = URL.createObjectURL(blob);
+                        temporaryVideo = document.createElement("video");
+                        temporaryVideo.preload = "auto";
+                        temporaryVideo.muted = true;
+                        temporaryVideo.playsInline = true;
+                        temporaryVideo.src = objectUrl;
+                        await waitForVideoEvent(temporaryVideo, "loadedmetadata");
+                        captureVideo = temporaryVideo;
+                    }
+                }
+                const captureDuration = Number.isFinite(captureVideo.duration) ? captureVideo.duration : duration;
+                const targetTime = kind === "first" ? 0.001 : kind === "last" ? Math.max(0, captureDuration - 0.05) : Math.min(restoreTime, Math.max(0, captureDuration - 0.01));
+                if (Math.abs(captureVideo.currentTime - targetTime) > 0.01) {
+                    const seeked = waitForVideoEvent(captureVideo, "seeked");
+                    captureVideo.currentTime = targetTime;
+                    await seeked;
+                }
+                const width = captureVideo.videoWidth;
+                const height = captureVideo.videoHeight;
+                if (!width || !height) throw new Error("视频画面尚未加载完成");
+                const canvas = document.createElement("canvas");
+                canvas.width = width;
+                canvas.height = height;
+                const context = canvas.getContext("2d");
+                if (!context) throw new Error("无法创建截帧画布");
+                context.drawImage(captureVideo, 0, 0, width, height);
+                await onCaptureVideoFrame(node, canvas.toDataURL("image/png"), kind);
+            } catch (error) {
+                console.error("[canvas-video] capture frame failed", error);
+                setCaptureFailed(true);
+            } finally {
+                temporaryVideo?.removeAttribute("src");
+                temporaryVideo?.load();
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                setCapturing(null);
+            }
+        },
+        [capturing, duration, node, onCaptureVideoFrame],
+    );
+
     if (!src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="空视频节点" theme={theme} />;
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
+
     return (
-        <video
-            src={src}
-            controls
-            preload="metadata"
-            draggable={false}
-            onDragStart={(event) => event.preventDefault()}
-            onPointerDown={keepControlsInteractive}
-            onClick={keepControlsInteractive}
-            onDoubleClick={keepControlsInteractive}
-            onError={() => setFailedSrc(src)}
-            className="h-full w-full rounded-[18px] bg-black object-contain"
-        />
+        <div ref={containerRef} className="group/video relative h-full w-full overflow-hidden rounded-[18px] bg-black">
+            <video
+                ref={videoRef}
+                src={src}
+                preload="metadata"
+                playsInline
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
+                onLoadedMetadata={(event) => {
+                    setDuration(event.currentTarget.duration || 0);
+                    setVolume(event.currentTarget.volume);
+                    setMuted(event.currentTarget.muted);
+                }}
+                onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+                onVolumeChange={(event) => {
+                    setVolume(event.currentTarget.volume);
+                    setMuted(event.currentTarget.muted);
+                }}
+                onError={() => setFailedSrc(src)}
+                className="pointer-events-none h-full w-full select-none object-contain"
+            />
+            <div
+                data-canvas-no-zoom
+                className={cn(
+                    "absolute inset-x-0 bottom-0 z-20 flex flex-col gap-1.5 bg-gradient-to-t from-black/90 via-black/65 to-transparent px-2.5 pb-2 pt-8 text-white transition-opacity duration-200",
+                    isSelected ? "opacity-100" : "opacity-0 group-hover/video:opacity-100",
+                )}
+                onPointerDown={stopControlEvent}
+                onMouseDown={stopControlEvent}
+                onClick={stopControlEvent}
+                onDoubleClick={stopControlEvent}
+            >
+                <input
+                    aria-label="视频进度"
+                    type="range"
+                    min={0}
+                    max={Math.max(duration, 0.01)}
+                    step={0.01}
+                    value={Math.min(currentTime, Math.max(duration, 0.01))}
+                    className="h-1 w-full cursor-pointer accent-white"
+                    onChange={(event) => {
+                        const time = Number(event.target.value);
+                        if (videoRef.current) videoRef.current.currentTime = time;
+                        setCurrentTime(time);
+                    }}
+                />
+                <div className="flex min-w-0 items-center gap-2">
+                    <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md text-white/90 transition hover:bg-white/15 hover:text-white" title={playing ? "暂停" : "播放"} onClick={togglePlayback}>
+                        {playing ? <Pause className="size-3.5 fill-current" /> : <Play className="size-3.5 fill-current" />}
+                    </button>
+                    <span className="shrink-0 text-[10px] tabular-nums text-white/75">{formatVideoTime(currentTime)} / {formatVideoTime(duration)}</span>
+                    <button
+                        type="button"
+                        className="grid size-7 shrink-0 place-items-center rounded-md text-white/80 transition hover:bg-white/15 hover:text-white"
+                        title={muted ? "取消静音" : "静音"}
+                        onClick={() => {
+                            const video = videoRef.current;
+                            if (video) video.muted = !video.muted;
+                        }}
+                    >
+                        {muted || volume === 0 ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+                    </button>
+                    <input
+                        aria-label="视频音量"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={muted ? 0 : volume}
+                        className="h-1 min-w-10 max-w-16 flex-1 cursor-pointer accent-white"
+                        onChange={(event) => {
+                            const nextVolume = Number(event.target.value);
+                            const video = videoRef.current;
+                            if (!video) return;
+                            video.volume = nextVolume;
+                            video.muted = nextVolume === 0;
+                        }}
+                    />
+                    <button type="button" className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-white/80 transition hover:bg-white/15 hover:text-white" title="全屏" onClick={toggleFullscreen}>
+                        <Maximize2 className="size-3.5" />
+                    </button>
+                </div>
+                {onCaptureVideoFrame ? (
+                    <div className="flex items-center gap-1 border-t border-white/10 pt-1.5">
+                        {([ ["first", "截取首帧"], ["current", "截取当前帧"], ["last", "截取尾帧"] ] as const).map(([kind, label]) => (
+                            <button
+                                key={kind}
+                                type="button"
+                                disabled={Boolean(capturing)}
+                                className="min-w-0 flex-1 truncate rounded-md px-1.5 py-1 text-[10px] text-white/75 transition hover:bg-white/15 hover:text-white disabled:cursor-wait disabled:opacity-45"
+                                title={label}
+                                onClick={() => void captureFrame(kind)}
+                            >
+                                {capturing === kind ? "截取中..." : label}
+                            </button>
+                        ))}
+                        {captureFailed ? <span className="shrink-0 text-[10px] text-red-300">截帧失败</span> : null}
+                    </div>
+                ) : null}
+            </div>
+        </div>
     );
 }
 

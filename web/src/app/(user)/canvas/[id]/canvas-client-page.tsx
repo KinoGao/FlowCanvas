@@ -25,7 +25,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal, message } from "antd";
-import { NODE_DEFAULT_SIZE, getNodeSpec } from "../constants";
+import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constants";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -56,6 +56,7 @@ import {
     type CanvasAssistantSession,
     type CanvasConnection,
     type CanvasImageGenerationType,
+    type CanvasNodeActionIntent,
     type CanvasNodeData,
     type CanvasNodeMetadata,
     type ConnectionHandle,
@@ -65,6 +66,7 @@ import {
 } from "../types";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
+import { normalizeRuntimeModelOption } from "@/services/runtime-config";
 
 type CanvasClipboard = {
     nodes: CanvasNodeData[];
@@ -271,6 +273,7 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const height = type === CanvasNodeType.Config ? getConfigNodeHeight(metadata?.generationMode || spec.metadata?.generationMode) : spec.height;
 
     return {
         id,
@@ -278,10 +281,10 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         title: spec.title,
         position: {
             x: position.x - spec.width / 2,
-            y: position.y - spec.height / 2,
+            y: position.y - height / 2,
         },
         width: spec.width,
-        height: spec.height,
+        height,
         metadata: { ...spec.metadata, ...metadata },
     };
 }
@@ -373,11 +376,44 @@ function ConnectionCreateMenu({
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
+    const menuRef = useRef<HTMLDivElement>(null);
+    const [menuPosition, setMenuPosition] = useState(position);
+
+    useLayoutEffect(() => {
+        const element = menuRef.current;
+        const offsetParent = element?.offsetParent as HTMLElement | null;
+        if (!element || !offsetParent) return;
+        let frame = 0;
+        const updatePosition = () => {
+            const padding = 12;
+            const { width, height } = element.getBoundingClientRect();
+            if (!width || !height) return;
+            const nextPosition = {
+                x: Math.min(Math.max(padding, position.x), Math.max(padding, offsetParent.clientWidth - width - padding)),
+                y: Math.min(Math.max(padding, position.y), Math.max(padding, offsetParent.clientHeight - height - padding)),
+            };
+            setMenuPosition((current) => (current.x === nextPosition.x && current.y === nextPosition.y ? current : nextPosition));
+        };
+        const scheduleUpdate = () => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(updatePosition);
+        };
+        scheduleUpdate();
+        const observer = new ResizeObserver(scheduleUpdate);
+        observer.observe(element);
+        observer.observe(offsetParent);
+        return () => {
+            cancelAnimationFrame(frame);
+            observer.disconnect();
+        };
+    }, [position.x, position.y]);
+
     return (
         <div
+            ref={menuRef}
             className="nodrag nopan absolute z-[120] w-[300px] rounded-[18px] border p-3 shadow-2xl backdrop-blur"
             data-connection-create-menu
-            style={{ left: position.x, top: position.y, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+            style={{ left: menuPosition.x, top: menuPosition.y, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
@@ -455,6 +491,12 @@ function ReactFlowCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nodeDraggingRef = useRef(false);
+    const imageTapGestureRef = useRef<{ nodeId: string | null; count: number; lastAt: number; composerTimer: number | null }>({
+        nodeId: null,
+        count: 0,
+        lastAt: 0,
+        composerTimer: null,
+    });
 
     const config = useConfigStore((state) => state.config);
     const comfyui = useConfigStore((state) => state.comfyui);
@@ -533,9 +575,7 @@ function ReactFlowCanvasPage() {
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
-    const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
-    const [superResolveNodeId, setSuperResolveNodeId] = useState<string | null>(null);
-    const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
+    const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);    const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
@@ -571,6 +611,14 @@ function ReactFlowCanvasPage() {
         selectedNodeIdsRef.current = next;
         setSelectedNodeIdsState(next);
     }, []);
+
+    const resetImageTapGesture = useCallback(() => {
+        const gesture = imageTapGestureRef.current;
+        if (gesture.composerTimer) window.clearTimeout(gesture.composerTimer);
+        imageTapGestureRef.current = { nodeId: null, count: 0, lastAt: 0, composerTimer: null };
+    }, []);
+
+    useEffect(() => () => resetImageTapGesture(), [resetImageTapGesture]);
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -1121,9 +1169,7 @@ function ReactFlowCanvasPage() {
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
-    const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
-    const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
-    const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
+    const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;    const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null;
@@ -1334,7 +1380,7 @@ function ReactFlowCanvasPage() {
     }, []);
 
     const handleGroupAction = useCallback(
-        (node: CanvasNodeData, action: "run" | "toolbox" | "storyboard" | "ungroup" | "download") => {
+        (node: CanvasNodeData, action: "storyboard" | "ungroup") => {
             if (node.type !== CanvasNodeType.Group) return;
             if (action === "ungroup") {
                 ungroupNodes([node.id]);
@@ -1345,9 +1391,6 @@ function ReactFlowCanvasPage() {
                 message.success("已转换为分镜组");
                 return;
             }
-            if (action === "run") message.info("整组执行会按组内连线顺序触发生成，后续接入批量队列");
-            if (action === "toolbox") message.info("已保留工具箱入口，后续会把该组保存为模板");
-            if (action === "download") message.info("批量下载会收集组内图片/视频/音频，后续接入打包下载");
         },
         [message, ungroupNodes],
     );
@@ -1463,25 +1506,28 @@ function ReactFlowCanvasPage() {
     }, []);
 
     const selectConnection = useCallback((connectionId: string) => {
+        resetImageTapGesture();
         selectedNodeIdsRef.current = new Set();
         selectedConnectionIdRef.current = connectionId;
         setSelectedConnectionId(connectionId);
         setSelectedNodeIds(new Set());
         setContextMenu(null);
         setDialogNodeId(null);
-    }, []);
+    }, [resetImageTapGesture]);
 
     const openConnectionContextMenu = useCallback((event: ReactMouseEvent<Element>, connectionId: string) => {
+        resetImageTapGesture();
         selectedNodeIdsRef.current = new Set();
         selectedConnectionIdRef.current = connectionId;
         setSelectedConnectionId(connectionId);
         setSelectedNodeIds(new Set());
         setDialogNodeId(null);
         setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId });
-    }, []);
+    }, [resetImageTapGesture]);
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
+        resetImageTapGesture();
         selectedNodeIdsRef.current = new Set();
         selectedConnectionIdRef.current = null;
         setSelectedNodeIds(new Set());
@@ -1491,7 +1537,7 @@ function ReactFlowCanvasPage() {
         setToolbarNodeId(null);
         setDialogNodeId(null);
         setEditingNodeId(null);
-    }, [cancelPendingConnectionCreate]);
+    }, [cancelPendingConnectionCreate, resetImageTapGesture]);
 
     const clearCanvas = useCallback(() => {
         setNodes([]);
@@ -1949,6 +1995,7 @@ function ReactFlowCanvasPage() {
             }
 
             if (event.key === "Escape") {
+                resetImageTapGesture();
                 setSelectedNodeIds(new Set());
                 setSelectedConnectionId(null);
                 setContextMenu(null);
@@ -1967,7 +2014,7 @@ function ReactFlowCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown, { capture: true });
         return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-    }, [copySelectedNodes, createGroupFromSelection, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
+    }, [copySelectedNodes, createGroupFromSelection, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
 
     const handleConnectStart = useCallback(
         (nodeId: string, handleType: "source" | "target") => {
@@ -2010,14 +2057,14 @@ function ReactFlowCanvasPage() {
         const isMediaPreviewNode =
             node?.type === CanvasNodeType.Image &&
             Boolean(node.metadata?.content || node.metadata?.storageKey);
-        if (nextSelected.size === 1 && !isMediaPreviewNode && node?.type !== CanvasNodeType.Group) {
-            const nextDialogNodeId = nextSelected.values().next().value as string | undefined;
-            setDialogNodeId(nextDialogNodeId ?? null);
+        if (!isMediaPreviewNode || isToggle || imageTapGestureRef.current.nodeId !== nodeId) resetImageTapGesture();
+        if (!isToggle && nextSelected.size === 1 && !isMediaPreviewNode && node?.type !== CanvasNodeType.Group && node?.metadata?.canvasTool !== "director") {
+            setDialogNodeId(nodeId);
         } else {
             setDialogNodeId(null);
         }
         return !isToggle;
-    }, []);
+    }, [resetImageTapGesture]);
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
         setNodes((prev) => {
@@ -2133,9 +2180,12 @@ function ReactFlowCanvasPage() {
 
     const openTextEditor = useCallback((node: CanvasNodeData) => {
         if (node.type !== CanvasNodeType.Text) return;
-        setSelectedNodeIds(new Set([node.id]));
+        const next = new Set([node.id]);
+        selectedNodeIdsRef.current = next;
+        setSelectedNodeIds(next);
+        selectedConnectionIdRef.current = null;
         setSelectedConnectionId(null);
-        setDialogNodeId(node.id);
+        setDialogNodeId(null);
         setEditingNodeId(node.id);
         setEditRequestNonce((value) => value + 1);
     }, []);
@@ -2152,6 +2202,18 @@ function ReactFlowCanvasPage() {
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+    }, []);
+
+    const handleConfigNodeHeightChange = useCallback((nodeId: string, height: number) => {
+        setNodes((prev) => {
+            let changed = false;
+            const next = prev.map((node) => {
+                if (node.id !== nodeId || node.height === height) return node;
+                changed = true;
+                return { ...node, height };
+            });
+            return changed ? next : prev;
+        });
     }, []);
 
     const handleNodeHoverStart = useCallback(
@@ -3444,6 +3506,44 @@ function ReactFlowCanvasPage() {
         [screenToCanvas, size.height, size.width],
     );
 
+    const insertVideoFrameCapture = useCallback(async (sourceNode: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => {
+        const videoNode = nodesRef.current.find((node) => node.id === sourceNode.id && node.type === CanvasNodeType.Video);
+        if (!videoNode) {
+            message.error("源视频节点已不存在");
+            return;
+        }
+        const frameLabel = kind === "first" ? "首帧" : kind === "last" ? "尾帧" : "当前帧";
+        try {
+            const image = await uploadImage(dataUrl);
+            const size = fitNodeSize(image.width, image.height);
+            const frameNode = {
+                ...createCanvasNode(
+                    CanvasNodeType.Image,
+                    {
+                        x: videoNode.position.x + videoNode.width + 64 + size.width / 2,
+                        y: videoNode.position.y + videoNode.height / 2,
+                    },
+                    {
+                        ...imageMetadata(image),
+                        freeResize: true,
+                        status: NODE_STATUS_SUCCESS,
+                    },
+                ),
+                title: `${videoNode.title || "视频"} - ${frameLabel}`,
+                width: size.width,
+                height: size.height,
+            } satisfies CanvasNodeData;
+            setNodes((previous) => [...previous, frameNode]);
+            setConnections((previous) => [...previous, { id: nanoid(), fromNodeId: videoNode.id, toNodeId: frameNode.id }]);
+            setSelectedNodeIds(new Set([frameNode.id]));
+            setSelectedConnectionId(null);
+            message.success(`${frameLabel}已插入画布`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "视频截帧插入失败");
+            throw error;
+        }
+    }, []);
+
     const insertDirectorCaptures = useCallback(
         async (directorNodeId: string, captures: DirectorDeskCapture[]) => {
             const directorNode = nodesRef.current.find((node) => node.id === directorNodeId);
@@ -3648,7 +3748,7 @@ function ReactFlowCanvasPage() {
                 inputSummary={configInputSummaryById.get(contentNode.id) || EMPTY_INPUT_SUMMARY}
                 mentionReferences={mentionReferencesByNodeId.get(contentNode.id) || EMPTY_MENTION_REFERENCES}
                 onConfigChange={handleConfigNodeChange}
-                onHeightChange={(nodeId, height) => handleNodeResize(nodeId, contentNode.width, height)}
+                onHeightChange={handleConfigNodeHeightChange}
                 onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                 onStop={confirmStopGeneration}
                 onGenerate={(nodeId) => {
@@ -3658,7 +3758,7 @@ function ReactFlowCanvasPage() {
                 }}
             />
         ),
-        [configInputSummaryById, configInputsById, confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, handleNodeResize, mentionReferencesByNodeId, runningNodeId],
+        [configInputSummaryById, configInputsById, confirmStopGeneration, handleConfigNodeChange, handleConfigNodeHeightChange, handleGenerateNode, mentionReferencesByNodeId, runningNodeId],
     );
 
     const pendingConnectionCreatePosition = pendingConnectionCreate ? canvasToScreen(pendingConnectionCreate.position) : null;
@@ -3781,6 +3881,135 @@ function ReactFlowCanvasPage() {
         },
         [selectOnlyNode],
     );
+
+    const handleLeaferNodeTap = useCallback(
+        (nodeId: string) => {
+            const node = nodeByIdRef.current.get(nodeId);
+            const isPopulatedImage =
+                node?.type === CanvasNodeType.Image &&
+                Boolean(node.metadata?.content || node.metadata?.storageKey);
+            if (!node || !isPopulatedImage) return;
+
+            const now = Date.now();
+            const previous = imageTapGestureRef.current;
+            if (previous.nodeId !== nodeId || now - previous.lastAt > 750) {
+                resetImageTapGesture();
+                imageTapGestureRef.current = { nodeId, count: 1, lastAt: now, composerTimer: null };
+                return;
+            }
+
+            const count = previous.count + 1;
+            previous.count = count;
+            previous.lastAt = now;
+            if (count === 2) {
+                if (previous.composerTimer) window.clearTimeout(previous.composerTimer);
+                previous.composerTimer = window.setTimeout(() => {
+                    const currentGesture = imageTapGestureRef.current;
+                    if (currentGesture.nodeId !== nodeId || currentGesture.count !== 2) return;
+                    const currentNode = nodeByIdRef.current.get(nodeId);
+                    resetImageTapGesture();
+                    if (currentNode) openNodeComposer(currentNode);
+                }, 760);
+                return;
+            }
+
+            resetImageTapGesture();
+            handleViewNodeImage(node);
+        },
+        [handleViewNodeImage, openNodeComposer, resetImageTapGesture],
+    );
+    const createConnectedGenerationNode = useCallback(
+        (sourceNode: CanvasNodeData, type: CanvasNodeType.Video | CanvasNodeType.Audio) => {
+            const source = nodesRef.current.find((node) => node.id === sourceNode.id);
+            if (!source) return;
+            const spec = NODE_DEFAULT_SIZE[type];
+            const prompt = (source.metadata?.content || source.metadata?.prompt || "").trim();
+            const target = createCanvasNode(
+                type,
+                { x: source.position.x + source.width + 96, y: source.position.y },
+                type === CanvasNodeType.Video
+                    ? {
+                          status: NODE_STATUS_IDLE,
+                          prompt,
+                          composerContent: prompt,
+                          generationMode: "video",
+                          videoGenerationMode: "text-to-video",
+                          model: effectiveConfig.videoModel || effectiveConfig.model,
+                      }
+                    : {
+                          status: NODE_STATUS_IDLE,
+                          prompt,
+                          composerContent: prompt,
+                          generationMode: "audio",
+                          model: effectiveConfig.audioModel || effectiveConfig.model,
+                      },
+            );
+            target.title = type === CanvasNodeType.Video ? "文生视频" : "文字生音乐";
+            target.width = spec.width;
+            target.height = spec.height;
+            const nextNodes = [...nodesRef.current, target];
+            const nextConnections = [...connectionsRef.current, { id: nanoid(), fromNodeId: source.id, toNodeId: target.id }];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([target.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(target.id);
+            setEditingNodeId(null);
+        },
+        [effectiveConfig.audioModel, effectiveConfig.model, effectiveConfig.videoModel],
+    );
+
+    const handleNodeAction = useCallback(
+        (node: CanvasNodeData, intent: CanvasNodeActionIntent) => {
+            switch (intent) {
+                case "text-to-video":
+                    createConnectedGenerationNode(node, CanvasNodeType.Video);
+                    return;
+                case "text-to-audio":
+                    createConnectedGenerationNode(node, CanvasNodeType.Audio);
+                    return;
+                case "script-edit":
+                    openNodeComposer(node);
+                    return;
+                case "script-to-storyboard":
+                    createScriptStoryboard(node);
+                    return;
+                case "script-to-video":
+                    createScriptVideoNode(node);
+                    return;
+                case "script-to-audio":
+                    createScriptNarrationNode(node);
+                    return;
+                case "image-to-panorama": {
+                    const prompt = (node.metadata?.composerContent || node.metadata?.prompt || DEFAULT_PANORAMA_360_PROMPT).trim();
+                    const nextNode: CanvasNodeData = {
+                        ...node,
+                        title: node.title || "360场景",
+                        metadata: {
+                            ...node.metadata,
+                            canvasTool: "panorama360",
+                            prompt,
+                            composerContent: prompt,
+                            generationMode: "image",
+                            generationType: "generation",
+                            model: node.metadata?.model || effectiveConfig.imageModel || effectiveConfig.model,
+                            size: "2048x1024",
+                            count: 1,
+                            freeResize: true,
+                            status: NODE_STATUS_IDLE,
+                            errorDetails: undefined,
+                        },
+                    };
+                    setNodes((current) => current.map((item) => (item.id === node.id ? nextNode : item)));
+                    openNodeComposer(nextNode);
+                    return;
+                }
+            }
+        },
+        [createConnectedGenerationNode, createScriptNarrationNode, createScriptStoryboard, createScriptVideoNode, effectiveConfig.imageModel, effectiveConfig.model, openNodeComposer],
+    );
     const reactFlowConnections = useMemo(
         () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
         [batchVisibilityIndex.hiddenConnectionEndpointIds, connections],
@@ -3819,13 +4048,15 @@ function ReactFlowCanvasPage() {
               const shellHeight = shellRect?.height || size.height || 900;
               const dockSafeBottom = shellHeight - 104;
               const rawTop = nodeBottom + estimatedHeight > dockSafeBottom && nodeTop > estimatedHeight + 24 ? nodeTop - estimatedHeight - 14 : nodeBottom;
+              const minTop = 24;
+              const maxTop = Math.max(minTop, dockSafeBottom - estimatedHeight);
               const halfWidth = composerWidth / 2;
               const minLeft = halfWidth + 24;
               const shellWidth = shellRect?.width || size.width;
               const maxLeft = Math.max(minLeft, shellWidth - halfWidth - 24);
               return {
                   left: clampNumber(rawLeft, minLeft, maxLeft),
-                  top: rawTop,
+                  top: clampNumber(rawTop, minTop, maxTop),
               };
           })()
         : null;
@@ -3851,6 +4082,8 @@ function ReactFlowCanvasPage() {
         const rawTop = nodeBottom + estimatedHeight > dockSafeBottom && nodeTop > estimatedHeight + 24
             ? nodeTop - estimatedHeight - 14
             : nodeBottom;
+        const minTop = 24;
+        const maxTop = Math.max(minTop, dockSafeBottom - estimatedHeight);
         const width = composerWidthRef.current;
         const halfWidth = width / 2;
         const minLeft = halfWidth + 24;
@@ -3858,7 +4091,7 @@ function ReactFlowCanvasPage() {
         const maxLeft = Math.max(minLeft, shellWidth - halfWidth - 24);
 
         overlay.style.left = `${clampNumber(rawLeft, minLeft, maxLeft) - halfWidth}px`;
-        overlay.style.top = `${rawTop}px`;
+        overlay.style.top = `${clampNumber(rawTop, minTop, maxTop)}px`;
     }, [size.height, size.width]);
     if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
     if (canvasSessionExpired) return <CanvasExpiredShell onBack={() => navigate("/canvas")} />;
@@ -3912,6 +4145,7 @@ function ReactFlowCanvasPage() {
                     onViewportChange={handleReactFlowViewportChange}
                     onViewportPresentation={handleViewportPresentation}
                     onNodePointerDown={handleLeaferNodePointerDown}
+                    onNodeTap={handleLeaferNodeTap}
                     onNodeDragStart={handleLeaferNodeDragStart}
                     onNodeDrag={handleLeaferNodeDrag}
                     onNodeDragStop={handleLeaferNodeDragStop}
@@ -3934,10 +4168,10 @@ function ReactFlowCanvasPage() {
                             if (mode === 'toggle' && next.has(nodeId)) next.delete(nodeId);
                             else next.add(nodeId);
                         }
+                        resetImageTapGesture();
                         selectedNodeIdsRef.current = next;
                         setSelectedNodeIds(next);
-                        if (next.size === 1) setDialogNodeId(Array.from(next)[0]);
-                        else setDialogNodeId(null);
+                        setDialogNodeId(null);
                         setContextMenu(null);
                     }}
                     connectingParams={connectingParams}
@@ -3959,8 +4193,12 @@ function ReactFlowCanvasPage() {
                             const isConnectionHovered = hoveredConnectionId === connection.id;
                             const isRelatedConnection = relatedHighlight.connectionIds.has(connection.id);
                             return (
-                                <g key={connection.id}>
+                                <g
+                                    key={connection.id}
+                                    className={`canvas-connection-group${isConnectionSelected ? " is-selected" : ""}${isConnectionHovered ? " is-hovered" : ""}`}
+                                >
                                     <path
+                                        className="canvas-connection-hit"
                                         data-connection-id={connection.id}
                                         d={path}
                                         fill="none"
@@ -3969,12 +4207,14 @@ function ReactFlowCanvasPage() {
                                         strokeLinecap="round"
                                         vectorEffect="non-scaling-stroke"
                                         style={{ cursor: "pointer", pointerEvents: "stroke" }}
+                                        onPointerEnter={() => setHoveredConnectionId(connection.id)}
+                                        onPointerLeave={() => {
+                                            setHoveredConnectionId((current) => current === connection.id ? null : current);
+                                        }}
                                         onPointerDown={(event) => {
                                             event.stopPropagation();
                                             selectConnection(connection.id);
                                         }}
-                                        onPointerEnter={() => setHoveredConnectionId(connection.id)}
-                                        onPointerLeave={() => setHoveredConnectionId((current) => (current === connection.id ? null : current))}
                                         onContextMenu={(event) => {
                                             event.preventDefault();
                                             event.stopPropagation();
@@ -3982,31 +4222,47 @@ function ReactFlowCanvasPage() {
                                         }}
                                     />
                                     <path
+                                        className="canvas-connection-line"
                                         d={path}
                                         fill="none"
-                                        stroke={isConnectionSelected || isConnectionHovered ? "#e0e4e8" : isRelatedConnection ? "#67e8f9" : "#86909c"}
-                                        strokeWidth={isConnectionSelected || isConnectionHovered ? 3 : 2.4}
+                                        stroke={isConnectionSelected ? "#e0e4e8" : isRelatedConnection ? "#67e8f9" : "#86909c"}
+                                        strokeWidth={isConnectionSelected ? 3 : 2.4}
                                         strokeLinecap="round"
-                                        opacity={isConnectionSelected || isConnectionHovered ? 1 : isRelatedConnection ? 0.88 : 0.78}
+                                        opacity={isConnectionSelected ? 1 : isRelatedConnection ? 0.88 : 0.78}
                                         vectorEffect="non-scaling-stroke"
                                         style={{ pointerEvents: "none" }}
                                     />
-                                    {isConnectionSelected || isConnectionHovered ? (
-                                        (isConnectionSelected ? [0, 1, 2] : [0]).map((index) => (
+                                    {isConnectionSelected
+                                        ? [0, 1, 2].map((index) => (
                                             <path
                                                 key={index}
-                                                className={isConnectionSelected ? "canvas-flow-edge" : "canvas-flow-edge canvas-flow-edge-hover"}
+                                                className="canvas-flow-edge canvas-connection-selected-flow"
                                                 d={path}
                                                 fill="none"
-                                                stroke={isConnectionSelected ? "#e0f2fe" : "#a5f3fc"}
-                                                strokeWidth={isConnectionSelected ? 4 : 3.4}
+                                                stroke="#e0f2fe"
+                                                strokeWidth={4}
                                                 strokeLinecap="round"
-                                                strokeDasharray={isConnectionSelected ? "10 34" : "8 42"}
+                                                strokeDasharray="10 34"
                                                 vectorEffect="non-scaling-stroke"
                                                 style={{ pointerEvents: "none", animationDelay: `${index * -300}ms` }}
                                             />
                                         ))
-                                    ) : null}
+                                        : isConnectionHovered
+                                            ? (
+                                                <path
+                                                    key={`hover-${connection.id}`}
+                                                    className="canvas-flow-edge canvas-flow-edge-hover canvas-connection-flow"
+                                                    d={path}
+                                                    fill="none"
+                                                    stroke="#a5f3fc"
+                                                    strokeWidth={3.4}
+                                                    strokeLinecap="round"
+                                                    strokeDasharray="8 42"
+                                                    vectorEffect="non-scaling-stroke"
+                                                    style={{ pointerEvents: "none" }}
+                                                />
+                                            )
+                                            : null}
                                 </g>
                             );
                         })}
@@ -4047,9 +4303,11 @@ function ReactFlowCanvasPage() {
                                 onToggleBatch={toggleBatchExpanded}
                                 onSetBatchPrimary={setBatchPrimary}
                                 onOpenComposer={openNodeComposer}
+                                onNodeAction={handleNodeAction}
                                 onUpload={(item) => handleUploadRequest(item.id)}
                                 onRetry={handleRetryNodeAction}
                                 onGenerateImage={generateImageFromTextNode}
+                                onCaptureVideoFrame={insertVideoFrameCapture}
                                 onViewImage={handleViewNodeImage}
                                 onGroupAction={handleGroupAction}
                                 onContextMenu={handleNodeContextMenu}
@@ -4070,6 +4328,7 @@ function ReactFlowCanvasPage() {
                         }}
                     >
                         <div
+                            data-canvas-composer
                             className="creative-os-composer-scroll pointer-events-auto max-h-[60vh] overflow-y-auto"
                             style={{
                                 width: composerWidth,
@@ -4133,7 +4392,7 @@ function ReactFlowCanvasPage() {
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
                 ) : null}
 
-                {!isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode ? (
+                {!dialogNode && !isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode ? (
                     <CanvasNodeHoverToolbar
                         node={toolbarNode}
                         viewport={viewport}
@@ -4152,9 +4411,7 @@ function ReactFlowCanvasPage() {
                         onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                         onCrop={(node) => setCropNodeId(node.id)}
                         onSplit={(node) => setSplitNodeId(node.id)}
-                        onUpscale={(node) => setUpscaleNodeId(node.id)}
-                        onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
-                        onAngle={(node) => setAngleNodeId(node.id)}
+                        onUpscale={(node) => setUpscaleNodeId(node.id)}                        onAngle={(node) => setAngleNodeId(node.id)}
                         onViewImage={handleViewNodeImage}
                         onReversePrompt={createImageReversePromptNodes}
                         onRetry={handleRetryNodeAction}
@@ -4195,10 +4452,6 @@ function ReactFlowCanvasPage() {
                     onAddVideoComposition={createVideoCompositionNode}
                     onAddDirector={createDirectorNode}
                     onAddPanorama360={createPanorama360Node}
-                    onTutorialAction={(action) => {
-                        const labels = { guide: "使用教程", support: "联系客服", sales: "联系销售", wechat: "关注公众号" };
-                        message.info(`${labels[action]}已打开`);
-                    }}
                 />
 
                 <CanvasZoomControls
@@ -4269,12 +4522,7 @@ function ReactFlowCanvasPage() {
                 {upscaleNode?.metadata?.content ? (
                     <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
                 ) : null}
-
-                <Modal title="AI 超分" open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
-                    <div className="py-8 text-center text-base font-medium">暂未实现</div>
-                </Modal>
-
-                {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
+{angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
                 <Modal
                     className={previewNode?.metadata?.canvasTool === 'panorama360' ? 'canvas-panorama-modal' : undefined}
@@ -5169,7 +5417,11 @@ function getGenerationCount(count: string) {
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
     const safePatch = patch || {};
-    const next = { ...node, metadata: { ...node.metadata, ...safePatch } };
+    const patchEntries = Object.entries(safePatch);
+    if (!patchEntries.length || patchEntries.every(([key, value]) => Object.is(node.metadata?.[key as keyof CanvasNodeData["metadata"]], value))) return node;
+    const nextMode = safePatch.generationMode || node.metadata?.generationMode;
+    const nextHeight = node.type === CanvasNodeType.Config && nextMode !== "comfyui" ? getConfigNodeHeight(nextMode) : node.height;
+    const next = { ...node, height: nextHeight, metadata: { ...node.metadata, ...safePatch } };
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
@@ -5206,9 +5458,12 @@ function getInputSummary(inputs: NodeGenerationInput[]) {
 
 function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
+    const selectedModel = normalizeRuntimeModelOption(config, node?.metadata?.model || defaultModel, mode)
+        || normalizeRuntimeModelOption(config, defaultModel, mode)
+        || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model);
     return {
         ...config,
-        model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        model: selectedModel,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,

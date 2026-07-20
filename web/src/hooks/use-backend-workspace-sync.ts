@@ -5,10 +5,12 @@ import { App } from "antd";
 
 import { useCanvasStore, type CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { ApiError, fetchCurrentUser } from "@/services/api/auth";
-import { backendFileUrl, fetchBackendBootstrap, pushBackendAssets, pushBackendConfig, pushBackendProjects, uploadBackendFile } from "@/services/api/backend-storage";
+import { clearBackendFileUrlCache, fetchBackendBootstrap, pushBackendAssets, pushBackendConfig, pushBackendProjects, signBackendFiles, uploadBackendFile } from "@/services/api/backend-storage";
+import { invalidateImageModelCapabilities, invalidateVideoModelCapabilities } from "@/services/api/model-capabilities";
+import { fetchRuntimeConfig } from "@/services/api/platform-admin";
+import { reconcileConfigWithRuntime } from "@/services/runtime-config";
 import { getMediaBlob } from "@/services/file-storage";
 import { getImageBlob } from "@/services/image-storage";
-import { clearLegacyWorkspace, readLegacyWorkspace, type LegacyWorkspace } from "@/services/legacy-workspace-storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { defaultConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -16,6 +18,18 @@ import { useUserStore } from "@/stores/use-user-store";
 type Tombstones = Record<string, string>;
 type SyncKind = "config" | "projects" | "assets";
 type BackendUpload = Awaited<ReturnType<typeof uploadBackendFile>>;
+type LegacyMigrationContext = {
+    uploads: Map<string, Promise<BackendUpload>>;
+    missingStorageKeys: Set<string>;
+    onMissing: (storageKey: string) => void;
+};
+
+class LegacyMediaMissingError extends Error {
+    constructor(readonly storageKey: string) {
+        super("Legacy media file is missing: " + storageKey);
+        this.name = "LegacyMediaMissingError";
+    }
+}
 
 const BACKEND_SYNC_DEBOUNCE_MS = 500;
 const BACKEND_BOOTSTRAP_RETRY_MS = 5000;
@@ -27,11 +41,9 @@ export function useBackendWorkspaceSync() {
     const userId = useUserStore((state) => state.user?.id || "");
     const token = useUserStore((state) => state.token);
     const saveMode = useUserStore((state) => state.saveMode);
-    const backendImportedAt = useUserStore((state) => (state.user ? state.backendImportedAtByUser[state.user.id] || "" : ""));
     const updateUser = useUserStore((state) => state.updateUser);
     const clearSession = useUserStore((state) => state.clearSession);
     const setWorkspaceState = useUserStore((state) => state.setWorkspaceState);
-    const markBackendImported = useUserStore((state) => state.markBackendImported);
     const projects = useCanvasStore((state) => state.projects);
     const projectTombstones = useCanvasStore((state) => state.projectTombstones);
     const assets = useAssetStore((state) => state.assets);
@@ -47,6 +59,7 @@ export function useBackendWorkspaceSync() {
     const lastPushedVersionRef = useRef({ config: -1, projects: -1, assets: -1 });
     const pushingRef = useRef({ config: false, projects: false, assets: false });
     const pushFailuresRef = useRef(new Set<SyncKind>());
+    const missingLegacyStorageKeysRef = useRef(new Set<string>());
     const bootstrapFailureNotifiedRef = useRef(false);
     const [bootstrapRetryTick, setBootstrapRetryTick] = useState(0);
     const [pushRetryTick, setPushRetryTick] = useState(0);
@@ -88,6 +101,12 @@ export function useBackendWorkspaceSync() {
 
     const canSync = useCallback(() => saveMode === "backend" && Boolean(token) && readyRef.current && !applyingRef.current, [saveMode, token]);
 
+    const reportMissingLegacyMedia = useCallback((storageKey: string) => {
+        if (missingLegacyStorageKeysRef.current.has(storageKey)) return;
+        missingLegacyStorageKeysRef.current.add(storageKey);
+        console.warn("[backend-sync] legacy media missing; keeping original reference", { storageKey });
+    }, []);
+
     const syncConfigNow = useCallback(async () => {
         if (!canSync() || !token || pushingRef.current.config) return;
         const version = versionRef.current.config;
@@ -110,11 +129,15 @@ export function useBackendWorkspaceSync() {
     const syncProjectsNow = useCallback(async () => {
         if (!canSync() || !token || pushingRef.current.projects) return;
         const current = useCanvasStore.getState();
-        if (lastPushedVersionRef.current.projects === versionRef.current.projects && !hasMigratableStorageKey(current.projects)) return;
+        if (lastPushedVersionRef.current.projects === versionRef.current.projects && !hasMigratableStorageKey(current.projects, missingLegacyStorageKeysRef.current)) return;
         pushingRef.current.projects = true;
         let succeeded = false;
         try {
-            const migrated = (await migrateStorageKeysToBackend(current.projects, token)) as CanvasProject[];
+            const migrated = (await migrateStorageKeysToBackend(current.projects, token, {
+                uploads: new Map(),
+                missingStorageKeys: missingLegacyStorageKeysRef.current,
+                onMissing: reportMissingLegacyMedia,
+            })) as CanvasProject[];
             if (migrated !== current.projects) {
                 applyingRef.current = true;
                 replaceProjects(migrated, current.projectTombstones);
@@ -132,16 +155,20 @@ export function useBackendWorkspaceSync() {
             pushingRef.current.projects = false;
             if (succeeded && lastPushedVersionRef.current.projects !== versionRef.current.projects) void syncProjectsNow();
         }
-    }, [canSync, handlePushFailure, handlePushSuccess, replaceProjects, token]);
+    }, [canSync, handlePushFailure, handlePushSuccess, replaceProjects, reportMissingLegacyMedia, token]);
 
     const syncAssetsNow = useCallback(async () => {
         if (!canSync() || !token || pushingRef.current.assets) return;
         const current = useAssetStore.getState().assets;
-        if (lastPushedVersionRef.current.assets === versionRef.current.assets && !hasMigratableStorageKey(current)) return;
+        if (lastPushedVersionRef.current.assets === versionRef.current.assets && !hasMigratableStorageKey(current, missingLegacyStorageKeysRef.current)) return;
         pushingRef.current.assets = true;
         let succeeded = false;
         try {
-            const migrated = (await migrateStorageKeysToBackend(current, token)) as Asset[];
+            const migrated = (await migrateStorageKeysToBackend(current, token, {
+                uploads: new Map(),
+                missingStorageKeys: missingLegacyStorageKeysRef.current,
+                onMissing: reportMissingLegacyMedia,
+            })) as Asset[];
             if (migrated !== current) {
                 applyingRef.current = true;
                 replaceAssets(migrated);
@@ -158,17 +185,19 @@ export function useBackendWorkspaceSync() {
             pushingRef.current.assets = false;
             if (succeeded && lastPushedVersionRef.current.assets !== versionRef.current.assets) void syncAssetsNow();
         }
-    }, [canSync, handlePushFailure, handlePushSuccess, replaceAssets, token]);
+    }, [canSync, handlePushFailure, handlePushSuccess, replaceAssets, reportMissingLegacyMedia, token]);
 
     useEffect(() => {
         if (!userHydrated) return;
         if (saveMode !== "backend") {
+            clearBackendFileUrlCache();
             readyRef.current = false;
             bootstrappedUserRef.current = "";
             setWorkspaceState("idle");
             return;
         }
         if (!token) {
+            clearBackendFileUrlCache();
             readyRef.current = false;
             bootstrappedUserRef.current = "";
             applyingRef.current = true;
@@ -184,44 +213,46 @@ export function useBackendWorkspaceSync() {
         if (bootstrappedUserRef.current === bootstrapIdentity) return;
         let cancelled = false;
         let retryTimer: number | undefined;
+        clearBackendFileUrlCache();
         readyRef.current = false;
         applyingRef.current = true;
         pushFailuresRef.current.clear();
+        missingLegacyStorageKeysRef.current.clear();
         setWorkspaceState("loading");
         replaceProjects([], {});
         replaceAssets([]);
         replaceConfig(defaultConfig);
 
         void (async () => {
-            const currentUser = await fetchCurrentUser(token);
-            if (cancelled) return;
-            const identity = currentUser.id + ":" + token;
-            const remote = await fetchBackendBootstrap(token);
-            if (cancelled) return;
-
-            const shouldReadLegacy = !backendImportedAt;
-            const legacy = shouldReadLegacy ? await readLegacyWorkspace() : emptyLegacyWorkspace();
-            const remoteConfig = parseRemoteConfig(remote.config?.data);
-            const nextConfig = remoteConfig || legacy.config || defaultConfig;
-            const tombstones = mergeTombstones(legacy.projectTombstones, remote.projectTombstones || {});
-            const mergedProjects = mergeProjectsById(legacy.projects, remote.projects || [], tombstones);
-            const mergedAssets = mergeById(legacy.assets, remote.assets || [], "updatedAt");
-            const uploads = new Map<string, Promise<BackendUpload>>();
-            const migratedProjects = (await migrateStorageKeysToBackend(mergedProjects, token, uploads)) as CanvasProject[];
-            const migratedAssets = (await migrateStorageKeysToBackend(mergedAssets, token, uploads)) as Asset[];
-
-            await Promise.all([
-                pushBackendProjects(token, migratedProjects, tombstones),
-                pushBackendAssets(token, migratedAssets),
-                pushBackendConfig(token, nextConfig),
+            const [currentUser, remote, runtime] = await Promise.all([
+                fetchCurrentUser(token),
+                fetchBackendBootstrap(token),
+                fetchRuntimeConfig(),
             ]);
             if (cancelled) return;
-            if (shouldReadLegacy) await clearLegacyWorkspace(legacy);
+            const identity = currentUser.id + ":" + token;
+
+            const remoteConfig = parseRemoteConfig(remote.config?.data);
+            const reconciled = reconcileConfigWithRuntime(
+                remoteConfig || defaultConfig,
+                runtime,
+                useConfigStore.getState().comfyui,
+            );
+            const nextConfig = reconciled.config;
+            const tombstones = remote.projectTombstones || {};
+            const remoteProjects = remote.projects || [];
+            const remoteAssets = remote.assets || [];
+            invalidateImageModelCapabilities();
+            invalidateVideoModelCapabilities();
+            await signBackendFiles(token, collectBackendStorageKeys([remoteProjects, remoteAssets, nextConfig]));
             if (cancelled) return;
 
-            replaceConfig(nextConfig);
-            replaceProjects(migratedProjects, tombstones);
-            replaceAssets(migratedAssets);
+            useConfigStore.setState({
+                config: nextConfig,
+                comfyui: reconciled.comfyui,
+            });
+            replaceProjects(remoteProjects, tombstones);
+            replaceAssets(remoteAssets);
             updateUser(currentUser);
             bootstrappedUserRef.current = identity;
             versionRef.current = { config: 0, projects: 0, assets: 0 };
@@ -230,7 +261,6 @@ export function useBackendWorkspaceSync() {
             applyingRef.current = false;
             bootstrapFailureNotifiedRef.current = false;
             setWorkspaceState("ready");
-            if (shouldReadLegacy) markBackendImported(currentUser.id);
         })()
             .catch((error) => {
                 if (cancelled) return;
@@ -255,7 +285,7 @@ export function useBackendWorkspaceSync() {
             cancelled = true;
             if (retryTimer !== undefined) window.clearTimeout(retryTimer);
         };
-    }, [backendImportedAt, bootstrapRetryTick, clearSession, markBackendImported, message, replaceAssets, replaceConfig, replaceProjects, saveMode, setWorkspaceState, token, updateUser, userHydrated, userId]);
+    }, [bootstrapRetryTick, clearSession, message, replaceAssets, replaceConfig, replaceProjects, saveMode, setWorkspaceState, token, updateUser, userHydrated, userId]);
 
     useEffect(() => {
         if (!pushRetryTick || saveMode !== "backend" || !token || !readyRef.current || applyingRef.current) return;
@@ -337,70 +367,39 @@ function parseRemoteConfig(value?: string): AiConfig | null {
     }
 }
 
-function emptyLegacyWorkspace(): LegacyWorkspace {
-    return { projects: [], projectTombstones: {}, assets: [], config: null, projectDetailKeys: [], hasData: false };
-}
-
-function mergeProjectsById(local: CanvasProject[], remote: CanvasProject[], tombstones: Tombstones) {
-    const byId = new Map<string, CanvasProject>();
-    remote.forEach((project) => {
-        if (project.id) byId.set(project.id, project);
-    });
-    local.forEach((project) => {
-        if (!project.id) return;
-        const current = byId.get(project.id);
-        const localTime = timeOf(project.updatedAt);
-        const remoteTime = timeOf(current?.updatedAt);
-        if (!current || localTime > remoteTime || (localTime === remoteTime && isProjectMoreComplete(project, current))) byId.set(project.id, project);
-    });
-    return Array.from(byId.values())
-        .filter((project) => !tombstones[project.id] || timeOf(tombstones[project.id]) < timeOf(project.updatedAt))
-        .sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt));
-}
-
-function isProjectMoreComplete(candidate: CanvasProject, current: CanvasProject) {
-    const candidateCounts = [candidate.nodes?.length || 0, candidate.connections?.length || 0, candidate.chatSessions?.length || 0];
-    const currentCounts = [current.nodes?.length || 0, current.connections?.length || 0, current.chatSessions?.length || 0];
-    for (let index = 0; index < candidateCounts.length; index++) {
-        if (candidateCounts[index] !== currentCounts[index]) return candidateCounts[index] > currentCounts[index];
+function collectBackendStorageKeys(value: unknown, keys = new Set<string>(), seen = new WeakSet<object>()): Set<string> {
+    if (typeof value === "string") {
+        if (value.startsWith("backend:")) keys.add(value);
+        return keys;
     }
-    return JSON.stringify(candidate).length > JSON.stringify(current).length;
+    if (!value || typeof value !== "object" || seen.has(value)) return keys;
+    seen.add(value);
+    if (Array.isArray(value)) {
+        value.forEach((item) => collectBackendStorageKeys(item, keys, seen));
+        return keys;
+    }
+    Object.values(value as Record<string, unknown>).forEach((item) => collectBackendStorageKeys(item, keys, seen));
+    return keys;
 }
 
-function mergeById<T extends { id?: string }>(local: T[], remote: T[], timeKey: string) {
-    const byId = new Map<string, T>();
-    remote.forEach((item) => {
-        if (item.id) byId.set(item.id, item);
-    });
-    local.forEach((item) => {
-        if (!item.id) return;
-        const current = byId.get(item.id);
-        if (!current || timeOf((item as Record<string, unknown>)[timeKey]) >= timeOf((current as Record<string, unknown>)[timeKey])) byId.set(item.id, item);
-    });
-    return Array.from(byId.values()).sort((a, b) => timeOf((b as Record<string, unknown>)[timeKey]) - timeOf((a as Record<string, unknown>)[timeKey]));
-}
-
-function mergeTombstones(local: Tombstones, remote: Tombstones) {
-    const merged = { ...remote };
-    Object.entries(local).forEach(([id, deletedAt]) => {
-        if (!merged[id] || timeOf(deletedAt) > timeOf(merged[id])) merged[id] = deletedAt;
-    });
-    return merged;
-}
-
-function hasMigratableStorageKey(value: unknown, seen = new WeakSet<object>()): boolean {
+function hasMigratableStorageKey(value: unknown, ignoredStorageKeys: ReadonlySet<string>, seen = new WeakSet<object>()): boolean {
     if (!value || typeof value !== "object") return false;
     if (seen.has(value)) return false;
     seen.add(value);
-    if (Array.isArray(value)) return value.some((item) => hasMigratableStorageKey(item, seen));
+    if (Array.isArray(value)) return value.some((item) => hasMigratableStorageKey(item, ignoredStorageKeys, seen));
     const source = value as Record<string, unknown>;
-    if (typeof source.storageKey === "string" && source.storageKey && !source.storageKey.startsWith("backend:")) return true;
-    return Object.values(source).some((item) => hasMigratableStorageKey(item, seen));
+    if (
+        typeof source.storageKey === "string"
+        && source.storageKey
+        && !source.storageKey.startsWith("backend:")
+        && !ignoredStorageKeys.has(source.storageKey)
+    ) return true;
+    return Object.values(source).some((item) => hasMigratableStorageKey(item, ignoredStorageKeys, seen));
 }
 
-async function migrateStorageKeysToBackend(value: unknown, token: string, uploads = new Map<string, Promise<BackendUpload>>()): Promise<unknown> {
+async function migrateStorageKeysToBackend(value: unknown, token: string, context: LegacyMigrationContext): Promise<unknown> {
     if (Array.isArray(value)) {
-        const nextItems = await Promise.all(value.map((item) => migrateStorageKeysToBackend(item, token, uploads)));
+        const nextItems = await Promise.all(value.map((item) => migrateStorageKeysToBackend(item, token, context)));
         return nextItems.every((item, index) => item === value[index]) ? value : nextItems;
     }
     if (!value || typeof value !== "object") return value;
@@ -412,25 +411,30 @@ async function migrateStorageKeysToBackend(value: unknown, token: string, upload
         record[key] = nextValue;
     };
     const storageKey = typeof source.storageKey === "string" ? source.storageKey : "";
-    if (storageKey && !storageKey.startsWith("backend:")) {
-        let pendingUpload = uploads.get(storageKey);
+    if (storageKey && !storageKey.startsWith("backend:") && !context.missingStorageKeys.has(storageKey)) {
+        let pendingUpload = context.uploads.get(storageKey);
         if (!pendingUpload) {
             pendingUpload = uploadLegacyMedia(storageKey, source, token);
-            uploads.set(storageKey, pendingUpload);
+            context.uploads.set(storageKey, pendingUpload);
         }
-        const uploaded = await pendingUpload;
-        const url = backendFileUrl(uploaded.storageKey, token);
-        setRecordValue("storageKey", uploaded.storageKey);
-        setRecordValue("bytes", uploaded.bytes);
-        setRecordValue("mimeType", uploaded.mimeType);
-        if (typeof source.content === "string") setRecordValue("content", url);
-        if (typeof source.dataUrl === "string") setRecordValue("dataUrl", url);
-        if (typeof source.url === "string") setRecordValue("url", url);
-        if (typeof source.coverUrl === "string") setRecordValue("coverUrl", url);
+        try {
+            const uploaded = await pendingUpload;
+            const url = uploaded.url;
+            setRecordValue("storageKey", uploaded.storageKey);
+            setRecordValue("bytes", uploaded.bytes);
+            setRecordValue("mimeType", uploaded.mimeType);
+            if (typeof source.content === "string") setRecordValue("content", url);
+            if (typeof source.dataUrl === "string") setRecordValue("dataUrl", url);
+            if (typeof source.url === "string") setRecordValue("url", url);
+            if (typeof source.coverUrl === "string") setRecordValue("coverUrl", url);
+        } catch (error) {
+            if (!(error instanceof LegacyMediaMissingError)) throw error;
+            context.onMissing(error.storageKey);
+        }
     }
     for (const key of Object.keys(source)) {
         if (key === "storageKey") continue;
-        const nextValue = await migrateStorageKeysToBackend(source[key], token, uploads);
+        const nextValue = await migrateStorageKeysToBackend(source[key], token, context);
         setRecordValue(key, nextValue);
     }
     return record || value;
@@ -440,7 +444,7 @@ async function uploadLegacyMedia(storageKey: string, source: Record<string, unkn
     const isImage = storageKey.startsWith("image:") || String(source.mimeType || "").startsWith("image/");
     let blob = isImage ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
     if (!blob) blob = await fetchReferencedBlob(source);
-    if (!blob) throw new Error("旧媒体文件缺失，迁移已中止：" + storageKey);
+    if (!blob) throw new LegacyMediaMissingError(storageKey);
     return uploadBackendFile(token, blob, storageKey.replace(/[:/\\]/g, "_") || "file");
 }
 

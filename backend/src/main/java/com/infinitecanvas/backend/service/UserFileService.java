@@ -56,21 +56,38 @@ public class UserFileService {
         entity.setBytes(file.getSize());
         entity.setRelativePath(relativePath);
         entity.setCreatedAt(Instant.now());
-        return files.save(entity);
+        try {
+            return files.save(entity);
+        } catch (RuntimeException error) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException cleanupError) {
+                error.addSuppressed(cleanupError);
+            }
+            throw error;
+        }
     }
 
     public Resource load(User user, String storageKey) {
-        UserFile file = files.findByStorageKey(storageKey).orElse(null);
-        if (file == null || !file.getUser().getId().equals(user.getId())) return null;
+        return loadByOwnerId(user.getId(), storageKey);
+    }
+
+    public Resource loadByOwnerId(String userId, String storageKey) {
+        UserFile file = findByOwnerId(userId, storageKey);
+        if (file == null) return null;
         Path path = fileDir.resolve(file.getRelativePath()).normalize();
         if (!path.startsWith(fileDir)) return null;
         Resource resource = new FileSystemResource(path);
-        return resource.exists() ? resource : null;
+        return resource.exists() && resource.isReadable() ? resource : null;
     }
 
     public UserFile find(User user, String storageKey) {
+        return findByOwnerId(user.getId(), storageKey);
+    }
+
+    public UserFile findByOwnerId(String userId, String storageKey) {
         UserFile file = files.findByStorageKey(storageKey).orElse(null);
-        return file != null && file.getUser().getId().equals(user.getId()) ? file : null;
+        return file != null && file.getUser().getId().equals(userId) ? file : null;
     }
 
     private String extension(String contentType, String fileName) {

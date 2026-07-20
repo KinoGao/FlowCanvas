@@ -1,4 +1,4 @@
-import { CanvasNodeType } from "./types";
+import { CanvasNodeType, type CanvasGenerationMode } from "./types";
 import type { CanvasNodeMetadata } from "./types";
 import { createDefaultCanvasNodeMetadata } from "./utils/canvas-node-metadata";
 
@@ -17,6 +17,10 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Audio]: { width: 220, height: 96, title: "Audio" },
     [CanvasNodeType.Group]: { width: 360, height: 260, title: "分组" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
+
+export function getConfigNodeHeight(mode?: CanvasGenerationMode) {
+    return mode === "video" ? 344 : NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
+}
 
 export const NODE_SPECS = {
     [CanvasNodeType.Image]: {

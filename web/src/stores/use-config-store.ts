@@ -16,6 +16,7 @@ export type ModelChannel = {
     apiFormat: ApiCallFormat;
     models: string[];
     modelLabels?: Record<string, string>;
+    modelPatterns?: Record<string, string[]>;
     useProxy?: boolean;
 };
 
@@ -296,6 +297,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         apiFormat,
         models: uniqueRawModels(channel?.models || []),
         modelLabels: channel?.modelLabels || {},
+        modelPatterns: channel?.modelPatterns || {},
         useProxy: Boolean(channel?.useProxy),
     };
 }

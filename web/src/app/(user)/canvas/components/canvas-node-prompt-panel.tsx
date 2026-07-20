@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, BadgePlus, Camera, ChevronDown, FileText, Languages, LoaderCircle, Maximize2, Sparkles, Square, Tag } from 'lucide-react';
+import { ArrowUp, BadgePlus, Camera, ChevronDown, FileText, Languages, LoaderCircle, Maximize2, Sparkles, Square, Tag, TriangleAlert } from 'lucide-react';
 import { App, Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -17,6 +17,9 @@ import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import type { VideoGenerationMode } from '@/services/api/model-capabilities';
+import { normalizeRuntimeModelOption } from '@/services/runtime-config';
+import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -40,7 +43,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
-    const { capability: videoCapability } = useVideoModelCapability(config.model);
+    const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
+    const isVideoCapabilityPending = mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching);
+    const isVideoCapabilityUnavailable = mode === "video" && !isVideoCapabilityPending && (!videoCapability || !videoCapability.modes.length);
     const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability?.modes);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
@@ -48,27 +53,102 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
     const [videoModeOpen, setVideoModeOpen] = useState(false);
     const [videoSettingsOpen, setVideoSettingsOpen] = useState(false);
-    const mentionLabels = useMemo(() => Array.from(new Set(mentionReferences.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length), [mentionReferences]);
+    const onPromptChangeRef = useRef(onPromptChange);
+    const onConfigChangeRef = useRef(onConfigChange);
+    const videoConfigRef = useRef(config);
+    const videoCapabilityRef = useRef(videoCapability);
+    const correctedVideoConfigKeyRef = useRef("");
+    const correctedModelKeyRef = useRef("");
+    videoConfigRef.current = config;
+    videoCapabilityRef.current = videoCapability;
+    const mentionReferenceSignature = mentionReferences.map(referenceSignature).join("\u001f");
+    const stableMentionReferences = useMemo(() => mentionReferences.map((reference) => ({ ...reference })), [mentionReferenceSignature]);
+    const mentionLabels = useMemo(() => Array.from(new Set(stableMentionReferences.filter((item) => item.active).map((item) => item.label))).sort((a, b) => b.length - a.length), [stableMentionReferences]);
+    const activeReferenceCounts = useMemo(() => stableMentionReferences.reduce((counts, reference) => {
+        if (reference.active && reference.kind !== "text") counts[reference.kind] += 1;
+        return counts;
+    }, { image: 0, video: 0, audio: 0 }), [stableMentionReferences]);
+    const videoReferenceValidationMessage = mode === "video" && selectedVideoMode && videoCapability
+        ? validateVideoReferenceCounts(selectedVideoMode, videoCapability, activeReferenceCounts)
+        : "";
+    useEffect(() => {
+        onPromptChangeRef.current = onPromptChange;
+        onConfigChangeRef.current = onConfigChange;
+    }, [onConfigChange, onPromptChange]);
+    const rawNodeModel = node.metadata?.model || "";
+    const canonicalNodeModel = rawNodeModel ? normalizeRuntimeModelOption(globalConfig, rawNodeModel, mode) : "";
+    useEffect(() => {
+        if (!rawNodeModel || !canonicalNodeModel || rawNodeModel === canonicalNodeModel) {
+            correctedModelKeyRef.current = "";
+            return;
+        }
+        const correctionKey = [node.id, rawNodeModel, canonicalNodeModel].join("\u001f");
+        if (correctedModelKeyRef.current === correctionKey) return;
+        correctedModelKeyRef.current = correctionKey;
+        onConfigChangeRef.current(node.id, { model: canonicalNodeModel });
+    }, [canonicalNodeModel, node.id, rawNodeModel]);
     useEffect(() => {
         const rawPrompt = isEditingExistingContent ? "" : node.metadata?.prompt || "";
-        const nextPrompt = normalizePromptReferences(rawPrompt, mentionReferences, mentionLabels);
+        const nextPrompt = normalizePromptReferences(rawPrompt, stableMentionReferences, mentionLabels);
         setPrompt((current) => (current === nextPrompt ? current : nextPrompt));
-        if (!isEditingExistingContent && nextPrompt !== rawPrompt && node.metadata?.prompt !== nextPrompt) onPromptChange(node.id, nextPrompt);
-    }, [isEditingExistingContent, mentionLabels, mentionReferences, node.id, node.metadata?.prompt, onPromptChange]);
+        if (!isEditingExistingContent && nextPrompt !== rawPrompt && node.metadata?.prompt !== nextPrompt) onPromptChangeRef.current(node.id, nextPrompt);
+    }, [isEditingExistingContent, mentionLabels, node.id, node.metadata?.prompt, stableMentionReferences]);
+
+    const videoCapabilityKey = videoCapabilitySignature(videoCapability);
+    const videoConfigSignature = [
+        node.metadata?.videoGenerationMode || "",
+        normalizeSeedanceRatio(config.size),
+        normalizeResolutionToken(config.vquality),
+        String(config.videoSeconds),
+        String(config.count),
+        config.videoGenerateAudio,
+        config.videoWatermark,
+        config.videoDraft,
+    ].join("\u001f");
+
+    const videoModel = config.model;
+    const currentVideoGenerationMode = node.metadata?.videoGenerationMode;
+    useEffect(() => {
+        const currentConfig = videoConfigRef.current;
+        const currentCapability = videoCapabilityRef.current;
+        if (mode !== "video" || isVideoCapabilityLoading || isVideoCapabilityFetching || !currentCapability?.modes.length) return;
+        const patch = normalizeVideoConfig(currentVideoGenerationMode, currentConfig, currentCapability);
+        const patchSignature = Object.entries(patch).map(([key, value]) => `${key}:${String(value)}`).join("|");
+        if (!patchSignature) {
+            correctedVideoConfigKeyRef.current = "";
+            return;
+        }
+        const correctionKey = [node.id, videoModel, videoCapabilityKey, videoConfigSignature, patchSignature].join("\u001e");
+        if (correctedVideoConfigKeyRef.current === correctionKey) return;
+        correctedVideoConfigKeyRef.current = correctionKey;
+        onConfigChangeRef.current(node.id, patch);
+    }, [currentVideoGenerationMode, isVideoCapabilityFetching, isVideoCapabilityLoading, mode, node.id, videoCapabilityKey, videoConfigSignature, videoModel]);
 
     useEffect(() => {
         textareaRef.current?.focus();
     }, [node.id]);
 
     const updatePrompt = (value: string) => {
-        const nextPrompt = normalizePromptReferences(value, mentionReferences, mentionLabels);
+        const nextPrompt = normalizePromptReferences(value, stableMentionReferences, mentionLabels);
         setPrompt((current) => (current === nextPrompt ? current : nextPrompt));
         if (!isEditingExistingContent && node.metadata?.prompt !== nextPrompt) onPromptChange(node.id, nextPrompt);
     };
 
     const submit = () => {
-        const text = normalizePromptReferences(prompt, mentionReferences, mentionLabels).trim();
+        const text = normalizePromptReferences(prompt, stableMentionReferences, mentionLabels).trim();
         if (!text || isRunning) return;
+        if (mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching)) {
+            message.info("正在读取当前模型的视频能力，请稍候");
+            return;
+        }
+        if (mode === "video" && (!videoCapability || !videoCapability.modes.length || !selectedVideoMode)) {
+            message.warning("当前模型未配置可用的视频生成能力，请联系管理员发布模型配置");
+            return;
+        }
+        if (videoReferenceValidationMessage) {
+            message.warning(videoReferenceValidationMessage);
+            return;
+        }
         if (mode !== "comfyui" && !isAiConfigReady(config, config.model)) {
             message.warning("\u5f53\u524d\u6a21\u578b\u6e20\u9053\u7f3a\u5c11 API Key\uff0c\u8bf7\u5148\u5b8c\u6210\u6e20\u9053\u914d\u7f6e");
             openConfigDialog(true);
@@ -108,6 +188,19 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </button>
             </div>
 
+            {mode === "video" && (isVideoCapabilityPending || isVideoCapabilityUnavailable) ? (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs" style={{ borderColor: theme.ui.hairline, color: theme.node.muted }}>
+                    {isVideoCapabilityPending ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : <TriangleAlert className="size-3.5 shrink-0" />}
+                    <span>{isVideoCapabilityPending ? "正在读取当前模型的视频能力" : "当前模型未配置可用的视频生成能力"}</span>
+                </div>
+            ) : null}
+            {videoReferenceValidationMessage ? (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs" style={{ borderColor: theme.ui.danger, color: theme.ui.danger }}>
+                    <TriangleAlert className="size-3.5 shrink-0" />
+                    <span>{videoReferenceValidationMessage}</span>
+                </div>
+            ) : null}
+
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
@@ -135,7 +228,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 open={videoModeOpen}
                                 theme={theme}
                                 value={selectedVideoMode}
-                                modes={videoCapability?.modes || ['text-to-video']}
+                                modes={videoCapability?.modes || []}
+                                disabled={isVideoCapabilityPending || isVideoCapabilityUnavailable}
+                                loading={isVideoCapabilityPending}
                                 onOpenChange={(open) => {
                                     setVideoModeOpen(open);
                                     if (open) {
@@ -178,7 +273,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className="creative-os-primary-action !h-9 !min-w-9 shrink-0 !rounded-full !px-0"
                     danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
+                    disabled={!isRunning && (!prompt.trim() || isVideoCapabilityPending || isVideoCapabilityUnavailable || Boolean(videoReferenceValidationMessage))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >
@@ -205,9 +300,12 @@ function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
+    const selectedModel = normalizeRuntimeModelOption(globalConfig, node.metadata?.model || defaultModel, mode)
+        || normalizeRuntimeModelOption(globalConfig, defaultModel, mode)
+        || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model);
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model: selectedModel,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
@@ -229,28 +327,24 @@ const VIDEO_GENERATION_MODES: Record<VideoGenerationMode, { label: string; icon:
     "image-to-video": { label: "图生视频", icon: <Camera className="size-3.5" /> },
     "first-last-frame": { label: "首尾帧", icon: <Sparkles className="size-3.5" /> },
     "image-reference": { label: "图片参考", icon: <Tag className="size-3.5" /> },
+    "multi-frame": { label: "智能多帧", icon: <BadgePlus className="size-3.5" /> },
 };
 
-function supportedVideoMode(value: VideoGenerationMode | undefined, modes: VideoGenerationMode[] | undefined): VideoGenerationMode {
-    const supported: VideoGenerationMode[] = modes?.length ? modes : ["text-to-video"];
-    return value && supported.includes(value) ? value : supported[0];
-}
-
-function VideoGenerationModeMenu({ open, value, modes, theme, onOpenChange, onChange }: { open: boolean; value: VideoGenerationMode; modes: VideoGenerationMode[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenChange: (open: boolean) => void; onChange: (value: VideoGenerationMode) => void }) {
+function VideoGenerationModeMenu({ open, value, modes, disabled, loading, theme, onOpenChange, onChange }: { open: boolean; value?: VideoGenerationMode; modes: VideoGenerationMode[]; disabled: boolean; loading: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenChange: (open: boolean) => void; onChange: (value: VideoGenerationMode) => void }) {
     const items = modes.map((mode) => ({ value: mode, ...VIDEO_GENERATION_MODES[mode] }));
-    const selected = items.find((item) => item.value === value) || items[0] || { value: "text-to-video" as const, ...VIDEO_GENERATION_MODES["text-to-video"] };
+    const selected = items.find((item) => item.value === value) || items[0];
     return (
         <div className="relative shrink-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold" style={{ background: theme.node.fill, color: theme.node.text }} onClick={() => onOpenChange(!open)}>
-                {selected.icon}
-                <span>{selected.label}</span>
+            <button type="button" disabled={disabled} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50" style={{ background: theme.node.fill, color: theme.node.text }} onClick={() => { if (!disabled) onOpenChange(!open); }}>
+                {selected?.icon || (loading ? <LoaderCircle className="size-3.5 animate-spin" /> : <TriangleAlert className="size-3.5" />)}
+                <span>{selected?.label || (loading ? "读取能力" : "能力不可用")}</span>
                 <ChevronDown className="size-3 opacity-70" />
             </button>
-            {open ? (
+            {open && !disabled && items.length ? (
                 <div className="absolute bottom-full left-0 z-[1300] mb-2 w-[198px] rounded-2xl border p-2 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.ui.hairline, color: theme.node.text }}>
                     <div className="px-2 pb-2 pt-1 text-xs" style={{ color: theme.node.muted }}>视频生成模式</div>
                     {items.map((item) => (
-                        <button key={item.value} type="button" className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:opacity-85" style={{ background: item.value === selected.value ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => { onChange(item.value); onOpenChange(false); }}>
+                        <button key={item.value} type="button" className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:opacity-85" style={{ background: item.value === selected?.value ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => { onChange(item.value); onOpenChange(false); }}>
                             {item.icon}
                             <span>{item.label}</span>
                         </button>
@@ -284,6 +378,9 @@ function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {
     return { audioInstructions: value };
 }
 
+function referenceSignature(reference: CanvasResourceReference) {
+    return [reference.id, reference.nodeId, reference.kind, reference.label, reference.title, reference.previewUrl || "", reference.storageKey || "", reference.text || "", reference.active ? "1" : "0"].join("\u001e");
+}
 function normalizePromptReferences(value: string, references: CanvasResourceReference[], labels: string[]) {
     let next = normalizeAdjacentMentionLabels(value, labels);
     references

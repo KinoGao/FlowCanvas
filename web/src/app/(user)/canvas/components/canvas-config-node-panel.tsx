@@ -1,7 +1,7 @@
 "use client";
 
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, Video, Workflow } from "lucide-react";
+import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Settings2, Square, TriangleAlert, Video, Workflow } from "lucide-react";
 import { App, Button, ConfigProvider, InputNumber, Segmented, Select, Switch, type SelectProps } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -13,10 +13,15 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
-import { NODE_DEFAULT_SIZE } from "../constants";
+import { getConfigNodeHeight } from "../constants";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import { listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
+import { normalizeRuntimeModelOption } from "@/services/runtime-config";
+import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
+import type { VideoGenerationMode } from "@/services/api/model-capabilities";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { VIDEO_GENERATION_MODE_LABELS, normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 
 type CanvasConfigNodePanelProps = {
     node: CanvasNodeData;
@@ -49,7 +54,7 @@ const renderCanvasSelectPopup = (menu: ReactNode) => (
 function CanvasSafeSelect(props: SelectProps<string>) {
     const [open, setOpen] = useState(false);
     return (
-        <div className="nodrag nopan" data-canvas-no-zoom onMouseDown={stopCanvasSelectInteraction} onPointerDown={stopCanvasSelectInteraction} onClick={() => setOpen(true)}>
+        <div className="nodrag nopan" onMouseDown={stopCanvasSelectInteraction} onPointerDown={stopCanvasSelectInteraction} onClick={() => setOpen(true)}>
             <Select
                 {...props}
                 open={open}
@@ -92,13 +97,76 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
     );
     const mode = node.metadata?.generationMode || defaultModeForNode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
+    const isVideoCapabilityPending = mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching);
+    const isVideoCapabilityUnavailable = mode === "video" && !isVideoCapabilityPending && (!videoCapability || !videoCapability.modes.length);
+    const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability?.modes);
+    const videoReferenceValidationMessage = mode === "video" && videoCapability && selectedVideoMode
+        ? validateVideoReferenceCounts(selectedVideoMode, videoCapability, { image: inputSummary.imageCount, video: inputSummary.videoCount, audio: inputSummary.audioCount })
+        : "";
+    const onConfigChangeRef = useRef(onConfigChange);
+    const videoConfigRef = useRef(config);
+    const videoCapabilityRef = useRef(videoCapability);
+    const correctedVideoConfigKeyRef = useRef("");
+    const correctedModelKeyRef = useRef("");
+    videoConfigRef.current = config;
+    videoCapabilityRef.current = videoCapability;
+    const rawNodeModel = node.metadata?.model || "";
+    const canonicalNodeModel = rawNodeModel ? normalizeRuntimeModelOption(globalConfig, rawNodeModel, mode) : "";
     const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
     const selectedWorkflow = useMemo(() => workflows.find((workflow) => workflow.id === (node.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId)) || workflows[0], [comfyui.defaultWorkflowId, node.metadata?.comfyWorkflowId, workflows]);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
-    const canGenerate = mode === "comfyui" ? Boolean(selectedWorkflow) : hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const hasGenerationInput = hasComposerContent || (mode === "audio" ? inputSummary.textCount > 0 : hasAnyInput);
+    const videoCapabilityReady = mode !== "video" || Boolean(!isVideoCapabilityPending && videoCapability?.modes.length && selectedVideoMode && !videoReferenceValidationMessage);
+    const canGenerate = (mode === "comfyui" ? Boolean(selectedWorkflow) : hasGenerationInput) && videoCapabilityReady;
+
+    useEffect(() => {
+        onConfigChangeRef.current = onConfigChange;
+    }, [onConfigChange]);
+
+    useEffect(() => {
+        if (!rawNodeModel || !canonicalNodeModel || rawNodeModel === canonicalNodeModel) {
+            correctedModelKeyRef.current = "";
+            return;
+        }
+        const correctionKey = [node.id, rawNodeModel, canonicalNodeModel].join("\u001f");
+        if (correctedModelKeyRef.current === correctionKey) return;
+        correctedModelKeyRef.current = correctionKey;
+        onConfigChangeRef.current(node.id, { model: canonicalNodeModel });
+    }, [canonicalNodeModel, node.id, rawNodeModel]);
+
+    const videoCapabilityKey = videoCapabilitySignature(videoCapability);
+    const videoConfigSignature = [
+        node.metadata?.videoGenerationMode || "",
+        normalizeSeedanceRatio(config.size),
+        normalizeResolutionToken(config.vquality),
+        String(config.videoSeconds),
+        String(config.count),
+        config.videoGenerateAudio,
+        config.videoWatermark,
+        config.videoDraft,
+    ].join("\u001f");
+    const videoModel = config.model;
+    const currentVideoGenerationMode = node.metadata?.videoGenerationMode;
+
+    useEffect(() => {
+        const currentConfig = videoConfigRef.current;
+        const currentCapability = videoCapabilityRef.current;
+        if (mode !== "video" || isVideoCapabilityLoading || isVideoCapabilityFetching || !currentCapability?.modes.length) return;
+        const patch = normalizeVideoConfig(currentVideoGenerationMode, currentConfig, currentCapability);
+        const patchSignature = Object.entries(patch).map(([key, value]) => `${key}:${String(value)}`).join("|");
+        if (!patchSignature) {
+            correctedVideoConfigKeyRef.current = "";
+            return;
+        }
+        const correctionKey = [node.id, videoModel, videoCapabilityKey, videoConfigSignature, patchSignature].join("\u001e");
+        if (correctedVideoConfigKeyRef.current === correctionKey) return;
+        correctedVideoConfigKeyRef.current = correctionKey;
+        onConfigChangeRef.current(node.id, patch);
+    }, [currentVideoGenerationMode, isVideoCapabilityFetching, isVideoCapabilityLoading, mode, node.id, videoCapabilityKey, videoConfigSignature, videoModel]);
 
     useEffect(() => {
         if (mode !== "comfyui") return;
@@ -134,7 +202,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
             const fieldsCount = selectedWorkflow.fields?.length ?? 0;
             desired = Math.min(COMFY_AUTO_EXPAND_BASE + fieldsCount * COMFY_AUTO_EXPAND_PER_FIELD, COMFY_AUTO_EXPAND_MAX);
         } else {
-            desired = NODE_DEFAULT_SIZE[CanvasNodeType.Config].height;
+            desired = getConfigNodeHeight(mode);
         }
         if (desired === heightRef.current) return;
         onHeightChange(node.id, desired);
@@ -150,6 +218,18 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
             window.location.assign("/admin");
             return;
         }
+        if (mode === "video" && isVideoCapabilityPending) {
+            message.info("正在读取当前模型的视频能力，请稍候");
+            return;
+        }
+        if (mode === "video" && (!videoCapability || !videoCapability.modes.length || !selectedVideoMode)) {
+            message.warning("当前模型未配置可用的视频生成能力，请联系管理员发布模型配置");
+            return;
+        }
+        if (videoReferenceValidationMessage) {
+            message.warning(videoReferenceValidationMessage);
+            return;
+        }
         if (!canGenerate) {
             message.info(mode === "audio" ? "请先输入朗读文本或连接文本节点" : "请先输入提示词或连接上游素材");
             onComposerToggle();
@@ -163,7 +243,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
         <div className="creative-os-config-panel flex h-full min-h-0 min-w-0 w-full cursor-default flex-col rounded-[inherit] px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text, background: theme.node.panel }}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="shrink-0 cursor-move text-sm font-semibold">生成配置</div>
-                <div data-canvas-no-zoom className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <div className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
                         className="!flex-nowrap !min-w-0 !rounded-md !p-0.5 [&_.ant-segmented-item]:!flex-none [&_.ant-segmented-item-label]:!whitespace-nowrap"
@@ -229,15 +309,14 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                 <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
                 <InputChip label="参考视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} />
                 <InputChip label="参考音频" value={`${inputSummary.audioCount} 个`} style={chipStyle} />
-                <button type="button" data-canvas-no-zoom className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
+                <button type="button" className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]" style={chipStyle} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onClick={onComposerToggle}>
                     <Settings2 className="size-3.5" />
                     组装提示词
                 </button>
             </div>
 
             <div
-                data-canvas-no-zoom
-                className={`nodrag nopan mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "video" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
+                className={`nodrag nopan mb-2 grid min-h-0 min-w-0 cursor-default gap-2 ${mode === "image" || mode === "audio" ? "grid-cols-[minmax(0,1fr)_148px] items-center" : "grid-cols-1"} ${mode === "comfyui" ? "flex-1 items-stretch" : ""}`}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
             >
@@ -247,12 +326,23 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                     <>
                         <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                         {mode === "video" ? (
-                            <CanvasVideoSettingsPopover
-                                config={config}
-                                placement="topRight"
-                                buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
-                                onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
-                            />
+                            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_148px] items-center gap-2">
+                                <CanvasSafeSelect
+                                    className="canvas-compact-control h-10"
+                                    value={selectedVideoMode}
+                                    options={(videoCapability?.modes || []).map((value) => ({ value, label: VIDEO_GENERATION_MODE_LABELS[value] }))}
+                                    disabled={isVideoCapabilityPending || isVideoCapabilityUnavailable}
+                                    loading={isVideoCapabilityPending}
+                                    placeholder={isVideoCapabilityPending ? "读取模型能力" : "选择生成模式"}
+                                    onChange={(value) => onConfigChange(node.id, { videoGenerationMode: value as VideoGenerationMode })}
+                                />
+                                <CanvasVideoSettingsPopover
+                                    config={config}
+                                    placement="topRight"
+                                    buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
+                                    onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
+                                />
+                            </div>
                         ) : mode === "image" ? (
                             <CanvasImageSettingsPopover
                                 config={config}
@@ -274,11 +364,18 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                 )}
             </div>
 
+            {mode === "video" && (isVideoCapabilityPending || isVideoCapabilityUnavailable || videoReferenceValidationMessage) ? (
+                <div className="mb-2 flex items-start gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.activeBg, color: theme.node.text }}>
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{isVideoCapabilityPending ? "正在读取当前模型的视频能力" : isVideoCapabilityUnavailable ? "当前模型尚未发布可用的视频能力配置" : videoReferenceValidationMessage}</span>
+                </div>
+            ) : null}
+
             <Button
                 type="primary"
                 className="creative-os-primary-action mt-auto !h-10 !w-full !cursor-pointer !rounded-[8px]"
                 danger={isRunning}
-                data-canvas-no-zoom
+                disabled={!isRunning && !canGenerate}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={handlePrimaryAction}
@@ -335,7 +432,7 @@ function ComfyWorkflowControls({
                 onChange={(comfyWorkflowId) => onConfigChange(node.id, { comfyWorkflowId })}
             />
             {selectedWorkflow?.fields.length ? (
-                <div className="creative-os-hidden-scroll grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
+                <div data-canvas-no-zoom className="creative-os-hidden-scroll grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
                     {selectedWorkflow.fields.map((field) => (
                         <div key={field.id} className="grid gap-1 text-[11px]">
                             <span className="truncate opacity-70">{field.name || field.input}</span>
@@ -375,6 +472,7 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
             <CanvasResourceMentionTextarea
                 value={textValue}
                 references={mentionReferences}
+                data-canvas-no-zoom
                 onChange={(next) => onChange(normalizeAdjacentMentionLabels(next, mentionLabels))}
                 className="thin-scrollbar min-h-20 w-full resize-y rounded-md border px-2 py-1.5 text-xs leading-5 outline-none"
                 style={textInputStyle}
@@ -408,6 +506,7 @@ function ComfyFieldControl({ field, value, inputs, mentionReferences, onChange }
         <CanvasResourceMentionTextarea
             value={textValue}
             references={mentionReferences.filter((reference) => field.type === "text" || reference.kind === field.type)}
+            data-canvas-no-zoom
             onChange={(next) => onChange(normalizeAdjacentMentionLabels(next, mentionLabels))}
             className="thin-scrollbar min-h-12 w-full resize-y rounded-md border px-2 py-1.5 text-xs leading-5 outline-none"
             style={textInputStyle}
@@ -436,9 +535,12 @@ function defaultModelForMode(config: AiConfig, mode: CanvasGenerationMode) {
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasGenerationMode): AiConfig {
     const defaultModel = defaultModelForMode(globalConfig, mode);
+    const selectedModel = normalizeRuntimeModelOption(globalConfig, node.metadata?.model || defaultModel, mode)
+        || normalizeRuntimeModelOption(globalConfig, defaultModel, mode)
+        || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model);
     return {
         ...globalConfig,
-        model: node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model: selectedModel,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
