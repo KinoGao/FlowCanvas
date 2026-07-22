@@ -167,8 +167,11 @@ function imageProxyCandidates(url: string) {
 function shouldPreferImageProxy(url: string) {
     if (!/^https?:/i.test(url)) return false;
     try {
-        const { hostname } = new URL(url);
-        return hostname === "platform-outputs.agnes-ai.space";
+        const parsed = new URL(url);
+        const { hostname } = parsed;
+        return hostname === "platform-outputs.agnes-ai.space"
+            || hostname.endsWith(".tos-cn-beijing.volces.com")
+            || parsed.searchParams.has("X-Tos-Algorithm");
     } catch {
         return false;
     }

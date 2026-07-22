@@ -37,20 +37,25 @@ public class UserFileController {
     public ApiResponse<Map<String, Object>> upload(HttpServletRequest request, @RequestParam("file") MultipartFile file) {
         User user = UserRequestContext.requireUser(request);
         UserFile saved = fileService.save(user, file);
-        return ApiResponse.ok(Map.of(
-                "storageKey", saved.getStorageKey(),
-                "url", mediaAccess.signedPath(user, saved.getStorageKey()),
-                "bytes", saved.getBytes(),
-                "mimeType", saved.getContentType(),
-                "fileName", saved.getFileName()
-        ));
+        return ApiResponse.ok(toUploadResponse(user, saved));
+    }
+
+    /** JSON/dataURL upload — preferred through cpolar tunnels that break multipart boundaries. */
+    @PostMapping(value = "/data", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<Map<String, Object>> uploadDataUrl(HttpServletRequest request, @RequestBody DataUrlUploadRequest body) {
+        User user = UserRequestContext.requireUser(request);
+        if (body == null || body.dataUrl() == null || body.dataUrl().isBlank()) {
+            throw new IllegalArgumentException("dataUrl field is required");
+        }
+        UserFile saved = fileService.saveDataUrl(user, body.dataUrl(), body.fileName(), body.contentType());
+        return ApiResponse.ok(toUploadResponse(user, saved));
     }
 
     @PostMapping("/sign")
     public ApiResponse<Map<String, String>> sign(HttpServletRequest request, @RequestBody SignRequest body) {
         User user = UserRequestContext.requireUser(request);
         List<String> storageKeys = body == null || body.storageKeys() == null ? List.of() : body.storageKeys().stream().distinct().toList();
-        if (storageKeys.size() > MAX_SIGNED_FILES_PER_REQUEST) throw new IllegalArgumentException("单次最多签名 " + MAX_SIGNED_FILES_PER_REQUEST + " 个媒体文件");
+        if (storageKeys.size() > MAX_SIGNED_FILES_PER_REQUEST) throw new IllegalArgumentException("too many storage keys per request: max " + MAX_SIGNED_FILES_PER_REQUEST);
 
         Map<String, String> urls = new LinkedHashMap<>();
         for (String storageKey : storageKeys) {
@@ -80,5 +85,17 @@ public class UserFileController {
                 .body(resource);
     }
 
+    private Map<String, Object> toUploadResponse(User user, UserFile saved) {
+        return Map.of(
+                "storageKey", saved.getStorageKey(),
+                "url", mediaAccess.signedPath(user, saved.getStorageKey()),
+                "bytes", saved.getBytes(),
+                "mimeType", saved.getContentType(),
+                "fileName", saved.getFileName()
+        );
+    }
+
     public record SignRequest(List<String> storageKeys) {}
+
+    public record DataUrlUploadRequest(String dataUrl, String fileName, String contentType) {}
 }

@@ -39,6 +39,12 @@ public class PlatformConfigController {
         return ApiResponse.ok(service.discoverModels(providerId));
     }
 
+    @PostMapping("/api/admin/models/{modelId}/verify")
+    public ApiResponse<PlatformConfigDocument> verifyModel(@PathVariable String modelId, HttpServletRequest request) {
+        requireAdmin(request);
+        return ApiResponse.ok(service.verifyModel(modelId));
+    }
+
     private void requireAdmin(HttpServletRequest request) {
         if (!UserRequestContext.isAdmin(request)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "需要管理员权限");

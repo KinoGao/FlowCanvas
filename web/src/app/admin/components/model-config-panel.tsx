@@ -1,17 +1,17 @@
 import { App, Button, Checkbox, Drawer, Form, Input, InputNumber, Segmented, Select, Space, Switch, Table, Tag } from "antd";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { AdminCard } from "./admin-card";
-import { applyModelCategory, cloneModel, emptyModel, emptyProvider, IMAGE_RATIOS, normalizeModel, numberOr, replaceById } from "../platform-config-utils";
-import { discoverProviderModels, type ImageCapabilities, type ModelCategory, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
+import { applyModelCategory, cloneModel, emptyModel, emptyProvider, IMAGE_RATIOS, normalizeModel, normalizePlatformConfig, numberOr, replaceById } from "../platform-config-utils";
+import { discoverProviderModels, savePlatformConfig, verifyPlatformModel, type ImageCapabilities, type ModelCategory, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
 
 const CATEGORY_OPTIONS = [{ value: "text", label: "文本" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }];
 const CATEGORY_LABELS: Record<ModelCategory, string> = { text: "文本", image: "图像", video: "视频" };
 const TEXT_MODES = [{ value: "text", label: "纯文本" }, { value: "vision", label: "识图 / 多模态" }];
 const IMAGE_MODES = [{ value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "图生图" }, { value: "image-edit", label: "图像编辑" }];
 const IMAGE_QUALITIES = [{ value: "low", label: "低画质" }, { value: "standard", label: "标准画质" }, { value: "high", label: "高画质" }];
-const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"].map((value) => ({ value, label: value.toUpperCase() }));
+const IMAGE_RESOLUTIONS = ["1k", "2k", "3k", "4k"].map((value) => ({ value, label: value.toUpperCase() }));
 const VIDEO_MODES = [
     { value: "text-to-video", label: "文生视频" }, { value: "all-in-one-reference", label: "全能参考" },
     { value: "image-to-video", label: "图生视频" }, { value: "first-last-frame", label: "首尾帧" },
@@ -28,6 +28,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
     const [modelOriginalId, setModelOriginalId] = useState("");
     const [discovered, setDiscovered] = useState<Record<string, string[]>>({});
     const [discovering, setDiscovering] = useState("");
+    const [verifying, setVerifying] = useState("");
 
     const editProvider = (item?: PlatformProvider) => { setProviderOriginalId(item?.id || ""); setProviderDraft(item ? { ...item } : emptyProvider()); };
     const editModel = (item?: PlatformModel) => { setModelOriginalId(item?.id || ""); setModelDraft(item ? cloneModel(item) : emptyModel(config.providers[0]?.id || "")); };
@@ -61,28 +62,42 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
     const discover = async (provider: PlatformProvider) => {
         setDiscovering(provider.id);
         try {
+            const saved = normalizePlatformConfig(await savePlatformConfig(authToken, normalizePlatformConfig(config)));
+            onChange(saved);
             const models = await discoverProviderModels(authToken, provider.id);
             setDiscovered((current) => ({ ...current, [provider.id]: models }));
-            message.success("已从 " + provider.name + " 获取 " + models.length + " 个模型");
-        } catch (error) { message.error(error instanceof Error ? error.message : "获取模型失败，请先保存供应商配置"); }
+            message.success("厂商认证通过，已获取 " + models.length + " 个模型");
+        } catch (error) { message.error(error instanceof Error ? error.message : "厂商认证或模型拉取失败"); }
         finally { setDiscovering(""); }
+    };
+    const verifyModel = async (model: PlatformModel) => {
+        setVerifying(model.id);
+        try {
+            await savePlatformConfig(authToken, normalizePlatformConfig(config));
+            const next = normalizePlatformConfig(await verifyPlatformModel(authToken, model.id));
+            onChange(next);
+            const verified = next.models.find((item) => item.id === model.id);
+            if (verified?.verificationStatus === "verified") message.success("厂商认证通过且模型存在，可以发布到画布");
+            else message.warning(verified?.verificationMessage || "模型验证未通过");
+        } catch (error) { message.error(error instanceof Error ? error.message : "模型验证失败"); }
+        finally { setVerifying(""); }
     };
 
     return <div className="space-y-5">
-        <AdminCard title="模型厂商" description="厂商只配置接口、密钥和协议。保存全局配置后，再拉取模型并逐一分类。" action={<Button icon={<Plus className="size-4" />} onClick={() => editProvider()}>添加厂商</Button>}>
+        <AdminCard title="模型厂商" description="先配置厂商地址、API Key 和协议，再通过后端认证拉取当前账号真实可用的模型。密钥不会下发到创作端。" action={<Button icon={<Plus className="size-4" />} onClick={() => editProvider()}>添加厂商</Button>}>
             <Table rowKey="id" pagination={false} dataSource={config.providers} columns={[
                 { title: "厂商", render: (_, item) => <div><div className="font-medium">{item.name}</div><div className="text-xs text-gray-400">{item.id}</div></div> },
                 { title: "协议", dataIndex: "apiFormat", width: 100, render: (value) => <Tag>{String(value).toUpperCase()}</Tag> },
                 { title: "接口地址", dataIndex: "baseUrl", ellipsis: true },
                 { title: "状态", dataIndex: "enabled", width: 90, render: (value) => value ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
-                { title: "操作", width: 230, render: (_, item) => <Space><Button size="small" icon={<RefreshCw className="size-3.5" />} loading={discovering === item.id} onClick={() => void discover(item)}>拉取模型</Button><Button size="small" icon={<Pencil className="size-3.5" />} onClick={() => editProvider(item)} /><Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => removeProvider(item)} /></Space> },
+                { title: "操作", width: 260, render: (_, item) => <Space><Button size="small" icon={<RefreshCw className="size-3.5" />} loading={discovering === item.id} onClick={() => void discover(item)}>认证并拉取</Button><Button size="small" title="编辑厂商" icon={<Pencil className="size-3.5" />} onClick={() => editProvider(item)} /><Button size="small" danger title="删除厂商" icon={<Trash2 className="size-3.5" />} onClick={() => removeProvider(item)} /></Space> },
             ]} />
         </AdminCard>
 
         {Object.entries(discovered).map(([providerId, models]) => {
             const provider = config.providers.find((item) => item.id === providerId);
             if (!provider) return null;
-            return <AdminCard key={providerId} title={provider.name + " · 已拉取模型"} description="上游只返回模型名称。管理员确认分类后，再配置该分类的具体能力。">
+            return <AdminCard key={providerId} title={provider.name + " · 待接入模型"} description="厂商接口证明模型对当前账号可见。选择分类并配置能力后，完成模型验证才允许发布。">
                 <Table rowKey={(value) => value} pagination={{ pageSize: 8, hideOnSinglePage: true }} dataSource={models} columns={[
                     { title: "上游模型名称", render: (value: string) => <span className="font-mono text-xs">{value}</span> },
                     { title: "当前分类", width: 110, render: (value: string) => { const configured = config.models.find((item) => item.providerId === providerId && item.requestModel === value); return configured ? <Tag color="blue">{CATEGORY_LABELS[configured.category]}</Tag> : <Tag>未配置</Tag>; } },
@@ -91,14 +106,15 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
             </AdminCard>;
         })}
 
-        <AdminCard title="已配置模型" description="画布只展示已启用、已发布且厂商连接完整的模型。实际模型名和密钥不会下发前端。" action={<Button type="primary" icon={<Plus className="size-4" />} disabled={!config.providers.length} onClick={() => editModel()}>手动添加模型</Button>}>
+        <AdminCard title="已配置模型" description="模型完成能力配置和厂商认证验证后，由管理员明确发布。只有已验证且已发布的模型会进入画布。" action={<Button type="primary" icon={<Plus className="size-4" />} disabled={!config.providers.length} onClick={() => editModel()}>手动添加模型</Button>}>
             <Table rowKey="id" dataSource={config.models} pagination={{ pageSize: 10, hideOnSinglePage: true }} columns={[
                 { title: "模型", render: (_, item) => <div><div className="font-medium">{item.displayName}</div><div className="text-xs text-gray-400">{item.id}</div></div> },
                 { title: "分类", dataIndex: "category", width: 90, render: (value: ModelCategory) => <Tag color="blue">{CATEGORY_LABELS[value]}</Tag> },
                 { title: "实际请求模型", dataIndex: "requestModel", ellipsis: true },
-                { title: "能力", width: 260, render: (_, item) => <CapabilitySummary model={item} /> },
+                { title: "能力", width: 220, render: (_, item) => <CapabilitySummary model={item} /> },
+                { title: "验证", width: 130, render: (_, item) => <VerificationStatus model={item} /> },
                 { title: "可用性", width: 110, render: (_, item) => <ModelAvailability model={item} providers={config.providers} /> },
-                { title: "操作", width: 100, render: (_, item) => <Space><Button size="small" icon={<Pencil className="size-3.5" />} onClick={() => editModel(item)} /><Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => removeModel(item)} /></Space> },
+                { title: "操作", width: 190, render: (_, item) => <Space><Button size="small" icon={<ShieldCheck className="size-3.5" />} loading={verifying === item.id} onClick={() => void verifyModel(item)}>验证</Button><Button size="small" title="编辑模型" icon={<Pencil className="size-3.5" />} onClick={() => editModel(item)} /><Button size="small" danger title="删除模型" icon={<Trash2 className="size-3.5" />} onClick={() => removeModel(item)} /></Space> },
             ]} />
         </AdminCard>
 
@@ -141,10 +157,11 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
             <Form.Item label="请求适配器"><Input value={draft.requestAdapter} placeholder="openai / seedance-v2 / agnes" onChange={(event) => update({ requestAdapter: event.target.value })} /></Form.Item>
             <Form.Item label="模型名称匹配规则"><Select mode="tags" tokenSeparators={[","]} value={draft.modelPatterns} onChange={(modelPatterns) => update({ modelPatterns })} placeholder="例如 seedance-2" /></Form.Item>
         </div>
+        <div className="mb-4"><VerificationStatus model={draft} />{draft.verificationMessage ? <span className="ml-2 text-xs text-gray-500">{draft.verificationMessage}</span> : null}</div>
         {draft.category === "text" && draft.textCapabilities ? <TextCapabilityForm value={draft.textCapabilities} onChange={updateText} /> : null}
         {draft.category === "image" && draft.imageCapabilities ? <ImageCapabilityForm value={draft.imageCapabilities} onChange={updateImage} /> : null}
         {draft.category === "video" && draft.videoCapabilities ? <VideoCapabilityForm value={draft.videoCapabilities} onChange={updateVideo} /> : null}
-        <div className="mt-5 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05]"><Toggle label="启用并发布到画布" checked={draft.enabled && draft.published} onChange={(enabled) => update({ enabled, published: enabled })} /></div>
+        <div className="mt-5 grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-2"><Toggle label="启用该模型" checked={draft.enabled} onChange={(enabled) => update({ enabled })} /><Toggle label="发布到画布" checked={draft.published} disabled={draft.verificationStatus !== "verified"} onChange={(published) => update({ published })} /></div>
     </Form></Drawer>;
 }
 
@@ -153,8 +170,7 @@ function TextCapabilityForm(props: { value: TextCapabilities; onChange: (patch: 
 }
 
 function ImageCapabilityForm(props: { value: ImageCapabilities; onChange: (patch: Partial<ImageCapabilities>) => void }) {
-    const hasOfficialTemplate = Boolean(props.value.officialTemplate);
-    return <CapabilitySection title="图像能力" description="画质、清晰度、比例和生成数量会约束画布选项，并由后端复核请求。命中官方模板后，保存时以后端目录为准。">
+    return <CapabilitySection title="图像能力" description="这些能力参数会约束画布中可选择的生成方式、画质、尺寸和数量。">
         <Field label="生成方式"><Checkbox.Group options={IMAGE_MODES} value={props.value.modes} onChange={(modes) => {
             const selected = modes as ImageCapabilities["modes"];
             const minimumImages = selected.includes("image-to-image") || selected.includes("image-edit") ? 1 : 0;
@@ -166,8 +182,6 @@ function ImageCapabilityForm(props: { value: ImageCapabilities; onChange: (patch
         <Form.Item label="生成数量"><Select mode="tags" tokenSeparators={[","]} value={props.value.counts.map(String)} onChange={(values) => props.onChange({ counts: numberTags(values) })} placeholder="例如 1, 2, 4" /></Form.Item>
         <div className="grid gap-3 md:grid-cols-3"><Form.Item label="最多参考图片"><InputNumber min={0} className="w-full" value={props.value.maxImages} onChange={(value) => props.onChange({ maxImages: numberOr(value, 0) })} /></Form.Item><Form.Item label="最多输出图片"><InputNumber min={0} className="w-full" value={props.value.maxOutputs} onChange={(value) => props.onChange({ maxOutputs: numberOr(value, 0) })} /></Form.Item><Form.Item label="输入与输出总上限"><InputNumber min={0} className="w-full" value={props.value.maxTotalImages} onChange={(value) => props.onChange({ maxTotalImages: numberOr(value, 0) })} /></Form.Item></div>
         <div className="grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-2"><Toggle label="支持连续多图生成" checked={props.value.sequentialImageGeneration} onChange={(sequentialImageGeneration) => props.onChange({ sequentialImageGeneration })} /><Toggle label="支持添加水印" checked={props.value.watermark} onChange={(watermark) => props.onChange({ watermark })} /></div>
-        <div className="grid gap-x-4 md:grid-cols-2"><Form.Item label="官方能力模板"><Input value={props.value.officialTemplate} readOnly placeholder="未匹配官方模板" status={hasOfficialTemplate ? undefined : "warning"} /></Form.Item><Form.Item label="官方文档"><Input value={props.value.documentationUrl} readOnly placeholder="暂无官方文档" /></Form.Item></div>
-        {hasOfficialTemplate ? <p className="m-0 text-xs leading-5 text-gray-500">该模型已匹配后端官方能力模板。保存配置时，分类、适配器、模型匹配规则和能力参数会由后端重新校准。</p> : null}
     </CapabilitySection>;
 }
 
@@ -187,6 +201,7 @@ function VideoCapabilityForm(props: { value: VideoCapabilities; onChange: (patch
 function CapabilitySection(props: { title: string; description: string; children: React.ReactNode }) { return <section className="mt-2 rounded-xl border border-black/5 p-4 dark:border-white/10"><h3 className="m-0 text-sm font-semibold">{props.title}</h3><p className="mb-4 mt-1 text-xs leading-5 text-gray-500">{props.description}</p><div className="space-y-4">{props.children}</div></section>; }
 function Field(props: { label: string; children: React.ReactNode }) { return <div><div className="mb-2 text-sm text-gray-600 dark:text-white/65">{props.label}</div>{props.children}</div>; }
 function CapabilitySummary({ model }: { model: PlatformModel }) { const modes = model.textCapabilities?.modes || model.imageCapabilities?.modes || model.videoCapabilities?.modes || []; return <Space size={[4, 4]} wrap>{modes.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>)}{modes.length > 3 ? <Tag>+{modes.length - 3}</Tag> : null}</Space>; }
-function ModelAvailability({ model, providers }: { model: PlatformModel; providers: PlatformProvider[] }) { const provider = providers.find((item) => item.id === model.providerId); if (!provider) return <Tag color="red">厂商不存在</Tag>; if (!provider.enabled) return <Tag color="orange">厂商未启用</Tag>; if (!provider.baseUrl.trim()) return <Tag color="orange">缺少接口地址</Tag>; if (!provider.apiKey.trim()) return <Tag color="orange">缺少 API Key</Tag>; if (!model.enabled) return <Tag>模型未启用</Tag>; if (!model.published) return <Tag>模型未发布</Tag>; return <Tag color="green">已发布</Tag>; }
-function Toggle(props: { label: string; checked: boolean; onChange: (value: boolean) => void }) { return <div className="flex items-center justify-between gap-3 text-sm"><span>{props.label}</span><Switch size="small" checked={props.checked} onChange={props.onChange} /></div>; }
+function VerificationStatus({ model }: { model: PlatformModel }) { if (model.verificationStatus === "verified") return <Tag color="green" title={model.verifiedAt ? `验证时间：${model.verifiedAt}` : undefined}>已验证</Tag>; if (model.verificationStatus === "failed") return <Tag color="red" title={model.verificationMessage}>验证失败</Tag>; return <Tag color="orange">待验证</Tag>; }
+function ModelAvailability({ model, providers }: { model: PlatformModel; providers: PlatformProvider[] }) { const provider = providers.find((item) => item.id === model.providerId); if (!provider) return <Tag color="red">厂商不存在</Tag>; if (!provider.enabled) return <Tag color="orange">厂商未启用</Tag>; if (!provider.baseUrl.trim()) return <Tag color="orange">缺少接口地址</Tag>; if (!provider.apiKey.trim()) return <Tag color="orange">缺少 API Key</Tag>; if (model.verificationStatus !== "verified") return <Tag color="orange">未验证</Tag>; if (!model.enabled) return <Tag>模型未启用</Tag>; if (!model.published) return <Tag>模型未发布</Tag>; return <Tag color="green">已发布</Tag>; }
+function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="flex items-center justify-between gap-3 text-sm"><span>{props.label}</span><Switch size="small" checked={props.checked} disabled={props.disabled} onChange={props.onChange} /></div>; }
 function numberTags(values: string[]) { return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b); }

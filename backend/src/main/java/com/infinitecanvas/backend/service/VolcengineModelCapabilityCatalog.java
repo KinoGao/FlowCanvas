@@ -20,7 +20,7 @@ public class VolcengineModelCapabilityCatalog {
     private static final String SEEDREAM_DOCUMENTATION = "https://www.volcengine.com/docs/82379/1824121";
 
     private final Map<String, Consumer<PlatformConfigDocument.Model>> templates = Map.of(
-            SEEDREAM_5_LITE, model -> applySeedream(model, SEEDREAM_5_LITE, 10, List.of("2k", "4k"), "volcengine-seedream-5.0-lite"),
+            SEEDREAM_5_LITE, model -> applySeedream(model, SEEDREAM_5_LITE, 10, List.of("2k", "3k", "4k"), "volcengine-seedream-5.0-lite"),
             SEEDREAM_4_5, model -> applySeedream(model, SEEDREAM_4_5, 14, List.of("2k", "4k"), "volcengine-seedream-4.5"),
             SEEDREAM_4_0, model -> applySeedream(model, SEEDREAM_4_0, 10, List.of("1k", "2k", "4k"), "volcengine-seedream-4.0"),
             SEEDANCE_1_5_PRO, this::applySeedance15Pro,
@@ -179,11 +179,11 @@ public class VolcengineModelCapabilityCatalog {
         capabilities.setModes(List.of("text-to-video", "image-to-video", "first-last-frame"));
         capabilities.setRatios(List.of("adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"));
         capabilities.setResolutions(List.of("480p", "720p", "1080p"));
-        capabilities.setDurations(List.of(4, 5, 6, 7, 8, 9, 10, 11, 12));
+        capabilities.setDurations(List.of(-1, 4, 5, 6, 7, 8, 9, 10, 11, 12));
         capabilities.setCounts(List.of(1));
         capabilities.setGenerateAudio(true);
         capabilities.setWatermark(true);
-        capabilities.setDraft(false);
+        capabilities.setDraft(true);
         capabilities.setMaxImages(2);
         capabilities.setMaxVideos(0);
         capabilities.setMaxAudios(0);

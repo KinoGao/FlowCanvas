@@ -13,21 +13,20 @@ import {
     normalizeSeedanceResolution,
     seedanceCapabilityError,
     seedanceVideoReferenceError,
-    SEEDANCE_REFERENCE_LIMITS,
 } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
-import { uploadImageToCurrentBackend } from "@/services/api/backend";
+import { uploadImageToCurrentBackend, uploadMediaToCurrentBackend } from "@/services/api/backend";
 import { useUserStore } from "@/stores/use-user-store";
 import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { resolveVideoModelCapabilityForRequest, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
+import { normalizeVideoGenerationMode, resolveVideoModelCapabilityForRequest, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
 type SeedanceTask = {
     id: string;
-    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
+    status?: "queued" | "running" | "in_progress" | "completed" | "succeeded" | "failed" | "cancelled" | "expired";
     error?: { code?: string; message?: string } | null;
     content?: { video_url?: string; last_frame_url?: string } | null;
 };
@@ -91,9 +90,10 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     assertVideoConfig(requestConfig, requestConfig.model);
     const capability = await resolveVideoModelCapabilityForRequest(modelOptionName(selectedModel));
-    const generationMode = resolveGenerationMode(options?.generationMode, capability, references, videoReferences, audioReferences);
+    const seedanceRequest = capability?.requestAdapter.startsWith("seedance") || (!capability && isSeedanceVideoConfig(requestConfig));
+    const generationMode = resolveGenerationMode(options?.generationMode, capability, references, videoReferences, audioReferences, seedanceRequest);
     const selectedReferences = selectVideoReferences(generationMode, references, videoReferences, audioReferences, capability);
-    if (capability?.requestAdapter.startsWith("seedance") || (!capability && isSeedanceVideoConfig(requestConfig))) {
+    if (seedanceRequest) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, selectedReferences.images, selectedReferences.videos, selectedReferences.audios, generationMode, capability, options);
     }
     if (capability?.requestAdapter === "agnes-v2" || (!capability && isAgnesVideoConfig(requestConfig))) {
@@ -108,19 +108,23 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     return createOpenAIVideoTask(requestConfig, selectedModel, prompt, selectedReferences.images, generationMode, options);
 }
 
-function resolveGenerationMode(requested: VideoGenerationMode | undefined, capability: VideoModelCapability | null, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]): VideoGenerationMode {
+function resolveGenerationMode(requested: VideoGenerationMode | undefined, capability: VideoModelCapability | null, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[], seedanceRequest: boolean): VideoGenerationMode {
     const inferred: VideoGenerationMode = videos.length || audios.length
         ? "all-in-one-reference"
         : images.length > 2
-            ? "multi-frame"
+            ? seedanceRequest ? "all-in-one-reference" : "multi-frame"
             : images.length === 2
                 ? "first-last-frame"
                 : images.length === 1
                     ? "image-to-video"
                     : "text-to-video";
-    if (!capability) return requested || inferred;
+    const selected = requested
+        ? seedanceRequest
+            ? normalizeVideoGenerationMode(requested, { requestAdapter: "seedance" })
+            : requested
+        : inferred;
+    if (!capability) return selected;
     if (!capability.modes.length) throw new Error("当前视频模型尚未配置任何生成模式，请联系管理员完善模型能力");
-    const selected = requested || inferred;
     if (!capability.modes.includes(selected)) {
         throw new Error(`当前模型不支持${videoModeLabel(selected)}，支持的模式：${capability.modes.map(videoModeLabel).join("、")}`);
     }
@@ -168,7 +172,7 @@ function selectVideoReferences(mode: VideoGenerationMode, images: ReferenceImage
 
 function boundedReferences<T>(label: string, values: T[], max: number | undefined) {
     if (typeof max === "number" && values.length > max) throw new Error(`当前模型最多支持 ${max} 个参考${label}`);
-    return typeof max === "number" ? values.slice(0, max) : values;
+    return values;
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
@@ -252,13 +256,12 @@ async function createSeedanceTask(
     payload.ratio = ratio;
     payload.resolution = resolution;
     payload.duration = duration;
-    payload.camera_fixed = false;
     if (capability?.watermark ?? true) payload.watermark = boolConfig(config.videoWatermark, false);
     if (capability?.generateAudio) payload.generate_audio = boolConfig(config.videoGenerateAudio, true);
     if (capability?.draft) payload.draft = draft;
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -273,11 +276,11 @@ async function createSeedanceTask(
 
 async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
     try {
-        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(seedanceApiUrl(config, task.id), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data);
-        if (state.status === "succeeded") {
-            const url = state.content?.video_url;
-            if (!url) return { status: "failed", error: "Seedance 任务成功但没有返回视频 URL" };
-            return { status: "completed", result: await videoResultFromUrl(rewriteThroughProxy(url, config.useProxy), options) };
+        const state = unwrapSeedanceTask((await axios.get<ApiEnvelope<SeedanceTask>>(aiApiUrl(config, `/videos/${encodeURIComponent(task.id)}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data);
+        if (state.status === "succeeded" || state.status === "completed") {
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${encodeURIComponent(task.id)}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS });
+            await assertVideoBlob(content.data);
+            return { status: "completed", result: { blob: content.data } };
         }
         if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: state.error?.message || `Seedance 视频生成${state.status === "expired" ? "超时" : "失败"}` };
         return { status: "pending" };
@@ -306,10 +309,6 @@ function assertSeedanceAudioReferences(audioReferences: ReferenceAudio[]) {
         total += audio.durationMs;
     }
     if (total > 15000) throw new Error("Seedance 参考音频总时长不能超过 15 秒");
-}
-
-function seedanceApiUrl(config: AiConfig, taskId?: string) {
-    return buildApiUrl(config.baseUrl, `/contents/generations/tasks${taskId ? `/${encodeURIComponent(taskId)}` : ""}`, config.useProxy);
 }
 
 // ===== Agnes 视频 V2.0 实现 =====
@@ -342,59 +341,6 @@ function agnesPollBaseUrl(baseUrl: string) {
     }
 }
 
-// Agnes 要求 num_frames 满足 8n + 1 规则且 ≤ 441（参见官方文档）。
-function agnesFrameCountForSeconds(seconds: number, frameRate = 24) {
-    const fps = Math.max(1, Math.min(60, Math.floor(frameRate)));
-    const target = Math.max(1, Math.floor(seconds * fps));
-    const safe = Math.min(441, target);
-    const n = Math.max(1, Math.floor((safe - 1) / 8));
-    return n * 8 + 1;
-}
-
-function agnesVideoSize(value: string, resolution: string) {
-    const text = String(value || "").trim();
-    if (!text || text === "auto" || text === "adaptive") return { width: 1152, height: 768 };
-    const dimensions = parseVideoDimensions(text);
-    if (dimensions) return agnesResolutionForSize(dimensions, resolution);
-    const ratio = parseVideoRatio(text);
-    return ratio ? agnesResolutionForSize(ratio, resolution) : { width: 1152, height: 768 };
-}
-
-function agnesResolutionForSize(size: { width: number; height: number }, defaultResolution: string) {
-    let baseHeight = 720;
-    if (defaultResolution === "480p") baseHeight = 480;
-    else if (defaultResolution === "1080p") baseHeight = 1080;
-    const ratio = size.height === 0 ? 16 / 9 : size.width / size.height;
-    let width: number;
-    let height: number;
-    if (size.width >= size.height) {
-        height = baseHeight;
-        width = Math.round((baseHeight * ratio) / 16) * 16;
-    } else {
-        width = baseHeight;
-        height = Math.round(baseHeight / ratio / 16) * 16;
-    }
-    const longSide = Math.max(size.width, size.height);
-    if (longSide >= 1900) {
-        height = Math.max(height, 1080);
-        width = Math.round((height * ratio) / 16) * 16;
-    }
-    return { width, height };
-}
-
-function parseVideoDimensions(value: string) {
-    const match = value.match(/^(\d+)\s*x\s*(\d+)$/i);
-    if (!match) return null;
-    return { width: Number(match[1]), height: Number(match[2]) };
-}
-
-function parseVideoRatio(value: string) {
-    const match = value.match(/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
-    if (!match) return null;
-    const width = Number(match[1]);
-    const height = Number(match[2]);
-    return width > 0 && height > 0 ? { width, height } : null;
-}
 
 function agnesReferenceImageUrl(image: ReferenceImage) {
     const directUrl = image.url || image.dataUrl;
@@ -446,18 +392,15 @@ async function sendAgnesCreateRequest(
     const seconds = capability ? requireSupportedNumber(requestedSeconds, capability.durations, "时长") : requestedSeconds;
     const ratio = capability ? requireSupportedString(normalizeSeedanceRatio(config.size), capability.ratios, "画面比例") : config.size;
     const resolution = capability ? requireSupportedString(normalizeResolutionToken(config.vquality), capability.resolutions, "分辨率") : normalizeVideoResolution(config.vquality);
-    const { width, height } = agnesVideoSize(ratio, resolution);
     const body: Record<string, unknown> = {
-        model: modelOptionName(model),
         prompt,
-        width,
-        height,
-        num_frames: agnesFrameCountForSeconds(seconds),
+        seconds,
+        size: ratio,
+        resolution_name: resolution,
         frame_rate: 24,
         _flowcanvas_mode: generationMode,
     };
-    if (urls.length === 1) body.image = urls[0];
-    else if (urls.length > 1) body.extra_body = { image: urls, mode: "keyframes" };
+    if (urls.length) body.input_reference = urls;
 
     const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data;
     if (created.error?.message) throw new Error(created.error.message);
@@ -531,16 +474,14 @@ async function buildSeedanceContent(config: AiConfig, prompt: string, references
         for (let index = 0; index < Math.min(2, references.length); index += 1) {
             content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, references[index]) }, role: index === 0 ? "first_frame" : "last_frame" });
         }
-    } else if (generationMode === "multi-frame") {
-        for (const image of references) content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
-    } else if (generationMode === "image-reference" || generationMode === "all-in-one-reference") {
+    } else if (generationMode === "all-in-one-reference") {
         for (const image of references) content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
     }
     if (generationMode === "all-in-one-reference") {
-        for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
+        for (const video of videoReferences) {
             content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
         }
-        for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
+        for (const audio of audioReferences) {
             content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
         }
     }
@@ -560,8 +501,17 @@ async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
-    if (!blob) throw new Error("参考视频必须是公网 URL、素材 ID，或本地已保存的视频");
-    return blobToDataUrl(blob);
+    if (!blob) throw new Error("Reference video must be a public URL, asset ID, or saved local video");
+    if (blob.type !== "video/mp4" && blob.type !== "video/quicktime") {
+        throw new Error("Seedance reference videos must be MP4 or MOV");
+    }
+    if (blob.size > 200 * 1024 * 1024) throw new Error("Seedance reference video must not exceed 200 MB");
+    const token = useUserStore.getState().token.trim();
+    if (!token) throw new Error("Sign in before uploading a local Seedance reference video");
+    const extension = blob.type === "video/quicktime" ? ".mov" : ".mp4";
+    const originalName = video.name?.trim();
+    const fileName = originalName && /\.(mp4|mov)$/i.test(originalName) ? originalName : `seedance-reference${extension}`;
+    return uploadMediaToCurrentBackend(token, blob, fileName);
 }
 
 async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {

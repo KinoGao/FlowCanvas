@@ -1,5 +1,5 @@
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import type { VideoGenerationMode, VideoModelCapability } from "@/services/api/model-capabilities";
+import { normalizeVideoGenerationMode, videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
 import type { AiConfig } from "@/stores/use-config-store";
 
 import type { CanvasNodeMetadata } from "../types";
@@ -16,6 +16,7 @@ export const VIDEO_GENERATION_MODE_LABELS: Record<VideoGenerationMode, string> =
 };
 
 export function validateVideoReferenceCounts(mode: VideoGenerationMode, capability: VideoModelCapability, counts: ActiveVideoReferenceCounts) {
+    mode = normalizeVideoGenerationMode(mode, capability);
     const mediaCount = counts.image + counts.video + counts.audio;
     if (mode === "text-to-video") return mediaCount > 0 ? "文生视频不能携带图片、视频或音频参考素材" : "";
     if (mode !== "all-in-one-reference" && (counts.video > 0 || counts.audio > 0)) return `${VIDEO_GENERATION_MODE_LABELS[mode]}仅支持图片参考素材`;
@@ -33,9 +34,10 @@ export function validateVideoReferenceCounts(mode: VideoGenerationMode, capabili
     return "";
 }
 
-export function supportedVideoMode(value: VideoGenerationMode | undefined, modes: VideoGenerationMode[] | undefined): VideoGenerationMode | undefined {
-    if (!modes?.length) return undefined;
-    return value && modes.includes(value) ? value : modes[0];
+export function supportedVideoMode(value: VideoGenerationMode | undefined, capability: VideoModelCapability | null | undefined): VideoGenerationMode | undefined {
+    if (!capability?.modes.length) return undefined;
+    const normalized = value ? normalizeVideoGenerationMode(value, capability) : undefined;
+    return normalized && capability.modes.includes(normalized) ? normalized : capability.modes[0];
 }
 
 export function videoCapabilitySignature(capability: VideoModelCapability | null | undefined) {
@@ -56,10 +58,14 @@ export function videoCapabilitySignature(capability: VideoModelCapability | null
 
 export function normalizeVideoConfig(currentMode: VideoGenerationMode | undefined, config: AiConfig, capability: VideoModelCapability): Partial<CanvasNodeMetadata> {
     const patch: Partial<CanvasNodeMetadata> = {};
-    if (!currentMode || !capability.modes.includes(currentMode)) patch.videoGenerationMode = capability.modes[0];
+    const normalizedMode = currentMode ? normalizeVideoGenerationMode(currentMode, capability) : undefined;
+    const effectiveMode = normalizedMode && capability.modes.includes(normalizedMode) ? normalizedMode : capability.modes[0];
+    if (!normalizedMode || !capability.modes.includes(normalizedMode)) patch.videoGenerationMode = effectiveMode;
+    else if (normalizedMode !== currentMode) patch.videoGenerationMode = normalizedMode;
 
     const ratio = normalizeSeedanceRatio(config.size);
-    if (capability.ratios.length && !capability.ratios.includes(ratio)) patch.size = capability.ratios[0];
+    const ratios = videoRatiosForMode(capability, effectiveMode);
+    if (ratios.length && !ratios.includes(ratio)) patch.size = ratios.includes("16:9") ? "16:9" : ratios[0];
 
     const resolutions = capability.resolutions.map(normalizeResolutionToken);
     const draft = capability.draft && config.videoDraft === "true";

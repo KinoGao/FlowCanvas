@@ -25,7 +25,20 @@ public class PublicImageController {
 
     @PostMapping
     public ApiResponse<Map<String, String>> upload(@RequestParam("file") MultipartFile file) {
-        String filename = publicImageService.saveImage(file);
+        String filename = publicImageService.saveMedia(file);
+        if (!publicBaseUrl.isBlank()) {
+            return ApiResponse.ok(Map.of("filename", filename, "url", publicBaseUrl + "/api/public-image/" + filename));
+        }
+        return ApiResponse.ok(Map.of("filename", filename));
+    }
+
+    @PostMapping(value = "/data", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResponse<Map<String, String>> uploadDataUrl(@RequestBody Map<String, ?> body) {
+        Object value = body.get("dataUrl");
+        if (!(value instanceof String dataUrl) || dataUrl.isBlank()) {
+            throw new IllegalArgumentException("dataUrl field is required");
+        }
+        String filename = publicImageService.saveDataUrl(dataUrl);
         if (!publicBaseUrl.isBlank()) {
             return ApiResponse.ok(Map.of("filename", filename, "url", publicBaseUrl + "/api/public-image/" + filename));
         }

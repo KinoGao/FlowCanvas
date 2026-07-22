@@ -13,6 +13,7 @@ export type PlatformProvider = {
 };
 
 export type ModelCategory = "text" | "image" | "video";
+export type ModelVerificationStatus = "unverified" | "verified" | "failed";
 
 export type TextCapabilities = {
     modes: Array<"text" | "vision">;
@@ -21,7 +22,7 @@ export type TextCapabilities = {
 export type ImageCapabilities = {
     modes: Array<"text-to-image" | "image-to-image" | "image-edit">;
     qualities: Array<"low" | "standard" | "high">;
-    resolutions: Array<"1k" | "2k" | "4k">;
+    resolutions: Array<"1k" | "2k" | "3k" | "4k">;
     ratios: string[];
     counts: number[];
     maxImages: number;
@@ -58,6 +59,9 @@ export type PlatformModel = {
     enabled: boolean;
     published: boolean;
     modelPatterns: string[];
+    verificationStatus: ModelVerificationStatus;
+    verifiedAt: string;
+    verificationMessage: string;
     textCapabilities: TextCapabilities | null;
     imageCapabilities: ImageCapabilities | null;
     videoCapabilities: VideoCapabilities | null;
@@ -78,7 +82,7 @@ export type PlatformConfigDocument = {
     comfyui: PlatformComfyUi;
 };
 
-export type RuntimeModel = Omit<PlatformModel, "providerId" | "requestModel" | "enabled" | "published">;
+export type RuntimeModel = Omit<PlatformModel, "providerId" | "requestModel" | "enabled" | "published" | "verificationStatus" | "verifiedAt" | "verificationMessage">;
 export type RuntimeProvider = {
     id: string;
     name: string;
@@ -151,6 +155,15 @@ export async function fetchAdminWorkspaces(authCode: string) {
 export async function discoverProviderModels(authCode: string, providerId: string) {
     return readApi<string[]>(
         await fetch(apiUrl("/api/admin/providers/" + encodeURIComponent(providerId) + "/discover-models"), {
+            method: "POST",
+            headers: adminHeaders(authCode),
+        }),
+    );
+}
+
+export async function verifyPlatformModel(authCode: string, modelId: string) {
+    return readApi<PlatformConfigDocument>(
+        await fetch(apiUrl("/api/admin/models/" + encodeURIComponent(modelId) + "/verify"), {
             method: "POST",
             headers: adminHeaders(authCode),
         }),

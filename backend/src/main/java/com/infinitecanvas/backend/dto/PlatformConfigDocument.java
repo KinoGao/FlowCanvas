@@ -2,6 +2,7 @@ package com.infinitecanvas.backend.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSetter;
 
 import java.util.ArrayList;
@@ -44,6 +45,7 @@ public class PlatformConfigDocument {
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
     }
 
+    @JsonIgnoreProperties({"capabilitiesReviewed", "officialDocumentationUrl"})
     public static class Model {
         private String id = "";
         private String providerId = "";
@@ -53,8 +55,11 @@ public class PlatformConfigDocument {
         private String category = "image";
         private String requestAdapter = "openai";
         private boolean enabled = true;
-        private boolean published = true;
+        private boolean published;
         private List<String> modelPatterns = new ArrayList<>();
+        private String verificationStatus = "unverified";
+        private String verifiedAt = "";
+        private String verificationMessage = "";
         private TextCapabilities textCapabilities;
         private ImageCapabilities imageCapabilities;
         private VideoCapabilities videoCapabilities;
@@ -89,6 +94,12 @@ public class PlatformConfigDocument {
         public void setPublished(boolean published) { this.published = published; }
         public List<String> getModelPatterns() { return modelPatterns; }
         public void setModelPatterns(List<String> modelPatterns) { this.modelPatterns = modelPatterns == null ? new ArrayList<>() : modelPatterns; }
+        public String getVerificationStatus() { return verificationStatus; }
+        public void setVerificationStatus(String verificationStatus) { this.verificationStatus = verificationStatus; }
+        public String getVerifiedAt() { return verifiedAt; }
+        public void setVerifiedAt(String verifiedAt) { this.verifiedAt = verifiedAt; }
+        public String getVerificationMessage() { return verificationMessage; }
+        public void setVerificationMessage(String verificationMessage) { this.verificationMessage = verificationMessage; }
         public TextCapabilities getTextCapabilities() { return textCapabilities; }
         public void setTextCapabilities(TextCapabilities textCapabilities) { this.textCapabilities = textCapabilities; }
         public ImageCapabilities getImageCapabilities() { return imageCapabilities; }

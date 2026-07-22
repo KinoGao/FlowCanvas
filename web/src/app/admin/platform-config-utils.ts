@@ -79,8 +79,11 @@ export function emptyModel(providerId: string, category: ModelCategory = "image"
         category,
         requestAdapter: "openai",
         enabled: true,
-        published: true,
+        published: false,
         modelPatterns: requestModel ? [requestModel] : [],
+        verificationStatus: "unverified",
+        verifiedAt: "",
+        verificationMessage: "",
         textCapabilities: null,
         imageCapabilities: null,
         videoCapabilities: null,
@@ -110,6 +113,7 @@ export function cloneModel(model: PlatformModel): PlatformModel {
 export function normalizeModel(model: PlatformModel): PlatformModel {
     const category: ModelCategory = ["text", "image", "video"].includes(model.category) ? model.category : "image";
     const normalized = applyModelCategory(cloneModel(model), category);
+    const verificationStatus = ["unverified", "verified", "failed"].includes(normalized.verificationStatus) ? normalized.verificationStatus : "unverified";
     return {
         ...normalized,
         id: stableModelId(normalized.id),
@@ -117,7 +121,11 @@ export function normalizeModel(model: PlatformModel): PlatformModel {
         displayName: normalized.displayName.trim(),
         requestModel: normalized.requestModel.trim(),
         requestAdapter: normalized.requestAdapter.trim() || "openai",
+        published: Boolean(normalized.published) && verificationStatus === "verified",
         modelPatterns: cleanStrings(normalized.modelPatterns),
+        verificationStatus,
+        verifiedAt: normalized.verifiedAt || "",
+        verificationMessage: normalized.verificationMessage || "",
         textCapabilities: normalized.textCapabilities ? { modes: cleanStrings(normalized.textCapabilities.modes) as TextCapabilities["modes"] } : null,
         imageCapabilities: normalized.imageCapabilities ? {
             ...normalized.imageCapabilities,

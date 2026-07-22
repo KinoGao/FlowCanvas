@@ -1,4 +1,4 @@
-package com.infinitecanvas.backend.controller;
+package com.infinitecanvas.backend.service.modelruntime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
@@ -15,17 +15,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ModelRuntimeProxyControllerTest {
+class GenericOpenAiAdapterTest {
     private static final String BOUNDARY = "----flowcanvas-test-boundary";
-    private final ModelRuntimeProxyController controller = new ModelRuntimeProxyController(null, new ObjectMapper());
+    private final GenericOpenAiAdapter adapter = new GenericOpenAiAdapter(new ObjectMapper());
 
     @Test
     void preservesExplicitVideoModesAndRemovesInternalControlField() throws Exception {
         byte[] binary = new byte[]{0, 1, 2, 13, 10, (byte) 0xff, 42};
 
-        byte[] firstLast = controller.validateAndRewriteMultipart(
+        byte[] firstLast = adapter.validateAndRewriteMultipart(
                 multipart("first-last-frame", 2, binary), "/videos", videoModel(allModes()));
-        byte[] multiFrame = controller.validateAndRewriteMultipart(
+        byte[] multiFrame = adapter.validateAndRewriteMultipart(
                 multipart("multi-frame", 3, binary), "/videos", videoModel(allModes()));
 
         assertRewritten(firstLast, binary);
@@ -37,7 +37,7 @@ class ModelRuntimeProxyControllerTest {
         PlatformConfigDocument.Model model = videoModel(List.of("text-to-video"));
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
-                controller.validateAndRewriteMultipart(multipart("multi-frame", 3, new byte[]{7}), "/videos", model));
+                adapter.validateAndRewriteMultipart(multipart("multi-frame", 3, new byte[]{7}), "/videos", model));
 
         assertTrue(error.getMessage().contains("multi-frame"));
     }
@@ -53,7 +53,7 @@ class ModelRuntimeProxyControllerTest {
                 }
                 """.getBytes(StandardCharsets.UTF_8);
 
-        byte[] result = controller.validateAndRewriteJson(request, "/images/generations", imageModel(1), false);
+        byte[] result = adapter.validateAndRewriteJson(request, "/images/generations", imageModel(1), false);
         var json = new ObjectMapper().readTree(result);
 
         assertEquals("configured-image-model", json.get("model").asText());
@@ -72,7 +72,7 @@ class ModelRuntimeProxyControllerTest {
                 """.getBytes(StandardCharsets.UTF_8);
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
-                controller.validateAndRewriteJson(request, "/images/generations", imageModel(0), false));
+                adapter.validateAndRewriteJson(request, "/images/generations", imageModel(0), false));
 
         assertEquals("参考图片数量超过当前模型上限: 0", error.getMessage());
     }
@@ -87,10 +87,20 @@ class ModelRuntimeProxyControllerTest {
         );
         for (Map.Entry<Integer, String> entry : expectedModes.entrySet()) {
             PlatformConfigDocument.Model model = videoModel(List.of(entry.getValue()));
-            byte[] result = controller.validateAndRewriteMultipart(
+            byte[] result = adapter.validateAndRewriteMultipart(
                     multipart(null, entry.getKey(), new byte[]{9, 8, 7}), "/videos", model);
             assertRewritten(result, entry.getKey() == 0 ? null : new byte[]{9, 8, 7});
         }
+    }
+
+    @Test
+    void genericAdapterClaimsEveryModelAsFallback() {
+        assertTrue(adapter.order() > Integer.MAX_VALUE / 2);
+        PlatformConfigDocument.Model model = new PlatformConfigDocument.Model();
+        model.setCategory("image");
+        model.setRequestModel("any");
+        assertTrue(adapter.supports(new com.infinitecanvas.backend.service.PlatformConfigService.RuntimeModel(
+                new PlatformConfigDocument.Provider(), model), "/images/generations"));
     }
 
     private static void assertRewritten(byte[] result, byte[] binary) {

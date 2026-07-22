@@ -20,7 +20,7 @@ import {
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
-import type { VideoModelCapability } from "@/services/api/model-capabilities";
+import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -45,12 +45,13 @@ type VideoSettingsPanelProps = {
     showTitle?: boolean;
     className?: string;
     variant?: "default" | "composer";
+    generationMode?: VideoGenerationMode;
 };
 
-export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", variant = "default" }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", variant = "default", generationMode }: VideoSettingsPanelProps) {
     const { capability, isLoading, isFetching } = useVideoModelCapability(config.model || config.videoModel);
     if (capability) {
-        return <CapabilityVideoSettingsPanel capability={capability} config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} variant={variant} />;
+        return <CapabilityVideoSettingsPanel capability={capability} config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} variant={variant} generationMode={generationMode} />;
     }
     return <VideoCapabilityStatus loading={isLoading || isFetching} theme={theme} showTitle={showTitle} className={className} />;
 }
@@ -69,8 +70,9 @@ function VideoCapabilityStatus({ loading, theme, showTitle, className }: Pick<Vi
     );
 }
 
-function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, theme, showTitle, className, variant = "default" }: VideoSettingsPanelProps & { capability: VideoModelCapability }) {
-    const ratio = supportedValue(normalizeSeedanceRatio(config.size), capability.ratios);
+function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, theme, showTitle, className, variant = "default", generationMode }: VideoSettingsPanelProps & { capability: VideoModelCapability }) {
+    const ratios = videoRatiosForMode(capability, generationMode);
+    const ratio = supportedValue(normalizeSeedanceRatio(config.size), ratios);
     const resolution = supportedValue(normalizeResolutionToken(config.vquality), capability.resolutions);
     const duration = supportedNumber(Number(config.videoSeconds), capability.durations);
     const count = supportedNumber(Number(config.count), capability.counts);
@@ -79,10 +81,10 @@ function CapabilityVideoSettingsPanel({ capability, config, onConfigChange, them
     const draft = boolConfig(config.videoDraft, false);
     const compact = variant === "composer";
     const hasOutputControls = capability.generateAudio || capability.watermark || capability.draft || capability.counts.length > 1;
-    const ratioControls = capability.ratios.length ? (
+    const ratioControls = ratios.length ? (
         <SettingGroup title="比例" color={theme.node.muted} compact={compact}>
             <div className="grid grid-cols-3 gap-2">
-                {capability.ratios.map((value) => (
+                {ratios.map((value) => (
                     <button key={value} type="button" className={`flex ${compact ? "h-12" : "h-[62px]"} flex-col items-center justify-center gap-1 rounded-lg border text-xs transition hover:opacity-80`} style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, background: ratio === value ? theme.node.fill : "transparent", color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
                         <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
                         <span>{videoRatioLabel(value)}</span>

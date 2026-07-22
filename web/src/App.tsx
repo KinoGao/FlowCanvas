@@ -28,7 +28,6 @@ export default function App() {
                     <Route path="video" element={<VideoPage />} />
                     <Route path="assets" element={<AssetsPage />} />
                     <Route path="prompts" element={<PromptsPage />} />
-                    <Route path="comfyui" element={<Navigate to="/admin" replace />} />
                     <Route path="canvas/:id/*" element={<Navigate to=".." replace />} />
                 </Route>
                 <Route path="admin" element={<AdminPage />} />

@@ -46,7 +46,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
     const isVideoCapabilityPending = mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching);
     const isVideoCapabilityUnavailable = mode === "video" && !isVideoCapabilityPending && (!videoCapability || !videoCapability.modes.length);
-    const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability?.modes);
+    const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
@@ -241,6 +241,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             />
                             <CanvasVideoSettingsPopover
                                 config={config}
+                                generationMode={selectedVideoMode}
                                 placement="bottomRight"
                                 open={videoSettingsOpen}
                                 buttonClassName="!h-8 !max-w-[200px] !justify-start !rounded-[8px] !border-transparent !px-2.5"

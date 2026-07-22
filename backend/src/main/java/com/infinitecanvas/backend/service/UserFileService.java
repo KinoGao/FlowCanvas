@@ -31,6 +31,56 @@ public class UserFileService {
         }
     }
 
+
+    public UserFile saveDataUrl(User user, String dataUrl, String fileName, String contentType) {
+        if (dataUrl == null || !dataUrl.startsWith("data:")) throw new IllegalArgumentException("only data URL is supported");
+        int separator = dataUrl.indexOf(",");
+        if (separator < 0) throw new IllegalArgumentException("invalid data URL format");
+        String header = dataUrl.substring("data:".length(), separator).toLowerCase();
+        String encoded = dataUrl.substring(separator + 1);
+        if (!header.contains(";base64")) throw new IllegalArgumentException("data URL must be base64");
+        String detectedType = header.substring(0, header.indexOf(";"));
+        String effectiveType = (contentType == null || contentType.isBlank()) ? detectedType : contentType;
+        byte[] bytes;
+        try {
+            bytes = java.util.Base64.getDecoder().decode(encoded);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("invalid base64 in data URL", error);
+        }
+        if (bytes.length == 0) throw new IllegalArgumentException("data URL has no bytes");
+        String id = UUID.randomUUID().toString().replace("-", "");
+        String ext = extension(effectiveType, fileName);
+        String storageKey = "backend:" + id;
+        String relativePath = user.getId() + "/" + id + ext;
+        java.nio.file.Path target = fileDir.resolve(relativePath).normalize();
+        if (!target.startsWith(fileDir)) throw new IllegalArgumentException("invalid target path");
+        try {
+            java.nio.file.Files.createDirectories(target.getParent());
+            java.nio.file.Files.write(target, bytes, java.nio.file.StandardOpenOption.CREATE_NEW);
+        } catch (java.io.IOException error) {
+            throw new RuntimeException("failed to save file", error);
+        }
+        com.infinitecanvas.backend.entity.UserFile entity = new com.infinitecanvas.backend.entity.UserFile();
+        entity.setId(id);
+        entity.setUser(user);
+        entity.setStorageKey(storageKey);
+        entity.setFileName((fileName == null || fileName.isBlank()) ? ("file" + ext) : fileName);
+        entity.setContentType(effectiveType);
+        entity.setBytes((long) bytes.length);
+        entity.setRelativePath(relativePath);
+        entity.setCreatedAt(java.time.Instant.now());
+        try {
+            return files.save(entity);
+        } catch (RuntimeException error) {
+            try {
+                java.nio.file.Files.deleteIfExists(target);
+            } catch (java.io.IOException cleanupError) {
+                error.addSuppressed(cleanupError);
+            }
+            throw error;
+        }
+    }
+
     public UserFile save(User user, MultipartFile file) {
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("文件为空");
         String id = UUID.randomUUID().toString().replace("-", "");

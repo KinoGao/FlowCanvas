@@ -71,6 +71,26 @@ export function resolveVideoModelCapability(capabilities: VideoModelCapability[]
     return resolveModelCapability(capabilities, model);
 }
 
+export function normalizeVideoGenerationMode(
+    mode: VideoGenerationMode,
+    capability: Pick<VideoModelCapability, 'requestAdapter'> | null | undefined,
+): VideoGenerationMode {
+    return capability?.requestAdapter.startsWith('seedance')
+        && (mode === 'image-reference' || mode === 'multi-frame')
+        ? 'all-in-one-reference'
+        : mode;
+}
+
+export function videoRatiosForMode(
+    capability: Pick<VideoModelCapability, 'requestAdapter' | 'ratios'>,
+    mode: VideoGenerationMode | undefined,
+) {
+    const normalizedMode = mode ? normalizeVideoGenerationMode(mode, capability) : undefined;
+    return capability.requestAdapter === 'seedance-v1' && normalizedMode === 'text-to-video'
+        ? capability.ratios.filter((ratio) => ratio !== 'adaptive')
+        : capability.ratios;
+}
+
 export async function resolveImageModelCapabilityForRequest(model: string) {
     const capabilities = await queryClient.fetchQuery({
         queryKey: IMAGE_MODEL_CAPABILITIES_QUERY_KEY,

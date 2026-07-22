@@ -1,9 +1,8 @@
 "use client";
 
 import { App, Alert, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { Cloud, Database, LogIn, LogOut, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Cloud, LogIn, LogOut, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { loginUser, logoutUser, registerUser } from "@/services/api/auth";
 import { syncAppDataToWebdav, type AppSyncDomainKey } from "@/services/app-sync";
@@ -185,12 +184,7 @@ export function AppConfigModal() {
                     type="warning"
                     showIcon
                     message="生成能力需要配置"
-                    description="模型、厂家密钥、ComfyUI 地址和工作流已经移到后台管理。创作侧只保留保存位置与生成偏好。"
-                    action={
-                        <Link to="/admin">
-                            <Button size="small" type="primary">打开后台</Button>
-                        </Link>
-                    }
+                    description="当前没有可用的已验证模型，请联系系统管理员完成模型认证、能力配置和发布。"
                 />
             ) : null}
             <Tabs
@@ -242,11 +236,6 @@ export function AppConfigModal() {
                                     )}
                                 </section>
 
-                                <section className="rounded-2xl border border-black/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                                    <div className="mb-3 flex items-center gap-2 font-medium"><Database className="size-4" />后台管理</div>
-                                    <div className="mb-3 text-sm text-gray-500">厂家、API Key、实际请求模型名、模型能力、ComfyUI 地址和工作流都在后台统一配置，创作端只读取发布后的运行时能力。</div>
-                                    <Link to="/admin"><Button icon={<Settings2 className="size-4" />}>打开后台能力配置</Button></Link>
-                                </section>
                             </div>
                         ),
                     },

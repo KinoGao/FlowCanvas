@@ -119,7 +119,39 @@ type BackendFileUrlCacheEntry = {
 
 const backendFileUrlCache = new Map<string, BackendFileUrlCacheEntry>();
 
+async function blobToDataUrl(blob: Blob): Promise<string | null> {
+    if (typeof FileReader === "undefined") return null;
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onerror = () => resolve(null);
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+        reader.readAsDataURL(blob);
+    });
+}
+
 export async function uploadBackendFile(token: string, blob: Blob, fileName = "file"): Promise<BackendUploadedFile> {
+    // Prefer JSON/dataURL through tunnels (cpolar) that often break multipart boundaries.
+    const dataUrl = await blobToDataUrl(blob);
+    if (dataUrl) {
+        try {
+            const uploaded = await readApi<BackendUploadedFile>(
+                await fetch(apiUrl("/api/user/files/data"), {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        dataUrl,
+                        fileName,
+                        contentType: blob.type || undefined,
+                    }),
+                }),
+            );
+            cacheBackendFileUrl(uploaded.storageKey, uploaded.url, token);
+            return uploaded;
+        } catch {
+            // Fall back to multipart when the JSON endpoint is missing or rejects the payload.
+        }
+    }
+
     const form = new FormData();
     form.append("file", blob, fileName);
     const uploaded = await readApi<BackendUploadedFile>(
@@ -219,16 +251,22 @@ function normalizeBackendFileUrl(url: string) {
     if (/^https?:\/\//i.test(url)) return url;
     const configuredUrl = apiUrl(url);
     if (typeof window === "undefined") return configuredUrl;
-    return new URL(configuredUrl, window.location.origin).toString();
+    try {
+        return new URL(url, window.location.origin).toString();
+    } catch {
+        return configuredUrl;
+    }
 }
 
 function signedUrlExpiry(url: string) {
     try {
-        const base = typeof window === "undefined" ? "http://localhost" : window.location.origin;
-        const expires = Number(new URL(url, base).searchParams.get("expires"));
-        if (Number.isFinite(expires) && expires > 0) return expires * 1000;
+        const expires = Number(new URL(url, "http://localhost").searchParams.get("expires") || "0");
+        if (Number.isFinite(expires) && expires > 0) {
+            // Backend may return seconds or milliseconds.
+            return expires < 1e12 ? expires * 1000 : expires;
+        }
     } catch {
-        // The backend always returns an expires parameter; use a short fallback for malformed responses.
+        // ignore parse errors
     }
-    return Date.now() + SIGNED_URL_REFRESH_SKEW_MS * 2;
+    return Date.now() + 55 * 60_000;
 }

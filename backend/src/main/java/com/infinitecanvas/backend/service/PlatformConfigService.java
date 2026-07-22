@@ -2,11 +2,11 @@ package com.infinitecanvas.backend.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infinitecanvas.backend.config.ModelCapabilitiesProperties;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
 import com.infinitecanvas.backend.dto.RuntimeConfigResponse;
 import com.infinitecanvas.backend.entity.PlatformConfigEntity;
 import com.infinitecanvas.backend.repository.PlatformConfigRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +21,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -32,45 +34,53 @@ public class PlatformConfigService {
     private static final Set<String> TEXT_MODES = Set.of("text", "vision");
     private static final Set<String> IMAGE_MODES = Set.of("text-to-image", "image-to-image", "image-edit");
     private static final Set<String> IMAGE_QUALITIES = Set.of("low", "standard", "high");
-    private static final Set<String> IMAGE_RESOLUTIONS = Set.of("1k", "2k", "4k");
+    private static final Set<String> IMAGE_RESOLUTIONS = Set.of("1k", "2k", "3k", "4k");
     private static final Set<String> IMAGE_RATIOS = Set.of("1:1", "3:4", "4:5", "1:2", "4:3", "21:9", "2:1", "3:2", "9:21", "9:16", "2:3", "16:9", "5:4");
     private static final Set<String> VIDEO_MODES = Set.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame", "image-reference", "multi-frame");
+    private static final String VERIFICATION_UNVERIFIED = "unverified";
+    private static final String VERIFICATION_VERIFIED = "verified";
+    private static final String VERIFICATION_FAILED = "failed";
     private final PlatformConfigRepository repository;
     private final ObjectMapper objectMapper;
-    private final ModelCapabilitiesProperties defaults;
-    private final VolcengineModelCapabilityCatalog officialCapabilityCatalog;
     private final String configuredComfyUrl;
+    private final ModelCapabilityTemplateResolver capabilityTemplateResolver;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+
+    @Autowired
+    public PlatformConfigService(
+            PlatformConfigRepository repository,
+            ObjectMapper objectMapper,
+            @Value("${app.comfyui-base-url:}") String configuredComfyUrl,
+            ModelCapabilityTemplateResolver capabilityTemplateResolver
+    ) {
+        this.repository = repository;
+        this.objectMapper = objectMapper;
+        this.configuredComfyUrl = configuredComfyUrl == null ? "" : configuredComfyUrl.trim();
+        this.capabilityTemplateResolver = capabilityTemplateResolver;
+    }
 
     public PlatformConfigService(
             PlatformConfigRepository repository,
             ObjectMapper objectMapper,
-            ModelCapabilitiesProperties defaults,
-            VolcengineModelCapabilityCatalog officialCapabilityCatalog,
-            @Value("${app.comfyui-base-url:}") String configuredComfyUrl
+            String configuredComfyUrl
     ) {
-        this.repository = repository;
-        this.objectMapper = objectMapper;
-        this.defaults = defaults;
-        this.officialCapabilityCatalog = officialCapabilityCatalog;
-        this.configuredComfyUrl = configuredComfyUrl == null ? "" : configuredComfyUrl.trim();
+        this(repository, objectMapper, configuredComfyUrl,
+                new ModelCapabilityTemplateResolver(new com.infinitecanvas.backend.config.ModelCapabilitiesProperties()));
     }
 
     public PlatformConfigDocument getAdminConfig() {
-        return repository.findById(1L).map(entity -> {
-            PlatformConfigDocument document = read(entity);
-            if (officialCapabilityCatalog.reconcileConfirmedModels(document)) {
-                normalizeAndValidate(document);
-                persist(entity, document);
-            }
-            return document;
-        }).orElseGet(this::defaultDocument);
+        return repository.findById(1L).map(this::read).orElseGet(this::defaultDocument);
     }
 
     @Transactional
     public PlatformConfigDocument save(PlatformConfigDocument document) {
+        Optional<PlatformConfigEntity> existingEntity = repository.findById(1L);
+        PlatformConfigDocument existing = existingEntity.map(this::read).orElse(null);
+        if (existing != null) normalizeAndValidate(existing);
         normalizeAndValidate(document);
-        PlatformConfigEntity entity = repository.findById(1L).orElseGet(PlatformConfigEntity::new);
+        preserveVerification(existing, document);
+        validatePublishedModels(document);
+        PlatformConfigEntity entity = existingEntity.orElseGet(PlatformConfigEntity::new);
         persist(entity, document);
         return document;
     }
@@ -95,8 +105,11 @@ public class PlatformConfigService {
         document.getModels().stream()
                 .filter(PlatformConfigDocument.Model::isEnabled)
                 .filter(PlatformConfigDocument.Model::isPublished)
+                .filter(this::isVerified)
                 .filter(item -> providers.containsKey(item.getProviderId()))
-                .forEach(item -> groupedModels.computeIfAbsent(item.getProviderId(), ignored -> new ArrayList<>()).add(toRuntimeModel(item)));
+                .forEach(item -> groupedModels
+                        .computeIfAbsent(item.getProviderId(), ignored -> new ArrayList<>())
+                        .add(toRuntimeModel(providers.get(item.getProviderId()), item)));
         List<RuntimeConfigResponse.Provider> runtimeProviders = providers.values().stream()
                 .filter(provider -> !groupedModels.getOrDefault(provider.getId(), List.of()).isEmpty())
                 .map(provider -> new RuntimeConfigResponse.Provider(
@@ -120,10 +133,12 @@ public class PlatformConfigService {
 
     public RuntimeModel requireRuntimeModel(String modelId) {
         PlatformConfigDocument.Model model = getAdminConfig().getModels().stream()
-                .filter(item -> item.isEnabled() && item.isPublished() && item.getId().equals(modelId))
+                .filter(item -> item.isEnabled() && item.isPublished() && isVerified(item) && item.getId().equals(modelId))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Model is disabled or unpublished: " + modelId));
-        return new RuntimeModel(requireRuntimeProvider(model.getProviderId()), model);
+        PlatformConfigDocument.Provider provider = requireRuntimeProvider(model.getProviderId());
+        model.setRequestAdapter(effectiveRequestAdapter(provider, model));
+        return new RuntimeModel(provider, model);
     }
 
     public List<String> discoverModels(String providerId) {
@@ -131,6 +146,10 @@ public class PlatformConfigService {
                 .filter(item -> item.getId().equals(providerId))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Provider does not exist: " + providerId));
+        return discoverModels(provider);
+    }
+
+    private List<String> discoverModels(PlatformConfigDocument.Provider provider) {
         if (blank(provider.getBaseUrl()) || blank(provider.getApiKey())) {
             throw new IllegalArgumentException("厂商未配置接口地址或 API Key");
         }
@@ -166,6 +185,46 @@ public class PlatformConfigService {
         }
     }
 
+    @Transactional
+    public PlatformConfigDocument verifyModel(String modelId) {
+        PlatformConfigDocument document = getAdminConfig();
+        normalizeAndValidate(document);
+        PlatformConfigDocument.Model model = document.getModels().stream()
+                .filter(item -> item.getId().equals(modelId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("模型不存在: " + modelId));
+        PlatformConfigDocument.Provider provider = document.getProviders().stream()
+                .filter(item -> item.getId().equals(model.getProviderId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("模型厂商不存在: " + model.getProviderId()));
+
+        boolean keepPublished = isVerified(model) && model.isPublished();
+        String failure = null;
+        try {
+            if (!discoverModels(provider).contains(model.getRequestModel())) {
+                failure = "厂商模型接口未返回实际请求模型: " + model.getRequestModel();
+            }
+        } catch (IllegalArgumentException error) {
+            failure = error.getMessage();
+        }
+
+        if (failure == null) {
+            model.setVerificationStatus(VERIFICATION_VERIFIED);
+            model.setVerifiedAt(Instant.now().toString());
+            model.setVerificationMessage("厂商认证通过，模型存在");
+            model.setPublished(keepPublished);
+        } else {
+            model.setVerificationStatus(VERIFICATION_FAILED);
+            model.setVerifiedAt("");
+            model.setVerificationMessage(failure);
+            model.setPublished(false);
+        }
+        document.getModels().stream().filter(item -> !isVerified(item)).forEach(item -> item.setPublished(false));
+        PlatformConfigEntity entity = repository.findById(1L).orElseGet(PlatformConfigEntity::new);
+        persist(entity, document);
+        return document;
+    }
+
     public String comfyBaseUrl() {
         PlatformConfigDocument.ComfyUi comfy = getAdminConfig().getComfyui();
         if (comfy.isEnabled() && !blank(comfy.getBaseUrl())) return comfy.getBaseUrl().trim();
@@ -190,6 +249,7 @@ public class PlatformConfigService {
         return document.getModels().stream()
                 .filter(PlatformConfigDocument.Model::isEnabled)
                 .filter(PlatformConfigDocument.Model::isPublished)
+                .filter(this::isVerified)
                 .filter(item -> category.equals(item.getCategory()))
                 .filter(item -> runtimeProviderIds.contains(item.getProviderId()))
                 .toList();
@@ -199,7 +259,7 @@ public class PlatformConfigService {
         try {
             PlatformConfigDocument document = objectMapper.readValue(entity.getData(), PlatformConfigDocument.class);
             migrateLegacyCapabilities(document);
-            document.getModels().forEach(officialCapabilityCatalog::applyOfficialTemplate);
+            applyOfficialCapabilityTemplates(document);
             return document;
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("平台配置解析失败", e);
@@ -210,41 +270,71 @@ public class PlatformConfigService {
         PlatformConfigDocument document = new PlatformConfigDocument();
         document.getComfyui().setEnabled(!configuredComfyUrl.isBlank());
         if (!configuredComfyUrl.isBlank()) document.getComfyui().setBaseUrl(configuredComfyUrl);
-        Map<String, PlatformConfigDocument.Provider> providers = new LinkedHashMap<>();
-        for (ModelCapabilitiesProperties.Video source : defaults.getVideo()) {
-            providers.computeIfAbsent(source.getProvider(), providerId -> {
-                PlatformConfigDocument.Provider provider = new PlatformConfigDocument.Provider();
-                provider.setId(providerId);
-                provider.setName(providerId);
-                provider.setEnabled(false);
-                return provider;
-            });
-            PlatformConfigDocument.Model model = new PlatformConfigDocument.Model();
-            model.setId(source.getId());
-            model.setProviderId(source.getProvider());
-            model.setDisplayName(source.getId());
-            model.setRequestModel(source.getModelPatterns().isEmpty() ? source.getId() : source.getModelPatterns().getFirst().replace("*", ""));
-            model.setCategory("video");
-            model.setRequestAdapter(source.getRequestAdapter());
-            model.setModelPatterns(List.copyOf(source.getModelPatterns()));
-            PlatformConfigDocument.VideoCapabilities capabilities = new PlatformConfigDocument.VideoCapabilities();
-            capabilities.setModes(List.copyOf(source.getModes()));
-            capabilities.setRatios(List.copyOf(source.getRatios()));
-            capabilities.setResolutions(List.copyOf(source.getResolutions()));
-            capabilities.setDurations(List.copyOf(source.getDurations()));
-            capabilities.setFrameRates(List.copyOf(source.getFrameRates()));
-            capabilities.setCounts(List.copyOf(source.getCounts()));
-            capabilities.setGenerateAudio(source.isGenerateAudio());
-            capabilities.setWatermark(source.isWatermark());
-            capabilities.setDraft(source.isDraft());
-            capabilities.setMaxImages(source.getMaxImages());
-            capabilities.setMaxVideos(source.getMaxVideos());
-            capabilities.setMaxAudios(source.getMaxAudios());
-            model.setVideoCapabilities(capabilities);
-            document.getModels().add(model);
-        }
-        document.setProviders(new ArrayList<>(providers.values()));
         return document;
+    }
+
+    private void preserveVerification(PlatformConfigDocument existing, PlatformConfigDocument incoming) {
+        Map<String, PlatformConfigDocument.Model> existingModels = existing == null ? Map.of() : existing.getModels().stream()
+                .collect(Collectors.toMap(PlatformConfigDocument.Model::getId, Function.identity()));
+        for (PlatformConfigDocument.Model model : incoming.getModels()) {
+            PlatformConfigDocument.Model previous = existingModels.get(model.getId());
+            if (previous != null && verificationFingerprint(existing, previous).equals(verificationFingerprint(incoming, model))) {
+                model.setVerificationStatus(previous.getVerificationStatus());
+                model.setVerifiedAt(previous.getVerifiedAt());
+                model.setVerificationMessage(previous.getVerificationMessage());
+            } else {
+                clearVerification(model);
+            }
+        }
+    }
+
+    private String verificationFingerprint(PlatformConfigDocument document, PlatformConfigDocument.Model model) {
+        PlatformConfigDocument.Provider provider = document.getProviders().stream()
+                .filter(item -> item.getId().equals(model.getProviderId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("模型厂商不存在: " + model.getProviderId()));
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("providerId", provider.getId());
+        values.put("providerBaseUrl", provider.getBaseUrl());
+        values.put("providerApiKey", provider.getApiKey());
+        values.put("providerApiFormat", provider.getApiFormat());
+        values.put("providerModelsPath", provider.getModelsPath());
+        values.put("requestModel", model.getRequestModel());
+        values.put("category", model.getCategory());
+        values.put("requestAdapter", model.getRequestAdapter());
+        values.put("modelPatterns", model.getModelPatterns());
+        values.put("textCapabilities", model.getTextCapabilities());
+        values.put("imageCapabilities", model.getImageCapabilities());
+        values.put("videoCapabilities", model.getVideoCapabilities());
+        try {
+            return objectMapper.writeValueAsString(values);
+        } catch (JsonProcessingException error) {
+            throw new IllegalArgumentException("模型验证配置无法序列化", error);
+        }
+    }
+
+    private void clearVerification(PlatformConfigDocument.Model model) {
+        model.setVerificationStatus(VERIFICATION_UNVERIFIED);
+        model.setVerifiedAt("");
+        model.setVerificationMessage("配置已变更，需要重新验证");
+        model.setPublished(false);
+    }
+
+    private void validatePublishedModels(PlatformConfigDocument document) {
+        document.getModels().stream()
+                .filter(PlatformConfigDocument.Model::isPublished)
+                .filter(model -> !isVerified(model))
+                .findFirst()
+                .ifPresent(model -> { throw new IllegalArgumentException("模型尚未通过认证验证，不能发布: " + model.getId()); });
+    }
+
+    private boolean isVerified(PlatformConfigDocument.Model model) {
+        return VERIFICATION_VERIFIED.equals(model.getVerificationStatus());
+    }
+
+    private String cleanVerificationStatus(String value) {
+        return Set.of(VERIFICATION_UNVERIFIED, VERIFICATION_VERIFIED, VERIFICATION_FAILED).contains(value)
+                ? value : VERIFICATION_UNVERIFIED;
     }
 
     private void normalizeAndValidate(PlatformConfigDocument document) {
@@ -271,9 +361,12 @@ public class PlatformConfigService {
             model.setDisplayName(required(model.getDisplayName(), "模型显示名称"));
             model.setRequestModel(required(model.getRequestModel(), "实际请求模型名称"));
             model.setCategory(CATEGORIES.contains(model.getCategory()) ? model.getCategory() : "image");
+            capabilityTemplateResolver.applyOfficialVideoTemplate(model);
             model.setRequestAdapter(blank(model.getRequestAdapter()) ? "openai" : model.getRequestAdapter().trim());
             model.setModelPatterns(cleanStrings(model.getModelPatterns()));
-            officialCapabilityCatalog.applyOfficialTemplate(model);
+            model.setVerificationStatus(cleanVerificationStatus(model.getVerificationStatus()));
+            model.setVerifiedAt(cleanOptional(model.getVerifiedAt()));
+            model.setVerificationMessage(cleanOptional(model.getVerificationMessage()));
             normalizeCapabilities(model);
             return model.getId();
         }).collect(Collectors.toSet());
@@ -285,12 +378,12 @@ public class PlatformConfigService {
         comfy.setPollIntervalMs(Math.max(500, comfy.getPollIntervalMs()));
     }
 
-    private RuntimeConfigResponse.Model toRuntimeModel(PlatformConfigDocument.Model item) {
+    private RuntimeConfigResponse.Model toRuntimeModel(PlatformConfigDocument.Provider provider, PlatformConfigDocument.Model item) {
         PlatformConfigDocument.TextCapabilities text = item.getTextCapabilities();
         PlatformConfigDocument.ImageCapabilities image = item.getImageCapabilities();
         PlatformConfigDocument.VideoCapabilities video = item.getVideoCapabilities();
         return new RuntimeConfigResponse.Model(
-                item.getId(), item.getDisplayName(), item.getCategory(), item.getRequestAdapter(),
+                item.getId(), item.getDisplayName(), item.getCategory(), effectiveRequestAdapter(provider, item),
                 runtimeModelPatterns(item),
                 text == null ? null : new RuntimeConfigResponse.TextCapabilities(List.copyOf(text.getModes())),
                 image == null ? null : new RuntimeConfigResponse.ImageCapabilities(
@@ -305,6 +398,41 @@ public class PlatformConfigService {
                         video.isWatermark(), video.isDraft(), video.getMaxImages(), video.getMaxVideos(), video.getMaxAudios()
                 )
         );
+    }
+
+    private String effectiveRequestAdapter(
+            PlatformConfigDocument.Provider provider,
+            PlatformConfigDocument.Model model
+    ) {
+        String configured = blank(model.getRequestAdapter()) ? "openai" : model.getRequestAdapter().trim();
+        if ("openai".equalsIgnoreCase(configured) && isAgnesVideoModel(provider, model)) {
+            return "agnes-v2";
+        }
+        return configured;
+    }
+
+    private boolean isAgnesVideoModel(
+            PlatformConfigDocument.Provider provider,
+            PlatformConfigDocument.Model model
+    ) {
+        if (!"video".equalsIgnoreCase(model.getCategory())) return false;
+
+        String requestModel = cleanOptional(model.getRequestModel()).toLowerCase(Locale.ROOT);
+        if (requestModel.startsWith("agnes-video-v2")) return true;
+
+        String modelIdentity = String.join(
+                " ",
+                cleanOptional(model.getId()),
+                cleanOptional(model.getDisplayName()),
+                requestModel
+        ).toLowerCase(Locale.ROOT);
+        String providerIdentity = String.join(
+                " ",
+                cleanOptional(provider.getId()),
+                cleanOptional(provider.getName()),
+                cleanOptional(provider.getBaseUrl())
+        ).toLowerCase(Locale.ROOT);
+        return modelIdentity.contains("agnes-video") || providerIdentity.contains("agnes");
     }
 
     List<String> runtimeModelPatterns(PlatformConfigDocument.Model item) {
@@ -408,7 +536,7 @@ public class PlatformConfigService {
                 capabilities.setModes(cleanAllowedStrings(capabilities.getModes(), VIDEO_MODES));
                 capabilities.setRatios(cleanStrings(capabilities.getRatios()));
                 capabilities.setResolutions(cleanStrings(capabilities.getResolutions()));
-                capabilities.setDurations(positiveIntegers(capabilities.getDurations()));
+                capabilities.setDurations(videoDurations(capabilities.getDurations()));
                 capabilities.setFrameRates(positiveIntegers(capabilities.getFrameRates()));
                 capabilities.setCounts(positiveIntegers(capabilities.getCounts()));
                 capabilities.setMaxImages(Math.max(0, capabilities.getMaxImages()));
@@ -506,6 +634,19 @@ public class PlatformConfigService {
     private List<Integer> positiveIntegers(List<Integer> values) {
         if (values == null) return List.of();
         return values.stream().filter(value -> value != null && value > 0).distinct().sorted().toList();
+    }
+
+    private List<Integer> videoDurations(List<Integer> values) {
+        if (values == null) return List.of();
+        return values.stream()
+                .filter(value -> value != null && (value == -1 || value > 0))
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private void applyOfficialCapabilityTemplates(PlatformConfigDocument document) {
+        document.getModels().forEach(capabilityTemplateResolver::applyOfficialVideoTemplate);
     }
 
     private List<String> cleanAllowedStrings(List<String> values, Set<String> allowed) {

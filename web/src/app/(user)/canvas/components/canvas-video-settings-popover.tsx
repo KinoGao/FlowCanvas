@@ -10,17 +10,20 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
+import type { VideoGenerationMode } from "@/services/api/model-capabilities";
 
 type CanvasVideoSettingsPopoverProps = {
     config: AiConfig;
+    generationMode?: VideoGenerationMode;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
+
 };
 
-export function CanvasVideoSettingsPopover({ config, onConfigChange, open: controlledOpen, onOpenChange, buttonClassName, placement = "topLeft" }: CanvasVideoSettingsPopoverProps) {
+export function CanvasVideoSettingsPopover({ config, onConfigChange, open: controlledOpen, onOpenChange, buttonClassName, placement = "topLeft", generationMode }: CanvasVideoSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -61,7 +64,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, open: contr
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <VideoSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} generationMode={generationMode} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -87,6 +90,7 @@ function VideoSettingsPortal({
     placement,
     theme,
     config,
+    generationMode,
     onConfigChange,
 }: {
     buttonRect: DOMRect;
@@ -94,6 +98,7 @@ function VideoSettingsPortal({
     placement: CanvasVideoSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    generationMode?: VideoGenerationMode;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
     const gap = 8;
@@ -127,7 +132,7 @@ function VideoSettingsPortal({
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover [&::-webkit-scrollbar]:hidden" style={{ ...style, scrollbarWidth: "none" }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <VideoSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-3" variant="composer" />
+            <VideoSettingsPanel config={config} generationMode={generationMode} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-3" variant="composer" />
         </div>,
         document.body,
     );

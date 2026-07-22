@@ -100,7 +100,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
     const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
     const isVideoCapabilityPending = mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching);
     const isVideoCapabilityUnavailable = mode === "video" && !isVideoCapabilityPending && (!videoCapability || !videoCapability.modes.length);
-    const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability?.modes);
+    const selectedVideoMode = supportedVideoMode(node.metadata?.videoGenerationMode, videoCapability);
     const videoReferenceValidationMessage = mode === "video" && videoCapability && selectedVideoMode
         ? validateVideoReferenceCounts(selectedVideoMode, videoCapability, { image: inputSummary.imageCount, video: inputSummary.videoCount, audio: inputSummary.audioCount })
         : "";
@@ -338,6 +338,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                                 />
                                 <CanvasVideoSettingsPopover
                                     config={config}
+                                    generationMode={selectedVideoMode}
                                     placement="topRight"
                                     buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2"
                                     onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}

@@ -1,11 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-
 import {
-    isSeedanceNewModel,
     isSeedanceVideoModel,
     seedanceCapabilitiesForModel,
-    seedanceDurationOptions,
-    seedanceRatioOptions,
 } from '@/lib/seedance-video';
 import {
     fetchVideoModelCapabilities,
@@ -33,27 +29,22 @@ export function useVideoModelCapability(model: string) {
 function seedanceFallbackCapability(model: string): VideoModelCapability | null {
     if (!isSeedanceVideoModel(model)) return null;
     const local = seedanceCapabilitiesForModel(model);
-    const modes: VideoGenerationMode[] = [];
-    if (local.textToVideo) modes.push('text-to-video');
-    if (local.imageToVideoFirst) modes.push('image-to-video');
-    if (local.imageToVideoFirstLast) modes.push('first-last-frame');
-    const maxImages = local.imageToVideoFirstLast ? 2 : local.imageToVideoFirst ? 1 : 0;
     return {
         id: `seedance-fallback:${model}`,
         provider: 'seedance',
-        requestAdapter: isSeedanceNewModel(model) ? 'seedance-v1.5' : 'seedance-v1',
+        requestAdapter: local.requestAdapter,
         modelPatterns: [model],
-        modes,
-        ratios: seedanceRatioOptions.map((item) => item.value),
+        modes: [...local.modes] as VideoGenerationMode[],
+        ratios: [...local.ratios],
         resolutions: [...local.resolutions],
-        durations: [...seedanceDurationOptions],
+        durations: [...local.durations],
         frameRates: [24],
         counts: [1],
         generateAudio: local.generateAudio,
-        watermark: false,
-        draft: false,
-        maxImages,
-        maxVideos: 0,
-        maxAudios: 0,
+        watermark: local.watermark,
+        draft: local.draft,
+        maxImages: local.maxImages,
+        maxVideos: local.maxVideos,
+        maxAudios: local.maxAudios,
     };
 }
