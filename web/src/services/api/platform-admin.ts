@@ -12,7 +12,7 @@ export type PlatformProvider = {
     enabled: boolean;
 };
 
-export type ModelCategory = "text" | "image" | "video";
+export type ModelCategory = "text" | "image" | "video" | "audio";
 export type ModelVerificationStatus = "unverified" | "verified" | "failed";
 
 export type TextCapabilities = {
@@ -29,6 +29,7 @@ export type ImageCapabilities = {
     maxOutputs: number;
     maxTotalImages: number;
     sequentialImageGeneration: boolean;
+    interactiveEdit: boolean;
     watermark: boolean;
     documentationUrl: string;
     officialTemplate: string;
@@ -49,6 +50,14 @@ export type VideoCapabilities = {
     maxAudios: number;
 };
 
+export type AudioCapabilities = {
+    modes: Array<"text-to-speech">;
+    voices: string[];
+    formats: string[];
+    speeds: number[];
+    instructions: boolean;
+};
+
 export type PlatformModel = {
     id: string;
     providerId: string;
@@ -65,6 +74,7 @@ export type PlatformModel = {
     textCapabilities: TextCapabilities | null;
     imageCapabilities: ImageCapabilities | null;
     videoCapabilities: VideoCapabilities | null;
+    audioCapabilities: AudioCapabilities | null;
 };
 
 export type PlatformComfyUi = {

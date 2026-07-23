@@ -67,8 +67,18 @@ default_tools_approval_mode = "approve"
 - `canvas_get_selection`
 - `canvas_export_snapshot`
 - `canvas_apply_ops`
+- `canvas_create_node`
 - `canvas_create_text_node`
+- `canvas_create_text_nodes`
 - `canvas_create_image_prompt_flow`
+- `canvas_create_generation_flow`
+- `canvas_generate_text`
+- `canvas_generate_image`
+- `canvas_generate_video`
+- `canvas_generate_audio`
+- `canvas_run_generation`
+
+通用生成工具会创建一个提示词文本节点和一个对应类型的目标节点（文本、图片、视频或音频），把提示词和参考节点连接到该目标节点，并直接在目标节点执行生成。需要创建 ComfyUI 工作流节点时，使用 `canvas_create_node` 并传入 `nodeType: "comfyui"`。
 
 `canvas_apply_ops` 示例：
 

@@ -1,6 +1,7 @@
 package com.infinitecanvas.backend.controller;
 
 import com.infinitecanvas.backend.dto.ApiResponse;
+import com.infinitecanvas.backend.dto.AudioModelCapabilityResponse;
 import com.infinitecanvas.backend.dto.ImageModelCapabilityResponse;
 import com.infinitecanvas.backend.dto.VideoModelCapabilityResponse;
 import com.infinitecanvas.backend.service.ModelCapabilityService;
@@ -27,5 +28,10 @@ public class ModelCapabilityController {
     @GetMapping("/video")
     public ApiResponse<List<VideoModelCapabilityResponse>> videoCapabilities() {
         return ApiResponse.ok(capabilityService.videoCapabilities());
+    }
+
+    @GetMapping("/audio")
+    public ApiResponse<List<AudioModelCapabilityResponse>> audioCapabilities() {
+        return ApiResponse.ok(capabilityService.audioCapabilities());
     }
 }

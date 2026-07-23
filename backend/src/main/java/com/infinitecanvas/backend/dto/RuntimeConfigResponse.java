@@ -12,7 +12,8 @@ public record RuntimeConfigResponse(List<Provider> providers, ComfyUi comfyui) {
             List<String> modelPatterns,
             TextCapabilities textCapabilities,
             ImageCapabilities imageCapabilities,
-            VideoCapabilities videoCapabilities
+            VideoCapabilities videoCapabilities,
+            AudioCapabilities audioCapabilities
     ) {}
     public record TextCapabilities(List<String> modes) {}
     public record ImageCapabilities(
@@ -25,6 +26,7 @@ public record RuntimeConfigResponse(List<Provider> providers, ComfyUi comfyui) {
             int maxOutputs,
             int maxTotalImages,
             boolean sequentialImageGeneration,
+            boolean interactiveEdit,
             boolean watermark,
             String documentationUrl,
             String officialTemplate
@@ -42,6 +44,13 @@ public record RuntimeConfigResponse(List<Provider> providers, ComfyUi comfyui) {
             int maxImages,
             int maxVideos,
             int maxAudios
+    ) {}
+    public record AudioCapabilities(
+            List<String> modes,
+            List<String> voices,
+            List<String> formats,
+            List<Double> speeds,
+            boolean instructions
     ) {}
     public record ComfyUi(boolean enabled, String clientId, String defaultWorkflowId, int timeoutSeconds, int pollIntervalMs) {}
 }

@@ -1,6 +1,7 @@
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { sortConnectionsByReferenceOrder } from "./canvas-node-identity";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
 
@@ -30,6 +31,8 @@ export function createCanvasResourceGraph(nodes: CanvasNodeData[], connections: 
         pushConnection(incomingByNodeId, connection.toNodeId, connection);
         pushConnection(outgoingByNodeId, connection.fromNodeId, connection);
     });
+    incomingByNodeId.forEach((items, nodeId) => incomingByNodeId.set(nodeId, sortConnectionsByReferenceOrder(items)));
+    outgoingByNodeId.forEach((items, nodeId) => outgoingByNodeId.set(nodeId, sortConnectionsByReferenceOrder(items)));
     return { nodeById, incomingByNodeId, outgoingByNodeId, resourceNodes: nodes.filter(isResourceNode) };
 }
 
@@ -58,8 +61,7 @@ export function getMentionResourceNodes(nodeId: string, source: CanvasResourceGr
     if (configInputs.length) return configInputs;
     const ownInputs = getContextResourceNodes(nodeId, graph);
     if (ownInputs.length) return ownInputs;
-    const node = graph.nodeById.get(nodeId);
-    return node && isResourceNode(node) ? [node] : [];
+    return [];
 }
 
 export function getGenerationResourceNodes(nodeId: string, graph: CanvasResourceGraph): CanvasNodeData[];
@@ -78,7 +80,7 @@ function getContextResourceNodes(nodeId: string, graph: CanvasResourceGraph) {
 }
 
 function getConnectedConfigResourceNodes(nodeId: string, graph: CanvasResourceGraph) {
-    const configConnection = (graph.outgoingByNodeId.get(nodeId) || []).find((connection) => graph.nodeById.get(connection.toNodeId)?.type === CanvasNodeType.Config);
+    const configConnection = (graph.outgoingByNodeId.get(nodeId) || []).find((connection) => isGenerationConfigNode(graph.nodeById.get(connection.toNodeId)));
     if (!configConnection) return [];
     return getContextResourceNodes(configConnection.toNodeId, graph).filter((node) => node.id !== nodeId);
 }
@@ -129,4 +131,8 @@ function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
     if (node.type === CanvasNodeType.Audio && (node.metadata?.content || node.metadata?.storageKey)) return "audio";
     if (node.type === CanvasNodeType.Text && (node.metadata?.content || node.metadata?.prompt)) return "text";
     return null;
+}
+
+function isGenerationConfigNode(node: CanvasNodeData | undefined) {
+    return node?.type === CanvasNodeType.Config || node?.type === CanvasNodeType.ComfyUI;
 }

@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 @Component
 public class VolcengineModelCapabilityCatalog {
     private static final String SEEDREAM_5_LITE = "doubao-seedream-5-0-lite-260128";
+    private static final String SEEDREAM_5_PRO_PREFIX = "doubao-seedream-5-0-pro-";
     private static final String SEEDREAM_4_5 = "doubao-seedream-4-5-251128";
     private static final String SEEDREAM_4_0 = "doubao-seedream-4-0-250828";
     private static final String SEEDANCE_1_5_PRO = "doubao-seedance-1-5-pro-251215";
@@ -20,9 +21,9 @@ public class VolcengineModelCapabilityCatalog {
     private static final String SEEDREAM_DOCUMENTATION = "https://www.volcengine.com/docs/82379/1824121";
 
     private final Map<String, Consumer<PlatformConfigDocument.Model>> templates = Map.of(
-            SEEDREAM_5_LITE, model -> applySeedream(model, SEEDREAM_5_LITE, 10, List.of("2k", "3k", "4k"), "volcengine-seedream-5.0-lite"),
+            SEEDREAM_5_LITE, model -> applySeedream(model, SEEDREAM_5_LITE, 14, List.of("2k", "3k", "4k"), "volcengine-seedream-5.0-lite"),
             SEEDREAM_4_5, model -> applySeedream(model, SEEDREAM_4_5, 14, List.of("2k", "4k"), "volcengine-seedream-4.5"),
-            SEEDREAM_4_0, model -> applySeedream(model, SEEDREAM_4_0, 10, List.of("1k", "2k", "4k"), "volcengine-seedream-4.0"),
+            SEEDREAM_4_0, model -> applySeedream(model, SEEDREAM_4_0, 14, List.of("1k", "2k", "4k"), "volcengine-seedream-4.0"),
             SEEDANCE_1_5_PRO, this::applySeedance15Pro,
             SEEDANCE_1_0_PRO_FAST, model -> applySeedance10(model, SEEDANCE_1_0_PRO_FAST, false),
             SEEDANCE_1_0_PRO, model -> applySeedance10(model, SEEDANCE_1_0_PRO, true),
@@ -33,8 +34,12 @@ public class VolcengineModelCapabilityCatalog {
     public boolean applyOfficialTemplate(PlatformConfigDocument.Model model) {
         if (model == null || model.getRequestModel() == null) return false;
         Consumer<PlatformConfigDocument.Model> template = templates.get(model.getRequestModel().trim());
-        if (template == null) return false;
-        template.accept(model);
+        if (template != null) {
+            template.accept(model);
+            return true;
+        }
+        if (!model.getRequestModel().trim().startsWith(SEEDREAM_5_PRO_PREFIX)) return false;
+        applySeedream5Pro(model);
         return true;
     }
 
@@ -61,7 +66,7 @@ public class VolcengineModelCapabilityCatalog {
                 .findFirst()
                 .orElse(null);
         if (exact != null) {
-            applyOfficialTemplate(exact);
+            if (exact.getImageCapabilities() == null && exact.getVideoCapabilities() == null) applyOfficialTemplate(exact);
             return false;
         }
 
@@ -162,9 +167,34 @@ public class VolcengineModelCapabilityCatalog {
         capabilities.setMaxOutputs(15);
         capabilities.setMaxTotalImages(15);
         capabilities.setSequentialImageGeneration(true);
+        capabilities.setInteractiveEdit(false);
         capabilities.setWatermark(true);
         capabilities.setDocumentationUrl(SEEDREAM_DOCUMENTATION);
         capabilities.setOfficialTemplate(officialTemplate);
+        model.setImageCapabilities(capabilities);
+    }
+
+    private static void applySeedream5Pro(PlatformConfigDocument.Model model) {
+        model.setCategory("image");
+        model.setRequestAdapter("seedream");
+        model.setModelPatterns(List.of(model.getRequestModel().trim()));
+        model.setTextCapabilities(null);
+        model.setVideoCapabilities(null);
+
+        PlatformConfigDocument.ImageCapabilities capabilities = new PlatformConfigDocument.ImageCapabilities();
+        capabilities.setModes(List.of("text-to-image", "image-to-image", "image-edit"));
+        capabilities.setQualities(List.of("standard", "high"));
+        capabilities.setResolutions(List.of("1k", "2k"));
+        capabilities.setRatios(List.of("1:1", "3:4", "4:5", "1:2", "4:3", "21:9", "2:1", "3:2", "9:21", "9:16", "2:3", "16:9", "5:4"));
+        capabilities.setCounts(List.of(1));
+        capabilities.setMaxImages(10);
+        capabilities.setMaxOutputs(1);
+        capabilities.setMaxTotalImages(0);
+        capabilities.setSequentialImageGeneration(false);
+        capabilities.setInteractiveEdit(true);
+        capabilities.setWatermark(true);
+        capabilities.setDocumentationUrl(SEEDREAM_DOCUMENTATION);
+        capabilities.setOfficialTemplate("volcengine-seedream-5.0-pro");
         model.setImageCapabilities(capabilities);
     }
 

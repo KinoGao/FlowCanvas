@@ -47,7 +47,7 @@ export function buildNodeGenerationContext(
     const appendUpstreamText = options?.appendUpstreamText ?? true;
     const inputs = graph ? buildNodeGenerationInputs(nodeId, graph) : buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = graph ? graph.nodeById.get(nodeId) : nodes.find((node) => node.id === nodeId);
-    if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
+    if (isGenerationConfigNode(sourceNode?.type) && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt);
     }
 
@@ -75,6 +75,10 @@ export function buildNodeGenerationContext(
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
     };
+}
+
+function isGenerationConfigNode(type: CanvasNodeType | undefined) {
+    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
 }
 
 function buildMentionLabelGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext | null {

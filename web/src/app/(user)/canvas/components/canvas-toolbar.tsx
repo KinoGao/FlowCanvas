@@ -20,7 +20,6 @@ import {
     Palette,
     Plus,
     Redo2,
-    Settings2,
     Sparkles,
     Square,
     Sun,
@@ -30,6 +29,7 @@ import {
     Upload,
     Video,
     WandSparkles,
+    Workflow,
     X,
 } from "lucide-react";
 
@@ -48,6 +48,7 @@ export function CanvasToolbar({
     onAddAudio,
     onAddText,
     onAddScript,
+    onAddComfyUI,
     onAddConfig,
     onAddVideoComposition,
     onAddDirector,
@@ -76,7 +77,9 @@ export function CanvasToolbar({
     onAddAudio: () => void;
     onAddText: () => void;
     onAddScript: () => void;
-    onAddConfig: () => void;
+    onAddComfyUI?: () => void;
+    /** @deprecated Use onAddComfyUI for newly created nodes. */
+    onAddConfig?: () => void;
     onAddVideoComposition: () => void;
     onAddDirector: () => void;
     onAddPanorama360: () => void;
@@ -112,6 +115,7 @@ export function CanvasToolbar({
     const dockStyle = { background: theme.ui.material, borderColor: theme.ui.hairline, color: theme.toolbar.item, boxShadow: theme.ui.shadow };
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
+    const addComfyUI = onAddComfyUI ?? onAddConfig ?? (() => undefined);
     const tip = hovered ? toolLabel(hovered) : "";
     const dockPanelOpen = addMenuOpen || appearanceOpen || materialOpen || historyOpen;
 
@@ -208,7 +212,7 @@ export function CanvasToolbar({
                     <AddNodeOption theme={theme} icon={<Type className="size-4" />} label="文本" onClick={onAddText} onClose={() => setAddMenuOpen(false)} />
                     <AddNodeOption theme={theme} icon={<ImageIcon className="size-4" />} label="图片" onClick={onAddImage} onClose={() => setAddMenuOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Video className="size-4" />} label="视频" onClick={onAddVideo} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Settings2 className="size-4" />} label="生成配置" onClick={onAddConfig} onClose={() => setAddMenuOpen(false)} />
+                    <AddNodeOption theme={theme} icon={<Workflow className="size-4" />} label="ComfyUI" onClick={addComfyUI} onClose={() => setAddMenuOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Clapperboard className="size-4" />} label="视频合成" tag="Beta" onClick={onAddVideoComposition} onClose={() => setAddMenuOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" tag="NEW" onClick={onAddDirector} onClose={() => setAddMenuOpen(false)} />
                     <AddNodeOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" tag="NEW" onClick={onAddPanorama360} onClose={() => setAddMenuOpen(false)} />

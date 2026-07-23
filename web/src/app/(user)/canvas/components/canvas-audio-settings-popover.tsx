@@ -6,6 +6,7 @@ import { Settings2 } from "lucide-react";
 import { Button } from "antd";
 
 import { AudioSettingsPanel } from "@/components/audio-settings-panel";
+import { useAudioModelCapability } from "@/hooks/use-audio-model-capability";
 import { audioFormatLabel, audioSpeedLabel, audioVoiceLabel } from "@/lib/audio-generation";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -26,6 +27,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+    const { capability } = useAudioModelCapability(config.audioModel || config.model);
 
     useEffect(() => {
         if (!open) return;
@@ -48,7 +50,7 @@ export function CanvasAudioSettingsPopover({ config, onConfigChange, buttonClass
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <AudioSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} capability={capability} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -77,6 +79,7 @@ function AudioSettingsPortal({
     placement,
     theme,
     config,
+    capability,
     onConfigChange,
 }: {
     buttonRect: DOMRect;
@@ -84,6 +87,7 @@ function AudioSettingsPortal({
     placement: CanvasAudioSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
+    capability: ReturnType<typeof useAudioModelCapability>["capability"];
     onConfigChange: (key: CanvasAudioSettingKey, value: string) => void;
 }) {
     const width = 356;
@@ -109,7 +113,7 @@ function AudioSettingsPortal({
 
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-            <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} capability={capability} className="space-y-4" />
         </div>,
         document.body,
     );

@@ -28,7 +28,8 @@ export function isSeedEditImageModel(model: string) {
 export function seedreamCapabilitiesForModel(model: string): SeedreamCapabilities {
     const value = normalizedSeedreamModel(model);
     if (value.includes("seededit")) return { textToImage: false, imageEdit: true, maxImages: 1, resolutions: ["adaptive", "1K", "2K", "4K"], outputFormat: false };
-    if (value.includes("5-0-lite")) return { textToImage: true, imageEdit: true, maxImages: 10, resolutions: ["2K", "4K"], outputFormat: true };
+    if (value.includes("5-0-pro")) return { textToImage: true, imageEdit: true, maxImages: 10, resolutions: ["1K", "2K"], outputFormat: true };
+    if (value.includes("5-0-lite")) return { textToImage: true, imageEdit: true, maxImages: 14, resolutions: ["2K", "3K", "4K"], outputFormat: true };
     if (value.includes("4-5")) return { textToImage: true, imageEdit: true, maxImages: 14, resolutions: ["2K", "4K"], outputFormat: false };
     if (value.includes("4-0")) return { textToImage: true, imageEdit: true, maxImages: 14, resolutions: ["1K", "2K", "4K"], outputFormat: false };
     if (value.includes("3-0-t2i")) return { textToImage: true, imageEdit: false, maxImages: 0, resolutions: ["1K", "2K"], outputFormat: false };

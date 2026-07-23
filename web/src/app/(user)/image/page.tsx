@@ -60,7 +60,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "resolution" | "size" | "count">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -287,6 +287,7 @@ export default function ImagePage() {
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
+        if (log.config.resolution) updateConfig("resolution", log.config.resolution);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
@@ -753,6 +754,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
         quality: log.config?.quality || log.quality || "",
+        resolution: log.config?.resolution || "2k",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
@@ -801,6 +803,7 @@ function buildLog({
         model: config.model,
         imageModel: config.imageModel,
         quality: config.quality,
+        resolution: config.resolution,
         size: config.size,
         count: config.count,
     };

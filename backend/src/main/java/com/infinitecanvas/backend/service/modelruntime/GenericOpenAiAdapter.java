@@ -117,6 +117,7 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
                 case "text" -> validateText(json, model.getTextCapabilities());
                 case "image" -> validateImage(json, path, model.getImageCapabilities());
                 case "video" -> validateVideo(json, model.getVideoCapabilities());
+                case "audio" -> validateAudio(json, path, model.getAudioCapabilities());
                 default -> throw new IllegalArgumentException("不支持的模型分类: " + model.getCategory());
             }
             json.remove("_flowcanvas_mode");
@@ -217,6 +218,23 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         validateReferenceLimit(countMediaInputs(json, "image"), capabilities.getMaxImages(), "参考图片");
         validateReferenceLimit(countMediaInputs(json, "video"), capabilities.getMaxVideos(), "参考视频");
         validateReferenceLimit(countMediaInputs(json, "audio"), capabilities.getMaxAudios(), "参考音频");
+    }
+
+    private void validateAudio(ObjectNode json, String path, PlatformConfigDocument.AudioCapabilities capabilities) {
+        if (capabilities == null) throw new IllegalArgumentException("音频模型尚未配置能力");
+        if (!path.toLowerCase(Locale.ROOT).contains("/audio/speech")) {
+            throw new IllegalArgumentException("当前 OpenAI 兼容音频模型仅支持 /audio/speech");
+        }
+        if (!capabilities.getModes().contains("text-to-speech")) {
+            throw new IllegalArgumentException("当前音频模型不支持文生语音");
+        }
+        if (json.path("input").asText("").trim().isEmpty()) throw new IllegalArgumentException("音频生成内容不能为空");
+        validateString(json, List.of("voice"), capabilities.getVoices(), "音色");
+        validateString(json, List.of("response_format"), capabilities.getFormats(), "输出格式");
+        validateDecimal(json, List.of("speed"), capabilities.getSpeeds(), "语速");
+        if (json.hasNonNull("instructions") && !capabilities.isInstructions()) {
+            throw new IllegalArgumentException("当前音频模型不支持语音指令");
+        }
     }
 
     private String inferVideoMode(JsonNode json) {
@@ -394,6 +412,14 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         if (allowed == null || allowed.isEmpty()) return;
         JsonNode value = first(json, keys);
         if (value != null && value.canConvertToInt() && !allowed.contains(value.asInt())) throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asInt());
+    }
+
+    private void validateDecimal(ObjectNode json, List<String> keys, List<Double> allowed, String label) {
+        if (allowed == null || allowed.isEmpty()) return;
+        JsonNode value = first(json, keys);
+        if (value != null && value.isNumber() && allowed.stream().noneMatch(item -> Math.abs(item - value.asDouble()) < 0.0001)) {
+            throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asDouble());
+        }
     }
 
     private void validateFlag(ObjectNode json, List<String> keys, boolean supported, String label) {

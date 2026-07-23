@@ -79,16 +79,6 @@ export class CanvasSession {
             input = { ops: generationFlowOps({ ...(input as Record<string, unknown>), mode: "image" }, this.canvasState) };
             tool = "canvas_apply_ops";
         }
-        if (tool === "canvas_create_config_node") {
-            const data = input as Record<string, unknown>;
-            const x = Number(data.x ?? nextCanvasX(this.canvasState));
-            const y = Number(data.y ?? 0);
-            const configId = `config-${crypto.randomUUID()}`;
-            const mode = generationMode(data.mode);
-            const prompt = String(data.prompt || "");
-            input = { ops: [configNodeOp(configId, data, x, y), ...(data.autoRun ? [runGenerationOp(configId, mode, prompt)] : [])] };
-            tool = "canvas_apply_ops";
-        }
         if (tool === "canvas_create_generation_flow") {
             input = { ops: generationFlowOps(input as Record<string, unknown>, this.canvasState) };
             tool = "canvas_apply_ops";
@@ -172,55 +162,49 @@ function textNodeOp(input: { id?: string; text?: string; title?: string; width?:
     return { type: "add_node", id: input.id, nodeType: "text", title: input.title, position: { x, y }, width: input.width, height: input.height, metadata: { content: input.text || "", status: "success", fontSize: 14 } };
 }
 
-function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: number) {
-    const mode = generationMode(input.mode);
-    const prompt = String(input.prompt || "");
-    return {
-        type: "add_node",
-        id,
-        nodeType: "config",
-        title: String(input.title || generationTitle(mode)),
-        position: { x, y },
-        width: typeof input.width === "number" ? input.width : undefined,
-        height: typeof input.height === "number" ? input.height : undefined,
-        metadata: cleanRecord({
-            generationMode: mode,
-            composerContent: prompt,
-            prompt,
-            status: "idle",
-            model: input.model,
-            size: input.size,
-            quality: input.quality,
-            count: input.count,
-            seconds: input.seconds,
-            vquality: input.vquality,
-            generateAudio: input.generateAudio,
-            watermark: input.watermark,
-            audioVoice: input.audioVoice,
-            audioFormat: input.audioFormat,
-            audioSpeed: input.audioSpeed,
-            audioInstructions: input.audioInstructions,
-        }),
-    };
-}
-
 function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
     const mode = generationMode(input.mode);
     const prompt = String(input.prompt || "");
     const x = Number(input.x ?? nextCanvasX(state));
     const y = Number(input.y ?? 0);
     const textId = `text-${crypto.randomUUID()}`;
-    const configId = `config-${crypto.randomUUID()}`;
+    const targetId = `${mode}-${crypto.randomUUID()}`;
     const referenceNodeIds = Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string") : [];
     const tokens = [`@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`)];
-    const configInput = { ...input, prompt: tokens.join("\n") };
+    const targetPrompt = tokens.join("\n");
     return [
-        textNodeOp({ id: textId, text: prompt, title: String(input.title || "提示词") }, x, y),
-        configNodeOp(configId, configInput, x + 420, y),
-        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
-        ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes", fromNodeId, toNodeId: configId })),
-        { type: "select_nodes", ids: [configId] },
-        ...(input.autoRun ? [runGenerationOp(configId, mode, tokens.join("\n"))] : []),
+        textNodeOp({ id: textId, text: prompt }, x, y),
+        {
+            type: "add_node",
+            id: targetId,
+            nodeType: mode,
+            title: typeof input.title === "string" ? input.title : undefined,
+            position: { x: x + 420, y },
+            width: typeof input.width === "number" ? input.width : undefined,
+            height: typeof input.height === "number" ? input.height : undefined,
+            metadata: cleanRecord({
+                generationMode: mode,
+                composerContent: targetPrompt,
+                prompt: targetPrompt,
+                status: "idle",
+                model: input.model,
+                size: input.size,
+                quality: input.quality,
+                count: input.count,
+                seconds: input.seconds,
+                vquality: input.vquality,
+                generateAudio: input.generateAudio,
+                watermark: input.watermark,
+                audioVoice: input.audioVoice,
+                audioFormat: input.audioFormat,
+                audioSpeed: input.audioSpeed,
+                audioInstructions: input.audioInstructions,
+            }),
+        },
+        { type: "connect_nodes", fromNodeId: textId, toNodeId: targetId },
+        ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes", fromNodeId, toNodeId: targetId })),
+        { type: "select_nodes", ids: [targetId] },
+        ...(input.autoRun ? [runGenerationOp(targetId, mode, targetPrompt)] : []),
     ];
 }
 
@@ -230,13 +214,6 @@ function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "aud
 
 function generationMode(value: unknown): "text" | "image" | "video" | "audio" {
     return value === "text" || value === "video" || value === "audio" ? value : "image";
-}
-
-function generationTitle(mode: "text" | "image" | "video" | "audio") {
-    if (mode === "text") return "文本生成";
-    if (mode === "video") return "视频生成";
-    if (mode === "audio") return "音频生成";
-    return "图片生成";
 }
 
 function findNode(state: CanvasSnapshot | null, id: string): CanvasNode | undefined {

@@ -2,7 +2,8 @@ import axios from "axios";
 
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { resolveAudioModelCapabilityForRequest } from "@/services/api/model-capabilities";
+import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -21,9 +22,11 @@ function aiHeaders(config: AiConfig) {
 }
 
 export async function requestAudioGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<Blob> {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.audioModel);
+    const selectedModel = config.model || config.audioModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const model = requestConfig.model.trim();
     assertAudioConfig(requestConfig, model);
+    assertAudioCapability(await resolveAudioModelCapabilityForRequest(modelOptionName(selectedModel)), requestConfig);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const instructions = config.audioInstructions.trim();
 
@@ -57,6 +60,17 @@ function assertAudioConfig(config: AiConfig, model: string) {
     if (!config.baseUrl.trim()) throw new Error("请先配置 Base URL");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
     if (config.apiFormat === "gemini") throw new Error("Gemini 调用格式暂不支持音频生成，请使用 OpenAI 格式渠道");
+}
+
+function assertAudioCapability(capability: Awaited<ReturnType<typeof resolveAudioModelCapabilityForRequest>>, config: AiConfig) {
+    if (!capability) return;
+    const voice = normalizeAudioVoiceValue(config.audioVoice);
+    const format = normalizeAudioFormatValue(config.audioFormat);
+    const speed = Number(normalizeAudioSpeedValue(config.audioSpeed));
+    if (capability.voices.length && !capability.voices.includes(voice)) throw new Error(`当前模型不支持音色 ${voice}`);
+    if (capability.formats.length && !capability.formats.includes(format)) throw new Error(`当前模型不支持输出格式 ${format}`);
+    if (capability.speeds.length && !capability.speeds.some((value) => Math.abs(value - speed) < 0.0001)) throw new Error(`当前模型不支持语速 ${speed}`);
+    if (config.audioInstructions.trim() && !capability.instructions) throw new Error("当前模型不支持语音指令");
 }
 
 async function assertAudioBlob(blob: Blob) {

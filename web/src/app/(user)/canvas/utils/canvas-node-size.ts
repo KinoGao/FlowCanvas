@@ -1,9 +1,29 @@
 "use client";
 
-export function fitNodeSize(width: number, height: number, maxWidth = 640, maxHeight = 640) {
+export const IMAGE_NODE_SIZE_RANGE = {
+    minLongEdge: 160,
+    maxWidth: 640,
+    maxHeight: 640,
+} as const;
+
+export const VIDEO_NODE_SIZE_RANGE = {
+    minLongEdge: 180,
+    maxWidth: 640,
+    maxHeight: 480,
+} as const;
+
+export function fitNodeSize(
+    width: number,
+    height: number,
+    maxWidth = IMAGE_NODE_SIZE_RANGE.maxWidth,
+    maxHeight = IMAGE_NODE_SIZE_RANGE.maxHeight,
+    minLongEdge = IMAGE_NODE_SIZE_RANGE.minLongEdge,
+) {
     const w = Math.max(1, width);
     const h = Math.max(1, height);
-    const scale = Math.min(1, maxWidth / w, maxHeight / h);
+    const maxScale = Math.min(1, maxWidth / w, maxHeight / h);
+    const minScale = minLongEdge / Math.max(w, h);
+    const scale = Math.max(maxScale, minScale);
     return { width: w * scale, height: h * scale };
 }
 

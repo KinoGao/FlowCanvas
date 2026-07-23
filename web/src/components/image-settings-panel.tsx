@@ -1,7 +1,7 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
-import { ConfigProvider, Switch } from "antd";
+import { type ReactNode, useEffect } from "react";
+import { ConfigProvider } from "antd";
 
 import { useImageModelCapability } from "@/hooks/use-image-model-capability";
 import { type CanvasTheme } from "@/lib/canvas-theme";
@@ -10,127 +10,124 @@ import type { ImageModelCapability } from "@/services/api/model-capabilities";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
-    { value: "auto", label: "自动" },
-    { value: "high", label: "高" },
-    { value: "medium", label: "中" },
-    { value: "low", label: "低" },
+    { value: "low", label: "低画质" },
+    { value: "medium", label: "标准画质" },
+    { value: "high", label: "高画质" },
 ];
-const DIMENSION_STEP = 16;
+const resolutionOptions = [
+    { value: "1k", label: "1K" },
+    { value: "2k", label: "2K" },
+    { value: "4k", label: "4K" },
+];
+const LIBTV_OUTPUT_COUNTS = [1, 2, 4];
 
 const aspectOptions = [
     { value: "1:1", label: "1:1", width: 1024, height: 1024, icon: "square" },
+    { value: "1:2", label: "1:2", width: 768, height: 1536, icon: "portrait" },
+    { value: "2:1", label: "2:1", width: 1536, height: 768, icon: "landscape" },
+    { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
+    { value: "16:9", label: "16:9", width: 1824, height: 1024, icon: "landscape" },
+    { value: "3:4", label: "3:4", width: 1024, height: 1360, icon: "portrait" },
+    { value: "4:3", label: "4:3", width: 1360, height: 1024, icon: "landscape" },
     { value: "3:2", label: "3:2", width: 1536, height: 1024, icon: "landscape" },
     { value: "2:3", label: "2:3", width: 1024, height: 1536, icon: "portrait" },
-    { value: "4:3", label: "4:3", width: 1360, height: 1024, icon: "landscape" },
-    { value: "3:4", label: "3:4", width: 1024, height: 1360, icon: "portrait" },
-    { value: "16:9", label: "16:9", width: 1824, height: 1024, icon: "landscape" },
-    { value: "9:16", label: "9:16", width: 1024, height: 1824, icon: "portrait" },
-    { value: "1:1-2k", label: "1:1(2k)", size: "2048x2048", width: 2048, height: 2048, icon: "square" },
-    { value: "16:9-2k", label: "16:9(2k)", size: "2048x1152", width: 2048, height: 1152, icon: "landscape" },
-    { value: "9:16-2k", label: "9:16(2k)", size: "1152x2048", width: 1152, height: 2048, icon: "portrait" },
-    { value: "16:9-4k", label: "16:9(4k)", size: "3840x2160", width: 3840, height: 2160, icon: "landscape" },
-    { value: "9:16-4k", label: "9:16(4k)", size: "2160x3840", width: 2160, height: 3840, icon: "portrait" },
-    { value: "auto", label: "auto", width: 0, height: 0, icon: "auto" },
+    { value: "5:4", label: "5:4", width: 1280, height: 1024, icon: "landscape" },
+    { value: "4:5", label: "4:5", width: 1024, height: 1280, icon: "portrait" },
+    { value: "21:9", label: "21:9", width: 1792, height: 768, icon: "landscape" },
+    { value: "9:21", label: "9:21", width: 768, height: 1792, icon: "portrait" },
 ];
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count", value: string) => void;
+    onConfigChange: (key: "quality" | "resolution" | "size" | "count", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
     maxCount?: number;
-    quickCount?: number;
     referenceCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10, referenceCount = 0 }: ImageSettingsPanelProps) {
-    const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
-    const quality = config.quality || "auto";
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[376px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, referenceCount = 0 }: ImageSettingsPanelProps) {
+    const quality = normalizeImageQuality(config.quality);
+    const resolution = normalizeImageResolution(config.resolution);
     const model = config.model || config.imageModel;
     const { capability: imageCapability } = useImageModelCapability(model);
     const seedream = isSeedreamImageModel(model);
     const seedreamCapabilities = seedream ? seedreamCapabilitiesForModel(model) : null;
     const configuredCountLimit = imageCapability?.counts.length ? Math.max(...imageCapability.counts) : 0;
-    const totalOutputLimit = imageCapability?.maxTotalImages
-        ? Math.max(1, imageCapability.maxTotalImages - Math.max(0, referenceCount))
-        : 0;
+    const totalOutputLimit = imageCapability?.maxTotalImages ? Math.max(1, imageCapability.maxTotalImages - Math.max(0, referenceCount)) : 0;
     const effectiveMaxCount = smallestPositive(maxCount, imageCapability?.maxOutputs || 0, configuredCountLimit, totalOutputLimit) || maxCount;
     const allowedCounts = imageCapability?.counts.filter((value) => value <= effectiveMaxCount) || [];
-    const count = Math.max(1, Math.min(effectiveMaxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const quickCounts = allowedCounts.length
-        ? allowedCounts.slice(0, quickCount)
-        : Array.from({ length: Math.min(quickCount, effectiveMaxCount) }, (_, index) => index + 1);
-    const activeSize = config.size || "auto";
-    const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
-    const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
-    const selectAspect = (value: string) => {
-        const option = aspectOptions.find((item) => item.value === value);
-        onConfigChange("size", option?.size || option?.value || "auto");
-    };
-    const updateDimension = (key: "width" | "height", value: number | null) => {
-        const next = Math.max(1, Math.floor(value || dimensions[key] || 1024));
-        const width = key === "width" ? next : dimensions.width;
-        const height = key === "height" ? next : dimensions.height;
-        onConfigChange("size", `${alignDimension(width, snapDimensionToStep)}x${alignDimension(height, snapDimensionToStep)}`);
-    };
+    const quickCounts = preferredImageCounts(allowedCounts, effectiveMaxCount);
+    const rawCount = Math.max(1, Math.min(effectiveMaxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const count = nearestAllowedCount(rawCount, quickCounts, effectiveMaxCount);
+    const availableQualities = qualityOptions.filter((item) => !imageQualityDisabled(item.value, imageCapability));
+    const selectedQuality = availableQualities.find((item) => item.value === quality) || availableQualities.find((item) => item.value === "medium") || availableQualities[0] || qualityOptions[1];
+    const availableResolutions = resolutionOptions.filter((item) => !imageResolutionDisabled(item.value, imageCapability, seedreamCapabilities));
+    const selectedResolution = availableResolutions.find((item) => item.value === resolution) || availableResolutions.find((item) => item.value === "2k") || availableResolutions[0] || resolutionOptions[1];
+    const availableAspects = aspectOptions.filter((item) => !imageSizeDisabled(item.value, imageCapability));
+    const selectedAspect = availableAspects.find((item) => item.value === config.size) || availableAspects.find((item) => item.value === "16:9") || availableAspects[0] || aspectOptions[0];
+
+    useEffect(() => {
+        if (rawCount !== count) onConfigChange("count", String(count));
+    }, [count, onConfigChange, rawCount]);
+
+    useEffect(() => {
+        if (quality !== selectedQuality.value) onConfigChange("quality", selectedQuality.value);
+    }, [onConfigChange, quality, selectedQuality.value]);
+
+    useEffect(() => {
+        if (resolution !== selectedResolution.value) onConfigChange("resolution", selectedResolution.value);
+    }, [onConfigChange, resolution, selectedResolution.value]);
+
+    useEffect(() => {
+        if (config.size !== selectedAspect.value) onConfigChange("size", selectedAspect.value);
+    }, [config.size, onConfigChange, selectedAspect.value]);
 
     return (
         <ImageSettingsTheme theme={theme}>
             <div
                 className={className}
                 style={{ color: theme.node.text }}
-                onMouseDown={(event) => {
-                    event.stopPropagation();
-                    if (event.target instanceof HTMLInputElement) return;
-                    if (document.activeElement instanceof HTMLInputElement && event.currentTarget.contains(document.activeElement)) document.activeElement.blur();
-                }}
+                onMouseDown={(event) => event.stopPropagation()}
                 onWheelCapture={(event) => event.stopPropagation()}
                 onWheel={(event) => event.stopPropagation()}
             >
                 {showTitle ? <div className="text-lg font-semibold">图像设置</div> : null}
                 <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>质量</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
+                    <SettingTitle color={theme.node.muted}>画质</SettingTitle>
+                    <div className="grid grid-cols-3 gap-2.5">
                         {qualityOptions.map((item) => (
-                            <OptionPill key={item.value} selected={quality === item.value} disabled={imageQualityDisabled(item.value, imageCapability, seedreamCapabilities)} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
+                            <OptionPill key={item.value} selected={selectedQuality.value === item.value} disabled={imageQualityDisabled(item.value, imageCapability)} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </OptionPill>
                         ))}
                     </div>
                 </div>
                 <div className="space-y-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                        <SettingTitle color={theme.node.muted}>尺寸</SettingTitle>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium" style={{ color: theme.node.muted }}>
-                                16倍数对齐
-                            </span>
-                            <span title="输入完成后自动向上补成 16 的倍数" onMouseDown={(event) => event.stopPropagation()}>
-                                <Switch size="small" checked={snapDimensionToStep} onChange={setSnapDimensionToStep} />
-                            </span>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
-                        <DimensionInput prefix="W" value={dimensions.width} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("width", value)} />
-                        <span className="text-lg opacity-45">↔</span>
-                        <DimensionInput prefix="H" value={dimensions.height} disabled={activeSize === "auto"} theme={theme} alignToStep={snapDimensionToStep} onChange={(value) => updateDimension("height", value)} />
+                    <SettingTitle color={theme.node.muted}>清晰度</SettingTitle>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {resolutionOptions.map((item) => (
+                            <OptionPill key={item.value} selected={selectedResolution.value === item.value} disabled={imageResolutionDisabled(item.value, imageCapability, seedreamCapabilities)} theme={theme} onClick={() => onConfigChange("resolution", item.value)}>
+                                {item.label}
+                            </OptionPill>
+                        ))}
                     </div>
                 </div>
                 <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>宽高比</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
+                    <SettingTitle color={theme.node.muted}>比例</SettingTitle>
+                    <div className="grid grid-cols-5 gap-2.5">
                         {aspectOptions.map((item) => {
-                            const disabled = imageSizeDisabled(item.value, imageCapability, seedreamCapabilities);
+                            const disabled = imageSizeDisabled(item.value, imageCapability);
                             return (
                                 <button
                                     key={item.value}
                                     type="button"
                                     disabled={disabled}
-                                    className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border bg-transparent text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
-                                    style={{ borderColor: selectedAspect?.value === item.value ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}
+                                    className="flex h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border bg-transparent text-xs transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
+                                    style={{ borderColor: selectedAspect.value === item.value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
                                     onMouseDown={(event) => event.stopPropagation()}
-                                    onClick={() => selectAspect(item.value)}
+                                    onClick={() => onConfigChange("size", item.value)}
                                 >
                                     <AspectIcon type={item.icon} width={item.width} height={item.height} color={theme.node.text} />
                                     <span>{item.label}</span>
@@ -140,14 +137,14 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     </div>
                 </div>
                 <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>生成张数</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
+                    <SettingTitle color={theme.node.muted}>生成数量</SettingTitle>
+                    <div className="grid grid-cols-3 gap-2.5">
                         {quickCounts.map((value) => (
-                            <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))}>
-                                {value} ?
+                            <OptionPill key={value} selected={count === value} theme={theme} onClick={() => onConfigChange("count", String(value))} className="rounded-[10px]">
+                                {value} 张
                             </OptionPill>
                         ))}
-                        <CountInput value={count} max={effectiveMaxCount} theme={theme} onChange={(value) => onConfigChange("count", String(nearestAllowedCount(value || 1, allowedCounts, effectiveMaxCount)))} />
+                        {quickCounts.length < 3 ? <CountInput value={count} max={effectiveMaxCount} theme={theme} onChange={(value) => onConfigChange("count", String(nearestAllowedCount(value || 1, quickCounts, effectiveMaxCount)))} /> : null}
                     </div>
                 </div>
             </div>
@@ -169,19 +166,35 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string) {
-    return ({ auto: "自动", high: "高", medium: "中", low: "低" } as Record<string, string>)[value] || value;
+    return ({ low: "低画质", medium: "标准画质", high: "高画质" } as Record<string, string>)[normalizeImageQuality(value)] || "标准画质";
+}
+
+export function imageResolutionLabel(value: string) {
+    return normalizeImageResolution(value).toUpperCase();
 }
 
 export function imageSizeLabel(size: string) {
-    return aspectOptions.find((item) => (item.size || item.value) === size || item.value === size)?.label || size;
+    return aspectOptions.find((item) => item.value === size)?.label || "16:9";
 }
 
-function OptionPill({ selected, disabled, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
+function normalizeImageQuality(value: string | undefined) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "low" || normalized === "medium" || normalized === "high") return normalized;
+    if (normalized === "standard") return "medium";
+    return "medium";
+}
+
+function normalizeImageResolution(value: string | undefined) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "1k" || normalized === "4k" ? normalized : "2k";
+}
+
+function OptionPill({ selected, disabled, theme, onClick, children, className = "" }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode; className?: string }) {
     return (
         <button
             type="button"
             disabled={disabled}
-            className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
+            className={`h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45 ${className}`}
             style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClick}
@@ -191,38 +204,21 @@ function OptionPill({ selected, disabled, theme, onClick, children }: { selected
     );
 }
 
-function imageQualityDisabled(
-    value: string,
-    capability: ImageModelCapability | null,
-    fallback: ReturnType<typeof seedreamCapabilitiesForModel> | null,
-) {
-    if (value === "auto") return false;
-    if (capability) {
-        const quality = value === "medium" ? "standard" : value;
-        return capability.qualities.length > 0 && !capability.qualities.includes(quality);
-    }
-    if (!fallback) return false;
-    if (value === "high") return !fallback.resolutions.includes("4K");
-    if (value === "medium") return !fallback.resolutions.includes("2K");
-    return !fallback.resolutions.includes("1K") && !fallback.resolutions.includes("adaptive");
+function imageQualityDisabled(value: string, capability: ImageModelCapability | null) {
+    if (!capability?.qualities.length) return false;
+    const accepted = capability.qualities.map((item) => item.toLowerCase());
+    const aliases = value === "medium" ? ["medium", "standard"] : [value];
+    return !aliases.some((item) => accepted.includes(item));
 }
 
-function imageSizeDisabled(
-    value: string,
-    capability: ImageModelCapability | null,
-    fallback: ReturnType<typeof seedreamCapabilitiesForModel> | null,
-) {
-    if (capability) {
-        if (value === "auto") return false;
-        const match = value.toLowerCase().match(/^([^ -]+)(?:-(1k|2k|4k))?$/);
-        const ratio = match?.[1] || "";
-        const resolution = match?.[2] || "";
-        if (capability.ratios.length > 0 && ratio && !capability.ratios.includes(ratio)) return true;
-        return capability.resolutions.length > 0 && !!resolution && !capability.resolutions.map((item) => item.toLowerCase()).includes(resolution);
-    }
+function imageResolutionDisabled(value: string, capability: ImageModelCapability | null, fallback: ReturnType<typeof seedreamCapabilitiesForModel> | null) {
+    if (capability?.resolutions.length) return !capability.resolutions.some((item) => item.toLowerCase() === value);
     if (!fallback) return false;
-    if (value.includes("4k")) return !fallback.resolutions.includes("4K");
-    if (value.includes("2k")) return !fallback.resolutions.includes("2K");
+    return !fallback.resolutions.some((item) => item.toLowerCase() === value);
+}
+
+function imageSizeDisabled(value: string, capability: ImageModelCapability | null) {
+    if (capability?.ratios.length) return !capability.ratios.some((item) => item.toLowerCase() === value.toLowerCase());
     return false;
 }
 
@@ -231,44 +227,21 @@ function smallestPositive(...values: number[]) {
     return positive.length ? Math.min(...positive) : 0;
 }
 
+function preferredImageCounts(allowed: number[], max: number) {
+    const configured = allowed.length ? allowed : LIBTV_OUTPUT_COUNTS.filter((value) => value <= max);
+    const preferred = configured.filter((value) => LIBTV_OUTPUT_COUNTS.includes(value));
+    return (preferred.length ? preferred : configured).slice(0, 4);
+}
+
 function nearestAllowedCount(value: number, allowed: number[], max: number) {
     const normalized = Math.max(1, Math.min(max, Math.floor(Math.abs(value) || 1)));
     if (!allowed.length || allowed.includes(normalized)) return normalized;
     return allowed.reduce((best, current) => Math.abs(current - normalized) < Math.abs(best - normalized) ? current : best, allowed[0]);
 }
 
-function DimensionInput({ prefix, value, disabled, theme, alignToStep, onChange }: { prefix: string; value: number; disabled: boolean; theme: CanvasTheme; alignToStep: boolean; onChange: (value: number | null) => void }) {
-    const commit = (input: HTMLInputElement) => {
-        const next = alignDimension(Math.max(1, Math.floor(Number(input.value) || value || 1024)), alignToStep);
-        input.value = String(next);
-        onChange(next);
-    };
-
-    return (
-        <label className="flex h-9 overflow-hidden rounded-xl text-sm" style={{ background: theme.node.fill, color: theme.node.text, opacity: disabled ? 0.55 : 1 }}>
-            <span className="grid w-9 place-items-center" style={{ color: theme.node.muted }}>
-                {prefix}
-            </span>
-            <input
-                type="number"
-                min={1}
-                disabled={disabled}
-                className="min-w-0 flex-1 bg-transparent px-2 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                defaultValue={value || ""}
-                key={`${prefix}-${value}`}
-                onBlur={(event) => commit(event.currentTarget)}
-                onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-            />
-        </label>
-    );
-}
-
 function CountInput({ value, max, theme, onChange }: { value: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
     return (
-        <label className="col-span-2 flex h-9 overflow-hidden rounded-full border text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
+        <label className="flex h-9 w-full overflow-hidden rounded-[10px] border text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
             <input
                 type="number"
                 min={1}
@@ -284,7 +257,6 @@ function CountInput({ value, max, theme, onChange }: { value: number; max: numbe
 }
 
 function AspectIcon({ type, width, height, color }: { type: string; width: number; height: number; color: string }) {
-    if (type === "auto") return null;
     const ratio = width / Math.max(1, height);
     const boxWidth = ratio >= 1 ? 24 : Math.max(10, 24 * ratio);
     const boxHeight = ratio >= 1 ? Math.max(10, 24 / ratio) : 24;
@@ -296,21 +268,5 @@ function AspectIcon({ type, width, height, color }: { type: string; width: numbe
 }
 
 function SettingTitle({ children, color }: { children: string; color: string }) {
-    return (
-        <div className="text-xs font-medium" style={{ color }}>
-            {children}
-        </div>
-    );
-}
-
-function readSizeDimensions(size: string, fallback: { width: number; height: number }) {
-    const match = size?.match(/^(\d+)x(\d+)$/);
-    return {
-        width: match ? Number(match[1]) : fallback.width,
-        height: match ? Number(match[2]) : fallback.height,
-    };
-}
-
-function alignDimension(value: number, enabled: boolean) {
-    return enabled ? Math.ceil(value / DIMENSION_STEP) * DIMENSION_STEP : value;
+    return <div className="text-xs font-medium" style={{ color }}>{children}</div>;
 }

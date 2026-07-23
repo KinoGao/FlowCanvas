@@ -30,13 +30,14 @@ import java.util.stream.Collectors;
 
 @Service
 public class PlatformConfigService {
-    private static final Set<String> CATEGORIES = Set.of("text", "image", "video");
+    private static final Set<String> CATEGORIES = Set.of("text", "image", "video", "audio");
     private static final Set<String> TEXT_MODES = Set.of("text", "vision");
     private static final Set<String> IMAGE_MODES = Set.of("text-to-image", "image-to-image", "image-edit");
     private static final Set<String> IMAGE_QUALITIES = Set.of("low", "standard", "high");
     private static final Set<String> IMAGE_RESOLUTIONS = Set.of("1k", "2k", "3k", "4k");
     private static final Set<String> IMAGE_RATIOS = Set.of("1:1", "3:4", "4:5", "1:2", "4:3", "21:9", "2:1", "3:2", "9:21", "9:16", "2:3", "16:9", "5:4");
     private static final Set<String> VIDEO_MODES = Set.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame", "image-reference", "multi-frame");
+    private static final Set<String> AUDIO_MODES = Set.of("text-to-speech");
     private static final String VERIFICATION_UNVERIFIED = "unverified";
     private static final String VERIFICATION_VERIFIED = "verified";
     private static final String VERIFICATION_FAILED = "failed";
@@ -239,6 +240,10 @@ public class PlatformConfigService {
         return publishedModels("video");
     }
 
+    public List<PlatformConfigDocument.Model> publishedAudioModels() {
+        return publishedModels("audio");
+    }
+
     private List<PlatformConfigDocument.Model> publishedModels(String category) {
         PlatformConfigDocument document = getAdminConfig();
         Set<String> runtimeProviderIds = document.getProviders().stream()
@@ -306,6 +311,7 @@ public class PlatformConfigService {
         values.put("textCapabilities", model.getTextCapabilities());
         values.put("imageCapabilities", model.getImageCapabilities());
         values.put("videoCapabilities", model.getVideoCapabilities());
+        values.put("audioCapabilities", model.getAudioCapabilities());
         try {
             return objectMapper.writeValueAsString(values);
         } catch (JsonProcessingException error) {
@@ -361,7 +367,9 @@ public class PlatformConfigService {
             model.setDisplayName(required(model.getDisplayName(), "模型显示名称"));
             model.setRequestModel(required(model.getRequestModel(), "实际请求模型名称"));
             model.setCategory(CATEGORIES.contains(model.getCategory()) ? model.getCategory() : "image");
-            capabilityTemplateResolver.applyOfficialVideoTemplate(model);
+            if ("video".equals(model.getCategory()) && model.getVideoCapabilities() == null) {
+                capabilityTemplateResolver.applyOfficialVideoTemplate(model);
+            }
             model.setRequestAdapter(blank(model.getRequestAdapter()) ? "openai" : model.getRequestAdapter().trim());
             model.setModelPatterns(cleanStrings(model.getModelPatterns()));
             model.setVerificationStatus(cleanVerificationStatus(model.getVerificationStatus()));
@@ -382,6 +390,7 @@ public class PlatformConfigService {
         PlatformConfigDocument.TextCapabilities text = item.getTextCapabilities();
         PlatformConfigDocument.ImageCapabilities image = item.getImageCapabilities();
         PlatformConfigDocument.VideoCapabilities video = item.getVideoCapabilities();
+        PlatformConfigDocument.AudioCapabilities audio = item.getAudioCapabilities();
         return new RuntimeConfigResponse.Model(
                 item.getId(), item.getDisplayName(), item.getCategory(), effectiveRequestAdapter(provider, item),
                 runtimeModelPatterns(item),
@@ -389,13 +398,17 @@ public class PlatformConfigService {
                 image == null ? null : new RuntimeConfigResponse.ImageCapabilities(
                         List.copyOf(image.getModes()), List.copyOf(image.getQualities()), List.copyOf(image.getResolutions()),
                         List.copyOf(image.getRatios()), List.copyOf(image.getCounts()), image.getMaxImages(),
-                        image.getMaxOutputs(), image.getMaxTotalImages(), image.isSequentialImageGeneration(),
+                        image.getMaxOutputs(), image.getMaxTotalImages(), image.isSequentialImageGeneration(), image.isInteractiveEdit(),
                         image.isWatermark(), image.getDocumentationUrl(), image.getOfficialTemplate()
                 ),
                 video == null ? null : new RuntimeConfigResponse.VideoCapabilities(
                         List.copyOf(video.getModes()), List.copyOf(video.getRatios()), List.copyOf(video.getResolutions()),
                         List.copyOf(video.getDurations()), List.copyOf(video.getFrameRates()), List.copyOf(video.getCounts()), video.isGenerateAudio(),
                         video.isWatermark(), video.isDraft(), video.getMaxImages(), video.getMaxVideos(), video.getMaxAudios()
+                ),
+                audio == null ? null : new RuntimeConfigResponse.AudioCapabilities(
+                        List.copyOf(audio.getModes()), List.copyOf(audio.getVoices()), List.copyOf(audio.getFormats()),
+                        List.copyOf(audio.getSpeeds()), audio.isInstructions()
                 )
         );
     }
@@ -498,6 +511,10 @@ public class PlatformConfigService {
                 capabilities.setMaxVideos(model.legacyMaxVideos());
                 capabilities.setMaxAudios(model.legacyMaxAudios());
                 model.setVideoCapabilities(capabilities);
+            } else if ("audio".equals(model.getCategory()) && model.getAudioCapabilities() == null) {
+                PlatformConfigDocument.AudioCapabilities capabilities = new PlatformConfigDocument.AudioCapabilities();
+                capabilities.setModes(List.of("text-to-speech"));
+                model.setAudioCapabilities(capabilities);
             }
         });
     }
@@ -511,6 +528,7 @@ public class PlatformConfigService {
                 model.setTextCapabilities(capabilities);
                 model.setImageCapabilities(null);
                 model.setVideoCapabilities(null);
+                model.setAudioCapabilities(null);
             }
             case "image" -> {
                 PlatformConfigDocument.ImageCapabilities capabilities = model.getImageCapabilities() == null ? new PlatformConfigDocument.ImageCapabilities() : model.getImageCapabilities();
@@ -530,6 +548,7 @@ public class PlatformConfigService {
                 model.setTextCapabilities(null);
                 model.setImageCapabilities(capabilities);
                 model.setVideoCapabilities(null);
+                model.setAudioCapabilities(null);
             }
             case "video" -> {
                 PlatformConfigDocument.VideoCapabilities capabilities = model.getVideoCapabilities() == null ? new PlatformConfigDocument.VideoCapabilities() : model.getVideoCapabilities();
@@ -547,6 +566,23 @@ public class PlatformConfigService {
                 model.setTextCapabilities(null);
                 model.setImageCapabilities(null);
                 model.setVideoCapabilities(capabilities);
+                model.setAudioCapabilities(null);
+            }
+            case "audio" -> {
+                PlatformConfigDocument.AudioCapabilities capabilities = model.getAudioCapabilities() == null ? new PlatformConfigDocument.AudioCapabilities() : model.getAudioCapabilities();
+                capabilities.setModes(cleanAllowedStrings(capabilities.getModes(), AUDIO_MODES));
+                capabilities.setVoices(cleanStrings(capabilities.getVoices()));
+                capabilities.setFormats(cleanStringsLowercase(capabilities.getFormats(), Set.of("mp3", "opus", "aac", "flac", "wav", "pcm")));
+                capabilities.setSpeeds(capabilities.getSpeeds().stream()
+                        .filter(value -> value != null && value > 0 && value <= 4)
+                        .distinct()
+                        .sorted()
+                        .toList());
+                if (model.isPublished() && !capabilities.getModes().contains("text-to-speech")) throw new IllegalArgumentException("已发布的音频模型必须配置文生语音能力: " + model.getId());
+                model.setTextCapabilities(null);
+                model.setImageCapabilities(null);
+                model.setVideoCapabilities(null);
+                model.setAudioCapabilities(capabilities);
             }
             default -> throw new IllegalArgumentException("不支持的模型分类: " + model.getCategory());
         }
@@ -646,7 +682,10 @@ public class PlatformConfigService {
     }
 
     private void applyOfficialCapabilityTemplates(PlatformConfigDocument document) {
-        document.getModels().forEach(capabilityTemplateResolver::applyOfficialVideoTemplate);
+        document.getModels().stream()
+                .filter(model -> "video".equals(model.getCategory()))
+                .filter(model -> model.getVideoCapabilities() == null)
+                .forEach(capabilityTemplateResolver::applyOfficialVideoTemplate);
     }
 
     private List<String> cleanAllowedStrings(List<String> values, Set<String> allowed) {
@@ -657,6 +696,10 @@ public class PlatformConfigService {
         if (values == null) return List.of();
         return values.stream().filter(value -> value != null && !value.isBlank()).map(value -> value.trim().toLowerCase())
                 .filter(allowed::contains).distinct().toList();
+    }
+
+    private List<String> cleanStringsLowercase(List<String> values, Set<String> allowed) {
+        return cleanAllowedStringsLowercase(values, allowed);
     }
 
     private List<Integer> allowedIntegers(List<Integer> values, Set<Integer> allowed) {

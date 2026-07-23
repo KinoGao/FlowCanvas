@@ -77,6 +77,7 @@ public class ModelRuntimeProxyController {
         String value = path.toLowerCase(Locale.ROOT);
         if (value.contains("/images/")) return "image";
         if (value.equals("/videos") || value.contains("/videos/") || value.contains("/video/")) return "video";
+        if (value.contains("/audio/")) return "audio";
         if (value.contains("/chat/completions") || value.contains("/responses") || value.contains("/completions")) return "text";
         return null;
     }

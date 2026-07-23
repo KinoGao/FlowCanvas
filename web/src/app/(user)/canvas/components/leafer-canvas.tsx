@@ -306,7 +306,7 @@ export function LeaferCanvas({
 
         for (const node of nodesRef.current) {
             if (node.id === connection.nodeId || node.type === CanvasNodeType.Group) continue;
-            if (targetSide === "source" && node.type === CanvasNodeType.Config) continue;
+            if (targetSide === "source" && (node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI)) continue;
             const canvasPoint = getNodeConnectionPoint(node, targetSide);
             const screenPoint = canvasToScreen(canvasPoint.x, canvasPoint.y, viewportRef.current);
             const distance = Math.hypot(pointer.x - screenPoint.x, pointer.y - screenPoint.y);

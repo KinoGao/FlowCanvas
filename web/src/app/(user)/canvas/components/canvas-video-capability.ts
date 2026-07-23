@@ -9,8 +9,8 @@ export type ActiveVideoReferenceCounts = { image: number; video: number; audio: 
 export const VIDEO_GENERATION_MODE_LABELS: Record<VideoGenerationMode, string> = {
     "text-to-video": "文生视频",
     "all-in-one-reference": "全能参考",
-    "image-to-video": "图生视频",
-    "first-last-frame": "首尾帧",
+    "image-to-video": "首帧图生视频",
+    "first-last-frame": "首尾帧图生视频",
     "image-reference": "图片参考",
     "multi-frame": "智能多帧",
 };
@@ -20,7 +20,7 @@ export function validateVideoReferenceCounts(mode: VideoGenerationMode, capabili
     const mediaCount = counts.image + counts.video + counts.audio;
     if (mode === "text-to-video") return mediaCount > 0 ? "文生视频不能携带图片、视频或音频参考素材" : "";
     if (mode !== "all-in-one-reference" && (counts.video > 0 || counts.audio > 0)) return `${VIDEO_GENERATION_MODE_LABELS[mode]}仅支持图片参考素材`;
-    if (mode === "image-to-video" && counts.image !== 1) return "图生视频需要且仅支持 1 张参考图片";
+    if (mode === "image-to-video" && counts.image !== 1) return "首帧图生视频需要且仅支持 1 张参考图片";
     if (mode === "first-last-frame" && counts.image !== 2) return "首尾帧视频需要按顺序连接首帧和尾帧两张图片";
     if (mode === "image-reference" && counts.image < 1) return "图片参考模式至少需要连接 1 张参考图片";
     if (mode === "multi-frame" && counts.image < 3) return "智能多帧至少需要按顺序连接 3 张参考图片";

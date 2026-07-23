@@ -3,6 +3,17 @@ import { queryClient } from '@/lib/query-client';
 
 export type ImageGenerationMode = 'text-to-image' | 'image-to-image' | 'image-edit';
 export type VideoGenerationMode = 'text-to-video' | 'all-in-one-reference' | 'image-to-video' | 'first-last-frame' | 'image-reference' | 'multi-frame';
+export type AudioModelCapability = {
+    id: string;
+    provider: string;
+    requestAdapter: string;
+    modelPatterns: string[];
+    modes: Array<'text-to-speech'>;
+    voices: string[];
+    formats: string[];
+    speeds: number[];
+    instructions: boolean;
+};
 
 export type ImageModelCapability = {
     id: string;
@@ -18,6 +29,7 @@ export type ImageModelCapability = {
     maxOutputs: number;
     maxTotalImages: number;
     sequentialImageGeneration: boolean;
+    interactiveEdit: boolean;
     watermark: boolean;
     documentationUrl: string;
     officialTemplate: string;
@@ -46,6 +58,7 @@ type ApiResponse<T> = { code: number; data: T; msg?: string };
 
 export const IMAGE_MODEL_CAPABILITIES_QUERY_KEY = ['image-model-capabilities'] as const;
 export const VIDEO_MODEL_CAPABILITIES_QUERY_KEY = ['video-model-capabilities'] as const;
+export const AUDIO_MODEL_CAPABILITIES_QUERY_KEY = ['audio-model-capabilities'] as const;
 
 export function invalidateImageModelCapabilities() {
     void queryClient.invalidateQueries({ queryKey: IMAGE_MODEL_CAPABILITIES_QUERY_KEY });
@@ -53,6 +66,10 @@ export function invalidateImageModelCapabilities() {
 
 export function invalidateVideoModelCapabilities() {
     void queryClient.invalidateQueries({ queryKey: VIDEO_MODEL_CAPABILITIES_QUERY_KEY });
+}
+
+export function invalidateAudioModelCapabilities() {
+    void queryClient.invalidateQueries({ queryKey: AUDIO_MODEL_CAPABILITIES_QUERY_KEY });
 }
 
 export async function fetchImageModelCapabilities() {
@@ -63,11 +80,19 @@ export async function fetchVideoModelCapabilities() {
     return fetchCapabilities<VideoModelCapability>('/api/model-capabilities/video', '视频');
 }
 
+export async function fetchAudioModelCapabilities() {
+    return fetchCapabilities<AudioModelCapability>('/api/model-capabilities/audio', '音频');
+}
+
 export function resolveImageModelCapability(capabilities: ImageModelCapability[] | undefined, model: string) {
     return resolveModelCapability(capabilities, model);
 }
 
 export function resolveVideoModelCapability(capabilities: VideoModelCapability[] | undefined, model: string) {
+    return resolveModelCapability(capabilities, model);
+}
+
+export function resolveAudioModelCapability(capabilities: AudioModelCapability[] | undefined, model: string) {
     return resolveModelCapability(capabilities, model);
 }
 
@@ -107,6 +132,15 @@ export async function resolveVideoModelCapabilityForRequest(model: string) {
         staleTime: 5 * 60_000,
     });
     return resolveVideoModelCapability(capabilities, model);
+}
+
+export async function resolveAudioModelCapabilityForRequest(model: string) {
+    const capabilities = await queryClient.fetchQuery({
+        queryKey: AUDIO_MODEL_CAPABILITIES_QUERY_KEY,
+        queryFn: fetchAudioModelCapabilities,
+        staleTime: 5 * 60_000,
+    });
+    return resolveAudioModelCapability(capabilities, model);
 }
 
 async function fetchCapabilities<T>(endpoint: string, label: string) {

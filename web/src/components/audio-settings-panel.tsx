@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
+import type { AudioModelCapability } from "@/services/api/model-capabilities";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -17,12 +18,16 @@ type AudioSettingsPanelProps = {
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
+    capability?: AudioModelCapability | null;
 };
 
-export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: AudioSettingsPanelProps) {
+export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", capability }: AudioSettingsPanelProps) {
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = normalizeAudioSpeedValue(config.audioSpeed);
+    const voices = capabilityOptions(capability?.voices, audioVoiceOptions);
+    const formats = capabilityOptions(capability?.formats, audioFormatOptions);
+    const speeds = capability?.speeds.length ? capability.speeds.map(String) : speedOptions;
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -30,7 +35,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {showTitle ? <div className="text-lg font-semibold">音频设置</div> : null}
                 <SettingGroup title="声音" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {audioVoiceOptions.map((item) => (
+                        {voices.map((item) => (
                             <OptionPill key={item.value} selected={voice === item.value} theme={theme} onClick={() => onConfigChange("audioVoice", item.value)}>
                                 {item.label}
                             </OptionPill>
@@ -39,7 +44,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </SettingGroup>
                 <SettingGroup title="格式" color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {audioFormatOptions.map((item) => (
+                        {formats.map((item) => (
                             <OptionPill key={item.value} selected={format === item.value} theme={theme} onClick={() => onConfigChange("audioFormat", item.value)}>
                                 {item.label}
                             </OptionPill>
@@ -48,13 +53,13 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </SettingGroup>
                 <SettingGroup title="语速" color={theme.node.muted}>
                     <div className="grid grid-cols-4 gap-2.5">
-                        {speedOptions.map((value) => (
+                        {speeds.map((value) => (
                             <OptionPill key={value} selected={speed === value} theme={theme} onClick={() => onConfigChange("audioSpeed", value)}>
                                 {audioSpeedLabel(value)}
                             </OptionPill>
                         ))}
                     </div>
-                    <input
+                    {capability?.speeds.length ? null : <input
                         type="number"
                         min={0.25}
                         max={4}
@@ -65,9 +70,9 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         onChange={(event) => onConfigChange("audioSpeed", event.target.value)}
                         onBlur={(event) => onConfigChange("audioSpeed", normalizeAudioSpeedValue(event.target.value))}
                         onMouseDown={(event) => event.stopPropagation()}
-                    />
+                    />}
                 </SettingGroup>
-                <SettingGroup title="声音指令" color={theme.node.muted}>
+                {capability?.instructions === false ? null : <SettingGroup title="声音指令" color={theme.node.muted}>
                     <textarea
                         value={config.audioInstructions || ""}
                         placeholder="例如：自然、温暖、适合旁白。"
@@ -76,7 +81,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         onChange={(event) => onConfigChange("audioInstructions", event.target.value)}
                         onMouseDown={(event) => event.stopPropagation()}
                     />
-                </SettingGroup>
+                </SettingGroup>}
             </div>
         </ImageSettingsTheme>
     );
@@ -105,4 +110,9 @@ function SettingGroup({ title, color, children }: { title: string; color: string
             {children}
         </div>
     );
+}
+
+function capabilityOptions(values: string[] | undefined, defaults: ReadonlyArray<{ value: string; label: string }>) {
+    if (!values?.length) return defaults;
+    return values.map((value) => defaults.find((item) => item.value === value) || { value, label: value });
 }

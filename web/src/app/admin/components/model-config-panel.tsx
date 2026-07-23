@@ -4,17 +4,17 @@ import { useState } from "react";
 
 import { AdminCard } from "./admin-card";
 import { applyModelCategory, cloneModel, emptyModel, emptyProvider, IMAGE_RATIOS, normalizeModel, normalizePlatformConfig, numberOr, replaceById } from "../platform-config-utils";
-import { discoverProviderModels, savePlatformConfig, verifyPlatformModel, type ImageCapabilities, type ModelCategory, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
+import { discoverProviderModels, savePlatformConfig, verifyPlatformModel, type AudioCapabilities, type ImageCapabilities, type ModelCategory, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
 
-const CATEGORY_OPTIONS = [{ value: "text", label: "文本" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }];
-const CATEGORY_LABELS: Record<ModelCategory, string> = { text: "文本", image: "图像", video: "视频" };
+const CATEGORY_OPTIONS = [{ value: "text", label: "文本" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" }];
+const CATEGORY_LABELS: Record<ModelCategory, string> = { text: "文本", image: "图像", video: "视频", audio: "音频" };
 const TEXT_MODES = [{ value: "text", label: "纯文本" }, { value: "vision", label: "识图 / 多模态" }];
 const IMAGE_MODES = [{ value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "图生图" }, { value: "image-edit", label: "图像编辑" }];
 const IMAGE_QUALITIES = [{ value: "low", label: "低画质" }, { value: "standard", label: "标准画质" }, { value: "high", label: "高画质" }];
 const IMAGE_RESOLUTIONS = ["1k", "2k", "3k", "4k"].map((value) => ({ value, label: value.toUpperCase() }));
 const VIDEO_MODES = [
     { value: "text-to-video", label: "文生视频" }, { value: "all-in-one-reference", label: "全能参考" },
-    { value: "image-to-video", label: "图生视频" }, { value: "first-last-frame", label: "首尾帧" },
+    { value: "image-to-video", label: "首帧图生视频" }, { value: "first-last-frame", label: "首尾帧图生视频" },
     { value: "image-reference", label: "图片参考" }, { value: "multi-frame", label: "智能多帧" },
 ];
 
@@ -146,6 +146,7 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
     const updateText = (patch: Partial<TextCapabilities>) => draft.textCapabilities && update({ textCapabilities: { ...draft.textCapabilities, ...patch } });
     const updateImage = (patch: Partial<ImageCapabilities>) => draft.imageCapabilities && update({ imageCapabilities: { ...draft.imageCapabilities, ...patch } });
     const updateVideo = (patch: Partial<VideoCapabilities>) => draft.videoCapabilities && update({ videoCapabilities: { ...draft.videoCapabilities, ...patch } });
+    const updateAudio = (patch: Partial<AudioCapabilities>) => draft.audioCapabilities && update({ audioCapabilities: { ...draft.audioCapabilities, ...patch } });
     const discoveredOptions = (props.discovered[draft.providerId] || []).map((value) => ({ value, label: value }));
     return <Drawer size="large" title="模型分类与能力" open onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}><Form layout="vertical">
         <Form.Item label="模型分类" required><Segmented block value={draft.category} options={CATEGORY_OPTIONS} onChange={(category) => props.onChange(applyModelCategory(draft, category as ModelCategory))} /></Form.Item>
@@ -161,6 +162,7 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
         {draft.category === "text" && draft.textCapabilities ? <TextCapabilityForm value={draft.textCapabilities} onChange={updateText} /> : null}
         {draft.category === "image" && draft.imageCapabilities ? <ImageCapabilityForm value={draft.imageCapabilities} onChange={updateImage} /> : null}
         {draft.category === "video" && draft.videoCapabilities ? <VideoCapabilityForm value={draft.videoCapabilities} onChange={updateVideo} /> : null}
+        {draft.category === "audio" && draft.audioCapabilities ? <AudioCapabilityForm value={draft.audioCapabilities} onChange={updateAudio} /> : null}
         <div className="mt-5 grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-2"><Toggle label="启用该模型" checked={draft.enabled} onChange={(enabled) => update({ enabled })} /><Toggle label="发布到画布" checked={draft.published} disabled={draft.verificationStatus !== "verified"} onChange={(published) => update({ published })} /></div>
     </Form></Drawer>;
 }
@@ -181,12 +183,12 @@ function ImageCapabilityForm(props: { value: ImageCapabilities; onChange: (patch
         <Field label="比例"><Checkbox.Group options={IMAGE_RATIOS.map((value) => ({ value, label: value }))} value={props.value.ratios} onChange={(ratios) => props.onChange({ ratios: ratios as string[] })} /></Field>
         <Form.Item label="生成数量"><Select mode="tags" tokenSeparators={[","]} value={props.value.counts.map(String)} onChange={(values) => props.onChange({ counts: numberTags(values) })} placeholder="例如 1, 2, 4" /></Form.Item>
         <div className="grid gap-3 md:grid-cols-3"><Form.Item label="最多参考图片"><InputNumber min={0} className="w-full" value={props.value.maxImages} onChange={(value) => props.onChange({ maxImages: numberOr(value, 0) })} /></Form.Item><Form.Item label="最多输出图片"><InputNumber min={0} className="w-full" value={props.value.maxOutputs} onChange={(value) => props.onChange({ maxOutputs: numberOr(value, 0) })} /></Form.Item><Form.Item label="输入与输出总上限"><InputNumber min={0} className="w-full" value={props.value.maxTotalImages} onChange={(value) => props.onChange({ maxTotalImages: numberOr(value, 0) })} /></Form.Item></div>
-        <div className="grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-2"><Toggle label="支持连续多图生成" checked={props.value.sequentialImageGeneration} onChange={(sequentialImageGeneration) => props.onChange({ sequentialImageGeneration })} /><Toggle label="支持添加水印" checked={props.value.watermark} onChange={(watermark) => props.onChange({ watermark })} /></div>
+        <div className="grid gap-4 rounded-lg bg-black/[0.035] p-4 dark:bg-white/[0.05] sm:grid-cols-3"><Toggle label="支持连续多图生成" checked={props.value.sequentialImageGeneration} onChange={(sequentialImageGeneration) => props.onChange({ sequentialImageGeneration })} /><Toggle label="支持交互编辑" checked={props.value.interactiveEdit} onChange={(interactiveEdit) => props.onChange({ interactiveEdit })} /><Toggle label="支持添加水印" checked={props.value.watermark} onChange={(watermark) => props.onChange({ watermark })} /></div>
     </CapabilitySection>;
 }
 
 function VideoCapabilityForm(props: { value: VideoCapabilities; onChange: (patch: Partial<VideoCapabilities>) => void }) {
-    return <CapabilitySection title="视频能力" description="参考方式和输入数量决定画布菜单是否可用；有声开关只在模型明确支持时开放。">
+    return <CapabilitySection title="视频能力" description="首帧图生视频对应 1 张 first_frame；首尾帧图生视频对应按顺序连接的 first_frame 和 last_frame。其余选项、输入上限和开关均由你为当前模型配置。">
         <Field label="生成方式"><Checkbox.Group options={VIDEO_MODES} value={props.value.modes} onChange={(modes) => {
             const selected = modes as VideoCapabilities["modes"];
             const minimumImages = selected.includes("multi-frame") ? 3 : selected.includes("first-last-frame") ? 2 : selected.includes("image-to-video") || selected.includes("image-reference") ? 1 : 0;
@@ -198,10 +200,19 @@ function VideoCapabilityForm(props: { value: VideoCapabilities; onChange: (patch
     </CapabilitySection>;
 }
 
+function AudioCapabilityForm(props: { value: AudioCapabilities; onChange: (patch: Partial<AudioCapabilities>) => void }) {
+    return <CapabilitySection title="音频能力" description="OpenAI 兼容音频节点使用 /audio/speech；列表留空表示不限制该参数。">
+        <Field label="生成方式"><Checkbox.Group options={[{ value: "text-to-speech", label: "文生语音" }]} value={props.value.modes} onChange={(modes) => props.onChange({ modes: modes as AudioCapabilities["modes"] })} /></Field>
+        <div className="grid gap-x-4 md:grid-cols-2"><Form.Item label="音色"><Select mode="tags" tokenSeparators={[","]} value={props.value.voices} onChange={(voices) => props.onChange({ voices })} placeholder="例如 alloy, nova" /></Form.Item><Form.Item label="输出格式"><Select mode="tags" tokenSeparators={[","]} value={props.value.formats} onChange={(formats) => props.onChange({ formats })} placeholder="例如 mp3, wav" /></Form.Item><Form.Item label="可用语速"><Select mode="tags" tokenSeparators={[","]} value={props.value.speeds.map(String)} onChange={(values) => props.onChange({ speeds: decimalTags(values) })} placeholder="例如 0.75, 1, 1.25" /></Form.Item></div>
+        <Toggle label="支持语音指令" checked={props.value.instructions} onChange={(instructions) => props.onChange({ instructions })} />
+    </CapabilitySection>;
+}
+
 function CapabilitySection(props: { title: string; description: string; children: React.ReactNode }) { return <section className="mt-2 rounded-xl border border-black/5 p-4 dark:border-white/10"><h3 className="m-0 text-sm font-semibold">{props.title}</h3><p className="mb-4 mt-1 text-xs leading-5 text-gray-500">{props.description}</p><div className="space-y-4">{props.children}</div></section>; }
 function Field(props: { label: string; children: React.ReactNode }) { return <div><div className="mb-2 text-sm text-gray-600 dark:text-white/65">{props.label}</div>{props.children}</div>; }
-function CapabilitySummary({ model }: { model: PlatformModel }) { const modes = model.textCapabilities?.modes || model.imageCapabilities?.modes || model.videoCapabilities?.modes || []; return <Space size={[4, 4]} wrap>{modes.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>)}{modes.length > 3 ? <Tag>+{modes.length - 3}</Tag> : null}</Space>; }
+function CapabilitySummary({ model }: { model: PlatformModel }) { const modes = model.textCapabilities?.modes || model.imageCapabilities?.modes || model.videoCapabilities?.modes || model.audioCapabilities?.modes || []; return <Space size={[4, 4]} wrap>{modes.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>)}{modes.length > 3 ? <Tag>+{modes.length - 3}</Tag> : null}</Space>; }
 function VerificationStatus({ model }: { model: PlatformModel }) { if (model.verificationStatus === "verified") return <Tag color="green" title={model.verifiedAt ? `验证时间：${model.verifiedAt}` : undefined}>已验证</Tag>; if (model.verificationStatus === "failed") return <Tag color="red" title={model.verificationMessage}>验证失败</Tag>; return <Tag color="orange">待验证</Tag>; }
 function ModelAvailability({ model, providers }: { model: PlatformModel; providers: PlatformProvider[] }) { const provider = providers.find((item) => item.id === model.providerId); if (!provider) return <Tag color="red">厂商不存在</Tag>; if (!provider.enabled) return <Tag color="orange">厂商未启用</Tag>; if (!provider.baseUrl.trim()) return <Tag color="orange">缺少接口地址</Tag>; if (!provider.apiKey.trim()) return <Tag color="orange">缺少 API Key</Tag>; if (model.verificationStatus !== "verified") return <Tag color="orange">未验证</Tag>; if (!model.enabled) return <Tag>模型未启用</Tag>; if (!model.published) return <Tag>模型未发布</Tag>; return <Tag color="green">已发布</Tag>; }
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="flex items-center justify-between gap-3 text-sm"><span>{props.label}</span><Switch size="small" checked={props.checked} disabled={props.disabled} onChange={props.onChange} /></div>; }
 function numberTags(values: string[]) { return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b); }
+function decimalTags(values: string[]) { return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0 && value <= 4))].sort((a, b) => a - b); }

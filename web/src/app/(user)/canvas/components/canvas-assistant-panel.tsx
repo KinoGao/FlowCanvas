@@ -32,7 +32,7 @@ const ONLINE_AGENT_PROMPT =
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
-const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "config", "video", "audio"] };
+const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "comfyui", "video", "audio"] };
 const GENERATION_MODE_SCHEMA = { type: "string", enum: ["text", "image", "video", "audio"] };
 const GENERATION_OPTION_PROPERTIES = {
     model: { type: "string" },
@@ -111,7 +111,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     ),
     toolDefinition(
         "canvas_create_node",
-        "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
+        "创建任意类型节点：text、image、video、audio、comfyui。适合创建占位内容、媒体占位、ComfyUI 工作流节点或自定义 metadata 节点。",
         { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA },
         ["nodeType"],
     ),
@@ -137,24 +137,13 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
         },
         ["items"],
     ),
-    toolDefinition("canvas_create_config_node", "创建生成配置节点，可指定 text/image/video/audio 模式和生成参数，可选择立即触发生成。", {
-        prompt: { type: "string" },
-        mode: GENERATION_MODE_SCHEMA,
-        title: { type: "string" },
-        x: { type: "number" },
-        y: { type: "number" },
-        width: { type: "number" },
-        height: { type: "number" },
-        autoRun: { type: "boolean" },
-        ...GENERATION_OPTION_PROPERTIES,
-    }),
     toolDefinition(
         "canvas_create_image_prompt_flow",
-        "创建提示词文本节点和图片生成配置节点，并自动连线，可选择立即触发生图。",
+        "创建提示词文本节点和图片生成节点，并自动连线，可选择立即触发生图。",
         { prompt: { type: "string" }, x: { type: "number" }, y: { type: "number" }, autoRun: { type: "boolean" }, ...GENERATION_OPTION_PROPERTIES },
         ["prompt"],
     ),
-    generationToolDefinition("canvas_create_generation_flow", "创建通用生成流程：提示词文本节点、生成配置节点、参考节点连线，可用于文案、生图、视频或音频。"),
+    generationToolDefinition("canvas_create_generation_flow", "创建通用生成流程：提示词文本节点、目标生成节点、参考节点连线，可用于文案、生图、视频或音频。"),
     generationToolDefinition("canvas_generate_text", "创建通用文本生成流程并立即触发生成。", "text"),
     generationToolDefinition("canvas_generate_image", "创建通用图片生成流程并立即触发生成。", "image"),
     generationToolDefinition("canvas_generate_video", "创建通用视频生成流程并立即触发生成。", "video"),
@@ -1029,7 +1018,7 @@ function describeCanvasSnapshot(snapshot: CanvasAgentSnapshot) {
         acc[node.type] = (acc[node.type] || 0) + 1;
         return acc;
     }, {});
-    return `当前画布有 ${snapshot.nodes.length} 个节点、${snapshot.connections.length} 条连线。文本 ${counts[CanvasNodeType.Text] || 0} 个，图片 ${counts[CanvasNodeType.Image] || 0} 个，生成配置 ${counts[CanvasNodeType.Config] || 0} 个，视频 ${counts[CanvasNodeType.Video] || 0} 个，音频 ${counts[CanvasNodeType.Audio] || 0} 个。`;
+    return `当前画布有 ${snapshot.nodes.length} 个节点、${snapshot.connections.length} 条连线。文本 ${counts[CanvasNodeType.Text] || 0} 个，图片 ${counts[CanvasNodeType.Image] || 0} 个，ComfyUI ${counts[CanvasNodeType.ComfyUI] || 0} 个，视频 ${counts[CanvasNodeType.Video] || 0} 个，音频 ${counts[CanvasNodeType.Audio] || 0} 个。`;
 }
 
 function parseToolArguments(value: string) {
@@ -1048,7 +1037,6 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
         const nodeType = requireNodeType(input.nodeType);
         const x = numberOr(input.x, nextCanvasX(snapshot));
         const y = numberOr(input.y, 0);
-        if (nodeType === CanvasNodeType.Config) return [configNodeOp(stringOptional(input.id) || `config-${nanoid()}`, { ...recordOptional(input.metadata), ...input }, x, y, config)];
         return [{ type: "add_node", nodeType, title: stringOptional(input.title), position: { x, y }, width: numberOptional(input.width), height: numberOptional(input.height), metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
     }
     if (name === "canvas_create_text_node") return [textNodeOp(input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0))];
@@ -1067,11 +1055,6 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
         );
     }
     if (name === "canvas_create_image_prompt_flow") return generationFlowOps({ ...input, mode: "image" }, snapshot, config);
-    if (name === "canvas_create_config_node") {
-        const configId = `config-${nanoid()}`;
-        const mode = generationMode(input.mode);
-        return [configNodeOp(configId, input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0), config), ...(input.autoRun ? [runGenerationOp(configId, mode, stringOptional(input.prompt))] : [])];
-    }
     if (name === "canvas_create_generation_flow") return generationFlowOps(input, snapshot, config);
     if (name === "canvas_generate_text") return generationFlowOps({ ...input, mode: "text", autoRun: true }, snapshot, config);
     if (name === "canvas_generate_image") return generationFlowOps({ ...input, mode: "image", autoRun: true }, snapshot, config);
@@ -1111,16 +1094,16 @@ function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgent
     const x = numberOr(input.x, nextCanvasX(snapshot));
     const y = numberOr(input.y, 0);
     const textId = `text-${nanoid()}`;
-    const configId = `config-${nanoid()}`;
+    const targetId = `${mode}-${nanoid()}`;
     const referenceNodeIds = Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string") : [];
     const tokens = [`@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`)];
     return [
-        textNodeOp({ id: textId, text: prompt, title: stringOptional(input.title) || "提示词" }, x, y),
-        configNodeOp(configId, { ...input, prompt: tokens.join("\n") }, x + NODE_DEFAULT_SIZE[CanvasNodeType.Text].width + 80, y, config),
-        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
-        ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes" as const, fromNodeId, toNodeId: configId })),
-        { type: "select_nodes", ids: [configId] },
-        ...(input.autoRun ? [runGenerationOp(configId, mode, tokens.join("\n"))] : []),
+        textNodeOp({ id: textId, text: prompt }, x, y),
+        generationTargetNodeOp(targetId, input, mode, tokens.join("\n"), x + NODE_DEFAULT_SIZE[CanvasNodeType.Text].width + 80, y, config),
+        { type: "connect_nodes", fromNodeId: textId, toNodeId: targetId },
+        ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes" as const, fromNodeId, toNodeId: targetId })),
+        { type: "select_nodes", ids: [targetId] },
+        ...(input.autoRun ? [runGenerationOp(targetId, mode, tokens.join("\n"))] : []),
     ];
 }
 
@@ -1137,14 +1120,12 @@ function textNodeOp(input: Record<string, unknown>, x: number, y: number): Canva
     };
 }
 
-function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: number, config: AiConfig): CanvasAgentOp {
-    const mode = generationMode(input.mode);
-    const prompt = stringOptional(input.prompt);
+function generationTargetNodeOp(id: string, input: Record<string, unknown>, mode: "text" | "image" | "video" | "audio", prompt: string, x: number, y: number, config: AiConfig): CanvasAgentOp {
     return {
         type: "add_node",
         id,
-        nodeType: CanvasNodeType.Config,
-        title: stringOptional(input.title) || generationTitle(mode),
+        nodeType: generationNodeType(mode),
+        title: stringOptional(input.title),
         position: { x, y },
         width: numberOptional(input.width),
         height: numberOptional(input.height),
@@ -1203,7 +1184,6 @@ function toolCallLabel(name: string) {
     if (name === "canvas_create_node") return "创建节点";
     if (name === "canvas_create_text_node") return "创建文本";
     if (name === "canvas_create_text_nodes") return "批量创建文本";
-    if (name === "canvas_create_config_node") return "创建生成配置";
     if (name === "canvas_create_image_prompt_flow") return "创建生图流程";
     if (name === "canvas_create_generation_flow") return "创建生成流程";
     if (name === "canvas_generate_text") return "生成文本";
@@ -1284,8 +1264,8 @@ function requireNumber(value: unknown, field: string) {
 }
 
 function requireNodeType(value: unknown): CanvasNodeType {
-    if (Object.values(CanvasNodeType).includes(value as CanvasNodeType)) return value as CanvasNodeType;
-    throw new Error("节点类型必须是 text、image、config、video 或 audio");
+    if (value === CanvasNodeType.Text || value === CanvasNodeType.Image || value === CanvasNodeType.ComfyUI || value === CanvasNodeType.Video || value === CanvasNodeType.Audio) return value;
+    throw new Error("节点类型必须是 text、image、comfyui、video 或 audio");
 }
 
 function requireViewport(value: unknown) {
@@ -1317,11 +1297,11 @@ function generationMode(value: unknown): "text" | "image" | "video" | "audio" {
     return value === "text" || value === "video" || value === "audio" ? value : "image";
 }
 
-function generationTitle(mode: "text" | "image" | "video" | "audio") {
-    if (mode === "text") return "文本生成";
-    if (mode === "video") return "视频生成";
-    if (mode === "audio") return "音频生成";
-    return "图片生成";
+function generationNodeType(mode: "text" | "image" | "video" | "audio") {
+    if (mode === "text") return CanvasNodeType.Text;
+    if (mode === "video") return CanvasNodeType.Video;
+    if (mode === "audio") return CanvasNodeType.Audio;
+    return CanvasNodeType.Image;
 }
 
 function defaultGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio") {
@@ -1362,7 +1342,7 @@ function explainNoop(ops: CanvasAgentOp[], snapshot: CanvasAgentSnapshot) {
     if (deleteConnectionOps.length && deleteConnectionOps.every((op) => !op.all && [...(op.ids || []), ...(op.id ? [op.id] : [])].every((id) => !connectionIds.has(id)))) return "没有找到要删除的连线。";
     if (connectOps.length && connectOps.every((op) => snapshot.connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId))) return "这些节点已经存在对应连线，无需重复连接。";
     if (connectOps.length && connectOps.every((op) => !nodeIds.has(op.fromNodeId) || !nodeIds.has(op.toNodeId))) return "没有找到要连接的节点。";
-    if (deleteNodeOps.length && deleteNodeOps.every((op) => op.nodeType === CanvasNodeType.Config) && !snapshot.nodes.some((node) => node.type === CanvasNodeType.Config)) return "画布当前没有生成配置节点可删除。";
+    if (deleteNodeOps.length && deleteNodeOps.every((op) => op.nodeType === CanvasNodeType.ComfyUI) && !snapshot.nodes.some((node) => node.type === CanvasNodeType.ComfyUI)) return "画布当前没有 ComfyUI 节点可删除。";
     if (deleteNodeOps.length && deleteNodeOps.every((op) => [...(op.ids || []), ...(op.id ? [op.id] : [])].every((id) => !nodeIds.has(id)))) return "没有找到要删除的节点。";
     if (updateOps.length && updateOps.every((op) => !nodeIds.has(op.id))) return "没有找到要更新的节点。";
     if (selectOps.length && selectOps.every((op) => !(op.ids || []).some((id) => nodeIds.has(id)))) return "没有找到要选择的节点。";

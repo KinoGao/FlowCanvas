@@ -51,6 +51,7 @@ export type AiConfig = {
     textModels: string[];
     audioModels: string[];
     quality: string;
+    resolution: string;
     size: string;
     count: string;
     canvasImageCount: string;
@@ -118,10 +119,11 @@ export const defaultConfig: AiConfig = {
     videoModels: ["default::grok-imagine-video"],
     textModels: ["default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
-    quality: "auto",
-    size: "1:1",
+    quality: "medium",
+    resolution: "2k",
+    size: "16:9",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {

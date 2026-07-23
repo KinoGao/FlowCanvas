@@ -63,6 +63,7 @@ public class PlatformConfigDocument {
         private TextCapabilities textCapabilities;
         private ImageCapabilities imageCapabilities;
         private VideoCapabilities videoCapabilities;
+        private AudioCapabilities audioCapabilities;
 
         private List<String> legacyModes = new ArrayList<>();
         private List<String> legacyRatios = new ArrayList<>();
@@ -106,6 +107,8 @@ public class PlatformConfigDocument {
         public void setImageCapabilities(ImageCapabilities imageCapabilities) { this.imageCapabilities = imageCapabilities; }
         public VideoCapabilities getVideoCapabilities() { return videoCapabilities; }
         public void setVideoCapabilities(VideoCapabilities videoCapabilities) { this.videoCapabilities = videoCapabilities; }
+        public AudioCapabilities getAudioCapabilities() { return audioCapabilities; }
+        public void setAudioCapabilities(AudioCapabilities audioCapabilities) { this.audioCapabilities = audioCapabilities; }
 
         @JsonSetter("modes") public void setLegacyModes(List<String> values) { legacyModes = list(values); }
         @JsonSetter("ratios") public void setLegacyRatios(List<String> values) { legacyRatios = list(values); }
@@ -150,6 +153,7 @@ public class PlatformConfigDocument {
         private int maxOutputs;
         private int maxTotalImages;
         private boolean sequentialImageGeneration;
+        private boolean interactiveEdit;
         private boolean watermark;
         private String documentationUrl = "";
         private String officialTemplate = "";
@@ -172,6 +176,8 @@ public class PlatformConfigDocument {
         public void setMaxTotalImages(int maxTotalImages) { this.maxTotalImages = maxTotalImages; }
         public boolean isSequentialImageGeneration() { return sequentialImageGeneration; }
         public void setSequentialImageGeneration(boolean sequentialImageGeneration) { this.sequentialImageGeneration = sequentialImageGeneration; }
+        public boolean isInteractiveEdit() { return interactiveEdit; }
+        public void setInteractiveEdit(boolean interactiveEdit) { this.interactiveEdit = interactiveEdit; }
         public boolean isWatermark() { return watermark; }
         public void setWatermark(boolean watermark) { this.watermark = watermark; }
         public String getDocumentationUrl() { return documentationUrl; }
@@ -218,6 +224,25 @@ public class PlatformConfigDocument {
         public void setMaxVideos(int maxVideos) { this.maxVideos = maxVideos; }
         public int getMaxAudios() { return maxAudios; }
         public void setMaxAudios(int maxAudios) { this.maxAudios = maxAudios; }
+    }
+
+    public static class AudioCapabilities {
+        private List<String> modes = new ArrayList<>();
+        private List<String> voices = new ArrayList<>();
+        private List<String> formats = new ArrayList<>();
+        private List<Double> speeds = new ArrayList<>();
+        private boolean instructions;
+
+        public List<String> getModes() { return modes; }
+        public void setModes(List<String> modes) { this.modes = modes == null ? new ArrayList<>() : modes; }
+        public List<String> getVoices() { return voices; }
+        public void setVoices(List<String> voices) { this.voices = voices == null ? new ArrayList<>() : voices; }
+        public List<String> getFormats() { return formats; }
+        public void setFormats(List<String> formats) { this.formats = formats == null ? new ArrayList<>() : formats; }
+        public List<Double> getSpeeds() { return speeds; }
+        public void setSpeeds(List<Double> speeds) { this.speeds = speeds == null ? new ArrayList<>() : speeds; }
+        public boolean isInstructions() { return instructions; }
+        public void setInstructions(boolean instructions) { this.instructions = instructions; }
     }
 
     public static class ComfyUi {

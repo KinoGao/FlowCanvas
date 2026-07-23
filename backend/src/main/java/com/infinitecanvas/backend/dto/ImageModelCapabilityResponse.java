@@ -16,6 +16,7 @@ public record ImageModelCapabilityResponse(
         int maxOutputs,
         int maxTotalImages,
         boolean sequentialImageGeneration,
+        boolean interactiveEdit,
         boolean watermark,
         String documentationUrl,
         String officialTemplate

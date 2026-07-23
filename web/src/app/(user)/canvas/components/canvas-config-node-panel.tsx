@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
+import { CanvasReferenceStrip } from "./canvas-reference-strip";
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "../types";
@@ -95,7 +96,8 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
         }),
         [theme],
     );
-    const mode = node.metadata?.generationMode || defaultModeForNode(node.type);
+    const isStandaloneComfyUi = node.type === CanvasNodeType.ComfyUI;
+    const mode = isStandaloneComfyUi ? "comfyui" : node.metadata?.generationMode || defaultModeForNode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
     const isVideoCapabilityPending = mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching);
@@ -242,68 +244,78 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
         <ConfigProvider theme={antdTheme}>
         <div className="creative-os-config-panel flex h-full min-h-0 min-w-0 w-full cursor-default flex-col rounded-[inherit] px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text, background: theme.node.panel }}>
             <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="shrink-0 cursor-move text-sm font-semibold">生成配置</div>
-                <div className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                    <Segmented
-                        size="small"
-                        className="!flex-nowrap !min-w-0 !rounded-md !p-0.5 [&_.ant-segmented-item]:!flex-none [&_.ant-segmented-item-label]:!whitespace-nowrap"
-                        value={mode}
-                        onChange={(value) => {
-                            const nextMode = value as CanvasGenerationMode;
-                            const nextModel = defaultModelForMode(globalConfig, nextMode);
-                            onConfigChange(node.id, { generationMode: nextMode, ...(nextModel ? { model: nextModel } : {}) });
-                        }}
-                        options={[
-                            {
-                                value: "image",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <ImageIcon className="size-3.5" />
-                                        生图
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "text",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <MessageSquare className="size-3.5" />
-                                        文本
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "video",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Video className="size-3.5" />
-                                        视频
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "audio",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Music2 className="size-3.5" />
-                                        音频
-                                    </span>
-                                ),
-                            },
-                            {
-                                value: "comfyui",
-                                label: (
-                                    <span className="inline-flex items-center gap-1">
-                                        <Workflow className="size-3.5" />
-                                        ComfyUI
-                                    </span>
-                                ),
-                            },
-                        ]}
-                    />
+                <div className="shrink-0 cursor-move text-sm font-semibold">
+                    {isStandaloneComfyUi ? (
+                        <span className="inline-flex items-center gap-1.5">
+                            <Workflow className="size-4" />
+                            ComfyUI
+                        </span>
+                    ) : "生成配置"}
                 </div>
+                {!isStandaloneComfyUi ? (
+                    <div className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                        <Segmented
+                            size="small"
+                            className="!flex-nowrap !min-w-0 !rounded-md !p-0.5 [&_.ant-segmented-item]:!flex-none [&_.ant-segmented-item-label]:!whitespace-nowrap"
+                            value={mode}
+                            onChange={(value) => {
+                                const nextMode = value as CanvasGenerationMode;
+                                const nextModel = defaultModelForMode(globalConfig, nextMode);
+                                onConfigChange(node.id, { generationMode: nextMode, ...(nextModel ? { model: nextModel } : {}) });
+                            }}
+                            options={[
+                                {
+                                    value: "image",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <ImageIcon className="size-3.5" />
+                                            生图
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "text",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <MessageSquare className="size-3.5" />
+                                            文本
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "video",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Video className="size-3.5" />
+                                            视频
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "audio",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Music2 className="size-3.5" />
+                                            音频
+                                        </span>
+                                    ),
+                                },
+                                {
+                                    value: "comfyui",
+                                    label: (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Workflow className="size-3.5" />
+                                            ComfyUI
+                                        </span>
+                                    ),
+                                },
+                            ]}
+                        />
+                    </div>
+                ) : null}
             </div>
 
+            <CanvasReferenceStrip references={mentionReferences} className="mb-2" />
             <div className="mb-2 flex flex-wrap gap-1.5">
                 <InputChip label="提示词" value={`${inputSummary.textCount} 个`} style={chipStyle} />
                 <InputChip label="参考图" value={`${inputSummary.imageCount} 张`} style={chipStyle} />
@@ -543,6 +555,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         ...globalConfig,
         model: selectedModel,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        resolution: node.metadata?.resolution || globalConfig.resolution || defaultConfig.resolution,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,

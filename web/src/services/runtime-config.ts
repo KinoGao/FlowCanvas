@@ -1,5 +1,5 @@
 import { apiUrl } from "@/constant/env";
-import { invalidateImageModelCapabilities, invalidateVideoModelCapabilities } from "@/services/api/model-capabilities";
+import { invalidateAudioModelCapabilities, invalidateImageModelCapabilities, invalidateVideoModelCapabilities } from "@/services/api/model-capabilities";
 import { fetchRuntimeConfig, type RuntimeConfig } from "@/services/api/platform-admin";
 import {
     defaultComfyUiConfig,
@@ -134,6 +134,7 @@ export async function refreshRuntimeConfig() {
     const runtime = await fetchRuntimeConfig();
     invalidateImageModelCapabilities();
     invalidateVideoModelCapabilities();
+    invalidateAudioModelCapabilities();
     const state = useConfigStore.getState();
     useConfigStore.setState(reconcileConfigWithRuntime(state.config, runtime, state.comfyui));
     return runtime;

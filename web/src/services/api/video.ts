@@ -21,6 +21,7 @@ import { rewriteThroughProxy } from "@/lib/ai-proxy-url";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { normalizeVideoGenerationMode, resolveVideoModelCapabilityForRequest, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
+import { VideoGenerationTimeoutError, assertVideoGenerationActive, remainingVideoGenerationTime } from "@/services/api/video-generation-timeout";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -69,20 +70,44 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
+    const startedAt = Date.now();
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
-    const delayMs = task.provider === "seedance" ? 5000 : task.provider === "agnes" ? 5000 : 2500;
-    // 视频生成可能耗时较长（特别是 Agnes 高峰期排队），轮询总时长拉到 30 分钟
-    // 120 * 5s = 10 分钟 → 360 * 5s = 30 分钟
-    const maxAttempts = 360;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
-        if (state.status === "completed") return state.result;
-        if (state.status === "failed") throw new Error(state.error);
-        if (attempt === maxAttempts - 1) throw new Error(`${task.provider === "seedance" ? "Seedance " : task.provider === "agnes" ? "Agnes " : ""}视频生成超过 30 分钟仍未完成，任务可能仍在后端排队，请稍后重试`);
-        await delay(delayMs, options?.signal);
+    return waitForVideoGenerationTask(config, task, { ...options, startedAt });
+}
+
+export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions & { startedAt?: number }): Promise<VideoGenerationResult> {
+    const startedAt = options?.startedAt ?? Date.now();
+    assertVideoGenerationActive(startedAt);
+    if (options?.signal?.aborted) throw abortError();
+
+    const controller = new AbortController();
+    let deadlineExpired = false;
+    const abortFromParent = () => controller.abort();
+    options?.signal?.addEventListener("abort", abortFromParent, { once: true });
+    const deadlineTimer = setTimeout(() => {
+        deadlineExpired = true;
+        controller.abort();
+    }, remainingVideoGenerationTime(startedAt));
+    const pollOptions: RequestOptions = { signal: controller.signal, generationMode: options?.generationMode };
+    const pollDelayMs = task.provider === "openai" ? 2500 : 5000;
+
+    try {
+        while (true) {
+            assertVideoGenerationActive(startedAt);
+            const state = await pollVideoGenerationTask(config, task, pollOptions);
+            assertVideoGenerationActive(startedAt);
+            if (state.status === "completed") return state.result;
+            if (state.status === "failed") throw new Error(state.error);
+            await delay(Math.min(pollDelayMs, remainingVideoGenerationTime(startedAt)), controller.signal);
+        }
+    } catch (error) {
+        if (deadlineExpired || remainingVideoGenerationTime(startedAt) <= 0) throw new VideoGenerationTimeoutError();
+        if (options?.signal?.aborted) throw abortError();
+        throw error;
+    } finally {
+        clearTimeout(deadlineTimer);
+        options?.signal?.removeEventListener("abort", abortFromParent);
     }
-    throw new Error("视频生成超时，请稍后重试");
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
@@ -132,6 +157,8 @@ function resolveGenerationMode(requested: VideoGenerationMode | undefined, capab
 }
 
 function videoModeLabel(mode: VideoGenerationMode) {
+    if (mode === "image-to-video") return "首帧图生视频";
+    if (mode === "first-last-frame") return "首尾帧图生视频";
     return ({
         "text-to-video": "文生视频",
         "image-to-video": "图生视频",
@@ -670,19 +697,23 @@ function isPublicMediaUrl(value: string) {
 function delay(ms: number, signal?: AbortSignal) {
     return new Promise<void>((resolve, reject) => {
         if (signal?.aborted) {
-            reject(new DOMException("Aborted", "AbortError"));
+            reject(abortError());
             return;
         }
-        const timer = setTimeout(resolve, ms);
-        signal?.addEventListener(
-            "abort",
-            () => {
-                clearTimeout(timer);
-                reject(new DOMException("Aborted", "AbortError"));
-            },
-            { once: true },
-        );
+        const onAbort = () => {
+            clearTimeout(timer);
+            reject(abortError());
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener("abort", onAbort, { once: true });
     });
+}
+
+function abortError() {
+    return new DOMException("Aborted", "AbortError");
 }
 
 function blobToDataUrl(blob: Blob) {

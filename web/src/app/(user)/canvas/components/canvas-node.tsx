@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Settings2, Star, Video, Volume2, VolumeX } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import * as THREE from "three";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -23,6 +23,10 @@ type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const selectionBlue = "#0a84ff";
 
 type ResizeStartEvent = React.PointerEvent;
+
+function isGenerationConfigNode(type: CanvasNodeType) {
+    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
+}
 
 /** Lazy-resolve media URL from storageKey on mount.
  *  - If storageKey is present, resolve via IndexedDB (cached after first hit).
@@ -281,14 +285,17 @@ export const CanvasNode = React.memo(function CanvasNode({
             const scale = Math.max(scaleRef.current, 0.05);
             const dx = (event.clientX - resizeRef.current.startX) / scale;
             const dy = (event.clientY - resizeRef.current.startY) / scale;
-            const minWidth = data.type === CanvasNodeType.Image && data.metadata?.freeResize ? 64 : 220;
-            const minHeight = data.type === CanvasNodeType.Image && data.metadata?.freeResize ? 64 : 160;
+            const isMediaNode = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video;
+            const minWidth = data.type === CanvasNodeType.Image ? 120 : data.type === CanvasNodeType.Video ? 160 : 220;
+            const minHeight = data.type === CanvasNodeType.Image ? 96 : data.type === CanvasNodeType.Video ? 96 : 160;
+            const maxWidth = isMediaNode ? 640 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 720 : 520;
+            const maxHeight = data.type === CanvasNodeType.Image ? 640 : data.type === CanvasNodeType.Video ? 480 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 640 : 480;
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
             const startBottom = resizeRef.current.startTop + resizeRef.current.startHeight;
             const fromLeft = resizeRef.current.corner.includes("left");
             const fromTop = resizeRef.current.corner.includes("top");
-            const rawWidth = Math.max(minWidth, resizeRef.current.startWidth + (fromLeft ? -dx : dx));
-            const rawHeight = Math.max(minHeight, resizeRef.current.startHeight + (fromTop ? -dy : dy));
+            const rawWidth = Math.min(maxWidth, Math.max(minWidth, resizeRef.current.startWidth + (fromLeft ? -dx : dx)));
+            const rawHeight = Math.min(maxHeight, Math.max(minHeight, resizeRef.current.startHeight + (fromTop ? -dy : dy)));
             let width = rawWidth;
             let height = rawHeight;
             if (resizeRef.current.keepRatio) {
@@ -306,6 +313,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                     width = minWidth;
                     height = width / ratio;
                 }
+                const maxScale = Math.min(1, maxWidth / width, maxHeight / height);
+                width *= maxScale;
+                height *= maxScale;
             }
 
             const position = {
@@ -490,7 +500,6 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {!isGroup ? <NodeTitleBadge node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
-                {!shouldUseOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!shouldUseOverview ? (
@@ -504,7 +513,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             </Card>
 
             {!isGroup ? <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && data.type !== CanvasNodeType.Config && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} /> : null}
+            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && !isGenerationConfigNode(data.type) && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} /> : null}
 
             {showPanel && renderPanel ? (
                 <div
@@ -531,7 +540,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.type === CanvasNodeType.Group) return <GroupContent {...props} />;
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
-    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
+    if (isGenerationConfigNode(props.node.type) && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
@@ -544,6 +553,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Text]: TextContent,
     [CanvasNodeType.Image]: ImageNodeContent,
     [CanvasNodeType.Config]: EmptyImageContent,
+    [CanvasNodeType.ComfyUI]: EmptyImageContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupContent,
@@ -791,8 +801,11 @@ function NodeTitleBadge({
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Config ? Settings2 : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
+    const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
+        ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`
+        .replace(/\D+/g, " x ") : "";
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState("");
     const cancelRef = useRef(false);
@@ -807,9 +820,11 @@ function NodeTitleBadge({
 
     return (
         <div
-            className="absolute -top-[24px] left-0 z-30 flex max-w-full items-center gap-1 text-[11px] leading-4"
+            data-canvas-no-zoom
+            className={`absolute -top-[24px] z-30 flex items-center gap-1 text-[11px] leading-4 ${node.type === CanvasNodeType.Image ? "inset-x-0 justify-between" : "left-0 max-w-full"}`}
             style={{ color: theme.node.label }}
         >
+            <div className="flex min-w-0 items-center gap-1">
             <Icon className="pointer-events-none size-3 shrink-0 opacity-65" />
             {editing ? (
                 <input
@@ -840,6 +855,7 @@ function NodeTitleBadge({
                 <button
                     type="button"
                     tabIndex={-1}
+                    data-canvas-no-zoom
                     title="双击重命名"
                     className="min-w-0 max-w-full cursor-default truncate text-left"
                     onDoubleClick={(event) => {
@@ -852,6 +868,8 @@ function NodeTitleBadge({
                     {node.title || fallbackTitle}
                 </button>
             )}
+            </div>
+            {imageResolution ? <span className="shrink-0 tabular-nums opacity-60">{imageResolution}</span> : null}
         </div>
     );
 }

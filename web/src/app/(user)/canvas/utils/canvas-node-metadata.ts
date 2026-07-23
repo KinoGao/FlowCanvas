@@ -4,7 +4,9 @@ export function createDefaultCanvasNodeMetadata(type: CanvasNodeType): CanvasNod
     const base: CanvasNodeMetadata = { content: "", status: "idle" };
 
     if (type === CanvasNodeType.Text) return { ...base, fontSize: 14 };
+    if (type === CanvasNodeType.Image) return { ...base, size: "16:9" };
     if (type === CanvasNodeType.Config) return { ...base, generationMode: "image" };
+    if (type === CanvasNodeType.ComfyUI) return { ...base, generationMode: "comfyui" };
 
     return base;
 }
@@ -16,6 +18,7 @@ export function createGenerationMetadata(metadata: CanvasNodeMetadata): CanvasNo
         model: metadata.model,
         size: metadata.size,
         quality: metadata.quality,
+        resolution: metadata.resolution,
         count: metadata.count,
         seconds: metadata.seconds,
         vquality: metadata.vquality,

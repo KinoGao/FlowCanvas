@@ -16,6 +16,7 @@ export enum CanvasNodeType {
     Image = "image",
     Text = "text",
     Config = "config",
+    ComfyUI = "comfyui",
     Video = "video",
     Audio = "audio",
     Group = "group",
@@ -33,6 +34,7 @@ export type CanvasNodeActionIntent =
     | "script-to-video"
     | "script-to-audio";
 export type CanvasBaseMetadata = {
+    typeSequence?: number;
     content?: string;
     composerContent?: string;
     canvasTool?: "script" | "videoComposition" | "director" | "panorama360";
@@ -62,6 +64,7 @@ export type CanvasGenerationMetadata = {
     model?: string;
     size?: string;
     quality?: string;
+    resolution?: string;
     count?: number;
     seconds?: string;
     vquality?: string;
@@ -118,6 +121,7 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+    referenceOrder?: number;
 };
 
 export type CanvasAssistantReference = {
@@ -176,4 +180,5 @@ export type ContextMenuState =
           type: "canvas";
           x: number;
           y: number;
+          canvasPosition: Position;
       };

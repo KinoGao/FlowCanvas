@@ -22,6 +22,11 @@ export type CanvasAgentSnapshot = {
     viewport: ViewportTransform;
 };
 
+export type CanvasAgentApplyOptions = {
+    createNode?: (op: Extract<CanvasAgentOp, { type: "add_node" }>, index: number) => CanvasNodeData;
+    createConnection?: (op: Extract<CanvasAgentOp, { type: "connect_nodes" }>, index: number) => CanvasConnection;
+};
+
 export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {
     const counts = (Array.isArray(ops) ? ops : []).reduce<Record<string, number>>((acc, op) => {
         if (!op?.type) return acc;
@@ -33,7 +38,7 @@ export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {
         .join("，");
 }
 
-export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasAgentOp[]) {
+export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasAgentOp[], options: CanvasAgentApplyOptions = {}) {
     let nodes = snapshot.nodes;
     let connections = snapshot.connections;
     let selectedNodeIds = snapshot.selectedNodeIds;
@@ -42,17 +47,7 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
     (Array.isArray(ops) ? ops : []).forEach((op, index) => {
         if (!op?.type) return;
         if (op.type === "add_node") {
-            const nodeType = Object.values(CanvasNodeType).includes(op.nodeType as CanvasNodeType) ? op.nodeType! : CanvasNodeType.Text;
-            const spec = getNodeSpec(nodeType);
-            const node: CanvasNodeData = {
-                id: op.id || `${nodeType}-${Date.now()}-${index}`,
-                type: nodeType,
-                title: op.title || spec.title,
-                position: op.position || { x: op.x ?? index * 36, y: op.y ?? index * 36 },
-                width: op.width || spec.width,
-                height: op.height || spec.height,
-                metadata: { ...spec.metadata, ...op.metadata },
-            };
+            const node = options.createNode?.(op, index) || createAgentNode(op, index);
             nodes = [...nodes, node];
             selectedNodeIds = [node.id];
         }
@@ -74,13 +69,27 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
             if (!op.fromNodeId || !op.toNodeId) return;
             const exists = connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId);
             const hasNodes = nodes.some((node) => node.id === op.fromNodeId) && nodes.some((node) => node.id === op.toNodeId);
-            if (!exists && hasNodes) connections = [...connections, { id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId }];
+            if (!exists && hasNodes) connections = [...connections, options.createConnection?.(op, index) || { id: op.id || nanoid(), fromNodeId: op.fromNodeId, toNodeId: op.toNodeId }];
         }
         if (op.type === "set_viewport" && op.viewport) viewport = op.viewport;
         if (op.type === "select_nodes") selectedNodeIds = (op.ids || []).filter((id) => nodes.some((node) => node.id === id));
     });
 
     return { ...snapshot, nodes, connections, selectedNodeIds, viewport };
+}
+
+function createAgentNode(op: Extract<CanvasAgentOp, { type: "add_node" }>, index: number): CanvasNodeData {
+    const nodeType = Object.values(CanvasNodeType).includes(op.nodeType as CanvasNodeType) ? op.nodeType! : CanvasNodeType.Text;
+    const spec = getNodeSpec(nodeType);
+    return {
+        id: op.id || `${nodeType}-${Date.now()}-${index}`,
+        type: nodeType,
+        title: op.title || spec.title,
+        position: op.position || { x: op.x ?? index * 36, y: op.y ?? index * 36 },
+        width: op.width || spec.width,
+        height: op.height || spec.height,
+        metadata: { ...spec.metadata, ...op.metadata },
+    };
 }
 
 function opLabel(type: string) {

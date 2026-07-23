@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Plus, Trash2, Image as ImageIcon, Video, Music, FileText, SlidersHorizontal } from "lucide-react";
+import { Plus, Trash2, Image as ImageIcon, Video, Music, FileText, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -17,6 +17,7 @@ export function CanvasNodeContextMenu({
     onAddVideo,
     onAddAudio,
     onAddText,
+    onAddComfyUI,
     onAddConfig,
 }: {
     menu: ContextMenuState;
@@ -27,11 +28,14 @@ export function CanvasNodeContextMenu({
     onAddVideo?: () => void;
     onAddAudio?: () => void;
     onAddText?: () => void;
+    onAddComfyUI?: () => void;
+    /** @deprecated Use onAddComfyUI for newly created nodes. */
     onAddConfig?: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const menuRef = useRef<HTMLDivElement>(null);
     const [menuPosition, setMenuPosition] = useState(() => ({ x: menu.x, y: menu.y }));
+    const addComfyUI = onAddComfyUI ?? onAddConfig;
 
     useLayoutEffect(() => {
         const element = menuRef.current;
@@ -92,7 +96,7 @@ export function CanvasNodeContextMenu({
                     <MenuButton icon={<Video className="size-4" />} label="添加视频" onClick={onAddVideo} />
                     <MenuButton icon={<Music className="size-4" />} label="添加音频" onClick={onAddAudio} />
                     <MenuButton icon={<FileText className="size-4" />} label="添加文本" onClick={onAddText} />
-                    <MenuButton icon={<SlidersHorizontal className="size-4" />} label="添加配置节点" onClick={onAddConfig} />
+                    <MenuButton icon={<Workflow className="size-4" />} label="添加 ComfyUI" onClick={addComfyUI} />
                 </>
             ) : (
                 <>

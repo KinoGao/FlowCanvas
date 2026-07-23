@@ -1,4 +1,5 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { sortConnectionsByReferenceOrder } from "./canvas-node-identity";
 
 export type ConnectionAdjacency = {
     incomingByNodeId: Map<string, CanvasConnection[]>;
@@ -21,6 +22,8 @@ export function buildConnectionAdjacency(connections: CanvasConnection[]): Conne
         pushConnection(incomingByNodeId, connection.toNodeId, connection);
         pushConnection(outgoingByNodeId, connection.fromNodeId, connection);
     });
+    incomingByNodeId.forEach((items, nodeId) => incomingByNodeId.set(nodeId, sortConnectionsByReferenceOrder(items)));
+    outgoingByNodeId.forEach((items, nodeId) => outgoingByNodeId.set(nodeId, sortConnectionsByReferenceOrder(items)));
     return { incomingByNodeId, outgoingByNodeId };
 }
 
@@ -42,10 +45,10 @@ export function normalizeConnectionWithNodeMap(firstNodeId: string, secondNodeId
     const first = nodeById.get(firstNodeId);
     const second = nodeById.get(secondNodeId);
     if (!first || !second || first.id === second.id) return null;
-    if (first.type === CanvasNodeType.Config && second.type === CanvasNodeType.Config) return null;
-    if (second.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
-    if (first.type === CanvasNodeType.Config && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
-    if (first.type === CanvasNodeType.Config) return { fromNodeId: first.id, toNodeId: second.id };
+    if (isGenerationConfigNode(first) && isGenerationConfigNode(second)) return null;
+    if (isGenerationConfigNode(second)) return { fromNodeId: first.id, toNodeId: second.id };
+    if (isGenerationConfigNode(first) && firstHandleType === "target") return { fromNodeId: second.id, toNodeId: first.id };
+    if (isGenerationConfigNode(first)) return { fromNodeId: first.id, toNodeId: second.id };
     return firstHandleType === "target"
         ? { fromNodeId: second.id, toNodeId: first.id }
         : { fromNodeId: first.id, toNodeId: second.id };
@@ -63,4 +66,8 @@ function pushConnection(index: Map<string, CanvasConnection[]>, nodeId: string, 
     const connections = index.get(nodeId);
     if (connections) connections.push(connection);
     else index.set(nodeId, [connection]);
+}
+
+function isGenerationConfigNode(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI;
 }

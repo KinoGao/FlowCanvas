@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, Menu, Music2, Plus, Search, Settings2, Share2, Trash2, Upload, Video, X } from "lucide-react";
+import { Bot, Box, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, Menu, Music2, Plus, Search, Share2, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 import * as THREE from "three";
 
 import { saveAs } from "file-saver";
@@ -23,7 +23,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
-import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
+import { fitNodeSize, nodeSizeFromRatio, VIDEO_NODE_SIZE_RANGE } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal, message } from "antd";
 import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constants";
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
@@ -48,6 +48,13 @@ import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, nor
 import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
 import { buildSpatialIndex, querySpatialIndex, type CanvasSpatialRect } from "../utils/canvas-spatial-index";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import {
+    allocateCanvasNodeIdentity,
+    normalizeCanvasConnectionOrders,
+    normalizeCanvasNodeIdentities,
+    sortConnectionsByReferenceOrder,
+    type CanvasNodeSequenceCounters,
+} from "../utils/canvas-node-identity";
 import type { DirectorDeskCapture } from "../director/storyai/DirectorDesk";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
 import {
@@ -166,6 +173,10 @@ function defaultGenerationMode(type?: CanvasNodeType): CanvasNodeGenerationMode 
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
 
+function isGenerationConfigNode(type?: CanvasNodeType) {
+    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
+}
+
 function hasRetainableMedia(node: CanvasNodeData) {
     return (
         (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) &&
@@ -219,8 +230,8 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
     return changed ? next : nodes;
 }
 
-const VIDEO_NODE_MAX_WIDTH = 420;
-const VIDEO_NODE_MAX_HEIGHT = 420;
+const VIDEO_NODE_MAX_WIDTH = VIDEO_NODE_SIZE_RANGE.maxWidth;
+const VIDEO_NODE_MAX_HEIGHT = VIDEO_NODE_SIZE_RANGE.maxHeight;
 const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const CANVAS_OVERVIEW_SCALE = 0.24;
 const NODE_TOOLBAR_HIDE_DELAY_MS = 320;
@@ -270,10 +281,10 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
 3. 尽量写成可直接用于生图模型的完整提示词。`;
 
-function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
+function createCanvasNodeBase(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const height = type === CanvasNodeType.Config ? getConfigNodeHeight(metadata?.generationMode || spec.metadata?.generationMode) : spec.height;
+    const height = isGenerationConfigNode(type) ? getConfigNodeHeight(metadata?.generationMode || spec.metadata?.generationMode) : spec.height;
 
     return {
         id,
@@ -286,6 +297,23 @@ function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: C
         width: spec.width,
         height,
         metadata: { ...spec.metadata, ...metadata },
+    };
+}
+
+function resolveComposerOverlayPosition({
+    rawLeft,
+    nodeBottom,
+    composerHeight,
+}: {
+    rawLeft: number;
+    nodeBottom: number;
+    composerHeight: number;
+}) {
+    const gap = 12;
+    return {
+        left: rawLeft,
+        top: nodeBottom + gap,
+        maxHeight: Math.max(180, composerHeight),
     };
 }
 
@@ -371,7 +399,7 @@ function ConnectionCreateMenu({
 }: {
     pending: PendingConnectionCreate;
     position: Position;
-    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio) => void;
+    onCreate: (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio) => void;
     onClose: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
@@ -431,7 +459,7 @@ function ConnectionCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate(CanvasNodeType.Image)} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate(CanvasNodeType.Video)} />
                 <ConnectionCreateOption theme={theme} icon={<Music2 className="size-5" />} title="音频参考" onClick={() => onCreate(CanvasNodeType.Audio)} />
-                <ConnectionCreateOption theme={theme} icon={<Settings2 className="size-5" />} title="配置节点" description="模型、尺寸、数量和输入顺序" onClick={() => onCreate(CanvasNodeType.Config)} />
+                <ConnectionCreateOption theme={theme} icon={<Workflow className="size-5" />} title="ComfyUI" description="本地工作流与已连接素材" onClick={() => onCreate(CanvasNodeType.ComfyUI)} />
             </div>
         </div>
     );
@@ -474,8 +502,10 @@ function ReactFlowCanvasPage() {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasShellRef = useRef<HTMLElement>(null);
     const composerOverlayRef = useRef<HTMLDivElement>(null);
+    const composerPanelRef = useRef<HTMLDivElement>(null);
     const dialogNodeRef = useRef<CanvasNodeData | null>(null);
     const composerWidthRef = useRef(0);
+    const composerHeightRef = useRef(360);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
@@ -588,14 +618,20 @@ function ReactFlowCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+    const [nodeSequenceCounters, setNodeSequenceCounters] = useState<CanvasNodeSequenceCounters>({});
+    const [referenceOrderCounter, setReferenceOrderCounter] = useState(0);
+    const [composerContentHeight, setComposerContentHeight] = useState(360);
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
+    const nodeSequenceCountersRef = useRef<CanvasNodeSequenceCounters>({});
+    const referenceOrderCounterRef = useRef(0);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const selectedConnectionIdRef = useRef(selectedConnectionId);
     const nodeByIdRef = useRef<Map<string, CanvasNodeData>>(new Map());
     const hiddenBatchChildIdsRef = useRef<Set<string>>(new Set());
     const viewportRef = useRef(viewport);
+    const lastCanvasPositionRef = useRef<Position | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
@@ -610,6 +646,28 @@ function ReactFlowCanvasPage() {
         const next = typeof nextValue === "function" ? nextValue(selectedNodeIdsRef.current) : nextValue;
         selectedNodeIdsRef.current = next;
         setSelectedNodeIdsState(next);
+    }, []);
+
+    const createCanvasNode = useCallback((type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData => {
+        const identity = allocateCanvasNodeIdentity(type, nodeSequenceCountersRef.current);
+        nodeSequenceCountersRef.current = identity.nodeSequenceCounters;
+        setNodeSequenceCounters(identity.nodeSequenceCounters);
+
+        return {
+            ...createCanvasNodeBase(type, position, {
+                ...metadata,
+                typeSequence: identity.typeSequence,
+                ...(type === CanvasNodeType.ComfyUI ? { generationMode: "comfyui" } : null),
+            }),
+            title: identity.title,
+        };
+    }, []);
+
+    const createCanvasConnection = useCallback((fromNodeId: string, toNodeId: string): CanvasConnection => {
+        const referenceOrder = referenceOrderCounterRef.current + 1;
+        referenceOrderCounterRef.current = referenceOrder;
+        setReferenceOrderCounter(referenceOrder);
+        return { id: nanoid(), fromNodeId, toNodeId, referenceOrder };
     }, []);
 
     const resetImageTapGesture = useCallback(() => {
@@ -716,8 +774,13 @@ function ReactFlowCanvasPage() {
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             if (cancelled || restoreGenerationRef.current !== restoreGeneration) return;
 
+            const restoredNodeSequenceCounters = { ...project.nodeSequenceCounters };
+            nodeSequenceCountersRef.current = restoredNodeSequenceCounters;
+            referenceOrderCounterRef.current = project.referenceOrderCounter;
             setNodes(restoredNodes);
             setConnections(project.connections);
+            setNodeSequenceCounters(restoredNodeSequenceCounters);
+            setReferenceOrderCounter(project.referenceOrderCounter);
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
@@ -793,9 +856,9 @@ function ReactFlowCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, chatSessions, activeChatId, backgroundMode, showImageInfo });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, showImageInfo });
         }, 300);
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, updateProject]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, updateProject]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
@@ -934,7 +997,7 @@ function ReactFlowCanvasPage() {
             const { fromNodeId, toNodeId } = connection;
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, fromNodeId, toNodeId }]);
+                setConnections((prev) => [...prev, createCanvasConnection(fromNodeId, toNodeId)]);
             }
             connectingParamsRef.current = null;
             setConnecting(null);
@@ -943,7 +1006,7 @@ function ReactFlowCanvasPage() {
             connectionTargetNodeIdRef.current = null;
             setContextMenu(null);
         },
-        [message, setConnecting],
+        [createCanvasConnection, message, setConnecting],
     );
 
     const handleLeaferConnect = useCallback(
@@ -1083,16 +1146,15 @@ function ReactFlowCanvasPage() {
     }, []);
 
     const createConnectedNode = useCallback(
-        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
-            const newNode = createCanvasNode(type, pending.position, metadata);
+        (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
+            const newNode = createCanvasNode(type, pending.position);
             const connection = normalizeConnectionWithNodeMap(pending.connection.nodeId, newNode.id, buildNodeById([...nodesRef.current, newNode]), pending.connection.handleType);
             if (!connection) {
                 message.warning("配置节点之间不能连接");
                 return;
             }
             setNodes((prev) => [...prev, newNode]);
-            setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
+            setConnections((prev) => [...prev, createCanvasConnection(connection.fromNodeId, connection.toNodeId)]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(newNode.id);
@@ -1100,7 +1162,7 @@ function ReactFlowCanvasPage() {
             connectingParamsRef.current = null;
             setConnecting(null);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message, setConnecting],
+        [createCanvasConnection, createCanvasNode, message, setConnecting],
     );
 
     const cancelPendingConnectionCreate = useCallback(() => {
@@ -1193,7 +1255,7 @@ function ReactFlowCanvasPage() {
                 const stackY = root ? root.position.y + 14 + index * 8 : node.position.y;
                 batchMotionById.set(node.id, { x: stackX - node.position.x, y: stackY - node.position.y, index: Math.max(index, 0) });
             }
-            if (node.type === CanvasNodeType.Config) {
+            if (isGenerationConfigNode(node.type)) {
                 const inputs = buildNodeGenerationInputs(node.id, canvasGraph);
                 configInputsById.set(node.id, inputs);
                 configInputSummaryById.set(node.id, getInputSummary(inputs));
@@ -1204,7 +1266,7 @@ function ReactFlowCanvasPage() {
     const mentionReferencesByNodeId = useMemo(() => {
         const targetNodeIds = new Set<string>();
         visibleNodes.forEach((node) => {
-            if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Config) targetNodeIds.add(node.id);
+            if (node.type === CanvasNodeType.Text || isGenerationConfigNode(node.type)) targetNodeIds.add(node.id);
         });
         [dialogNodeId, activeNodeId, editingNodeId, toolbarNodeId].forEach((nodeId) => {
             if (nodeId) targetNodeIds.add(nodeId);
@@ -1251,6 +1313,23 @@ function ReactFlowCanvasPage() {
             const next = applyCanvasAgentOps(
                 before,
                 safeOps.filter((op) => op.type !== "run_generation"),
+                {
+                    createNode: (op, index) => {
+                        const type = op.nodeType === CanvasNodeType.Config ? CanvasNodeType.ComfyUI : op.nodeType || CanvasNodeType.Text;
+                        const node = createCanvasNode(type, op.position || { x: op.x ?? index * 36, y: op.y ?? index * 36 }, op.metadata);
+                        return {
+                            ...node,
+                            ...(op.id ? { id: op.id } : null),
+                            ...(op.title?.trim() ? { title: op.title } : null),
+                            ...(typeof op.width === "number" ? { width: op.width } : null),
+                            ...(typeof op.height === "number" ? { height: op.height } : null),
+                        };
+                    },
+                    createConnection: (op) => ({
+                        ...createCanvasConnection(op.fromNodeId, op.toNodeId),
+                        ...(op.id ? { id: op.id } : null),
+                    }),
+                },
             );
             nodesRef.current = next.nodes;
             connectionsRef.current = next.connections;
@@ -1274,7 +1353,7 @@ function ReactFlowCanvasPage() {
             }
             return { ...next, projectId, title: projectTitle || "未命名画布" };
         },
-        [projectTitle, projectId],
+        [createCanvasConnection, createCanvasNode, projectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;
@@ -1302,7 +1381,7 @@ function ReactFlowCanvasPage() {
                 metadata?: CanvasNodeMetadata;
             } = {},
         ) => {
-            const targetPosition = options.position || getCanvasCenter();
+            const targetPosition = options.position || lastCanvasPositionRef.current || getCanvasCenter();
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -1313,7 +1392,6 @@ function ReactFlowCanvasPage() {
                     : undefined;
             const newNode = {
                 ...createCanvasNode(type, targetPosition, { ...configMetadata, ...options.metadata }),
-                ...(options.title ? { title: options.title } : null),
                 ...(options.width ? { width: options.width } : null),
                 ...(options.height ? { height: options.height } : null),
             };
@@ -1323,7 +1401,7 @@ function ReactFlowCanvasPage() {
             setSelectedConnectionId(null);
             setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [createCanvasNode, effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
 
     const createGroupFromSelection = useCallback(
@@ -1347,13 +1425,14 @@ function ReactFlowCanvasPage() {
             const right = Math.max(...groupNodes.map((node) => node.position.x + node.width)) + padding;
             const bottom = Math.max(...groupNodes.map((node) => node.position.y + node.height)) + padding;
             const group: CanvasNodeData = {
-                id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                type: CanvasNodeType.Group,
-                title: variant === "storyboard" ? "分镜组" : "分组",
+                ...createCanvasNode(CanvasNodeType.Group, { x: (left + right) / 2, y: (top + bottom) / 2 }, {
+                    groupChildIds: groupNodes.map((node) => node.id),
+                    groupVariant: variant,
+                    status: NODE_STATUS_IDLE,
+                }),
                 position: { x: left, y: top },
                 width: Math.max(220, right - left),
                 height: Math.max(160, bottom - top),
-                metadata: { groupChildIds: groupNodes.map((node) => node.id), groupVariant: variant, status: NODE_STATUS_IDLE },
             };
 
             nodesRef.current = [group, ...nodesRef.current];
@@ -1364,7 +1443,7 @@ function ReactFlowCanvasPage() {
             setDialogNodeId(null);
             setContextMenu(null);
         },
-        [message],
+        [createCanvasNode, message],
     );
 
     const ungroupNodes = useCallback((groupIds: string[]) => {
@@ -1387,7 +1466,7 @@ function ReactFlowCanvasPage() {
                 return;
             }
             if (action === "storyboard") {
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, title: !item.title || item.title === "分组" ? "分镜组" : item.title, metadata: { ...item.metadata, groupVariant: "storyboard" } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, groupVariant: "storyboard" } } : item)));
                 message.success("已转换为分镜组");
                 return;
             }
@@ -1397,7 +1476,6 @@ function ReactFlowCanvasPage() {
 
     const createScriptNode = useCallback(() => {
         createNode(CanvasNodeType.Text, {
-            title: "脚本",
             width: 220,
             height: 160,
             metadata: {
@@ -1414,8 +1492,7 @@ function ReactFlowCanvasPage() {
     }, [createNode]);
 
     const createVideoCompositionNode = useCallback(() => {
-        createNode(CanvasNodeType.Config, {
-            title: "视频合成",
+        createNode(CanvasNodeType.ComfyUI, {
             width: 220,
             height: 132,
             metadata: { canvasTool: "videoComposition", generationMode: "video", status: NODE_STATUS_IDLE, count: 1 },
@@ -1423,8 +1500,7 @@ function ReactFlowCanvasPage() {
     }, [createNode]);
 
     const createDirectorNode = useCallback(() => {
-        createNode(CanvasNodeType.Config, {
-            title: "导演台",
+        createNode(CanvasNodeType.ComfyUI, {
             width: 220,
             height: 160,
             metadata: {
@@ -1437,7 +1513,6 @@ function ReactFlowCanvasPage() {
 
     const createPanorama360Node = useCallback(() => {
         createNode(CanvasNodeType.Image, {
-            title: "360场景",
             width: 320,
             height: 180,
             metadata: {
@@ -1542,6 +1617,10 @@ function ReactFlowCanvasPage() {
     const clearCanvas = useCallback(() => {
         setNodes([]);
         setConnections([]);
+        nodeSequenceCountersRef.current = {};
+        referenceOrderCounterRef.current = 0;
+        setNodeSequenceCounters({});
+        setReferenceOrderCounter(0);
         setInfoNodeId(null);
         setCropNodeId(null);
         setMaskEditNodeId(null);
@@ -1557,19 +1636,25 @@ function ReactFlowCanvasPage() {
         const source = nodesRef.current.find((node) => node.id === nodeId);
         if (!source) return;
 
-        const id = `${source.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const next: CanvasNodeData = {
-            ...source,
-            id,
-            title: `${source.title} Copy`,
+            ...createCanvasNode(
+                source.type,
+                {
+                    x: source.position.x + source.width / 2 + 36,
+                    y: source.position.y + source.height / 2 + 36,
+                },
+                source.metadata,
+            ),
             position: { x: source.position.x + 36, y: source.position.y + 36 },
+            width: source.width,
+            height: source.height,
         };
 
         setNodes((prev) => [...prev, next]);
-        setSelectedNodeIds(new Set([id]));
+        setSelectedNodeIds(new Set([next.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(next.id);
+    }, [createCanvasNode]);
 
     const copySelectedNodes = useCallback(() => {
         const selectedIds = selectedNodeIdsRef.current;
@@ -1609,32 +1694,31 @@ function ReactFlowCanvasPage() {
         const dy = center.y - (bounds.top + bounds.bottom) / 2;
         const idMap = new Map<string, string>();
         const nextNodes = clipboard.nodes.map((node, index) => {
-            const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-            idMap.set(node.id, id);
-            return {
-                ...node,
-                id,
-                title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
-                position: {
-                    x: node.position.x + dx,
-                    y: node.position.y + dy,
-                },
-                metadata: node.metadata ? { ...node.metadata } : undefined,
+            const nextPosition = {
+                x: node.position.x + dx,
+                y: node.position.y + dy,
             };
+            const next = {
+                ...createCanvasNode(
+                    node.type,
+                    { x: nextPosition.x + node.width / 2, y: nextPosition.y + node.height / 2 },
+                    node.metadata,
+                ),
+                position: {
+                    ...nextPosition,
+                },
+                width: node.width,
+                height: node.height,
+            };
+            idMap.set(node.id, next.id);
+            return next;
         });
 
-        const nextConnections = clipboard.connections.flatMap((connection, index) => {
+        const nextConnections = sortConnectionsByReferenceOrder(clipboard.connections).flatMap((connection) => {
             const fromNodeId = idMap.get(connection.fromNodeId);
             const toNodeId = idMap.get(connection.toNodeId);
             if (!fromNodeId || !toNodeId) return [];
-            return [
-                {
-                    ...connection,
-                    id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-                    fromNodeId,
-                    toNodeId,
-                },
-            ];
+            return [createCanvasConnection(fromNodeId, toNodeId)];
         });
 
         setNodes((prev) => [...prev, ...nextNodes]);
@@ -1644,7 +1728,7 @@ function ReactFlowCanvasPage() {
         setContextMenu(null);
         setDialogNodeId(nextNodes[0]?.id || null);
         return true;
-    }, [getCanvasCenter]);
+    }, [createCanvasConnection, createCanvasNode, getCanvasCenter]);
 
     const resetViewport = useCallback(() => {
         const rect = containerRef.current?.getBoundingClientRect();
@@ -1749,7 +1833,8 @@ function ReactFlowCanvasPage() {
     }, [cleanupAssetImages, deleteProjects, navigate, projectId]);
 
     const handleCanvasMouseDown = useCallback(
-        (event: ReactPointerEvent<HTMLDivElement>) => {
+        (event: ReactPointerEvent<HTMLDivElement>, canvasPosition: Position) => {
+            lastCanvasPositionRef.current = canvasPosition;
             setContextMenu(null);
             if (pendingConnectionCreateRef.current) cancelPendingConnectionCreate();
         },
@@ -1759,64 +1844,54 @@ function ReactFlowCanvasPage() {
     const createImageFileNode = useCallback(async (file: File, position: Position) => {
         const image = await uploadImage(file);
         const size = fitNodeSize(image.width, image.height);
-        const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const newNode: CanvasNodeData = {
-            id,
-            type: CanvasNodeType.Image,
-            title: file.name,
+            ...createCanvasNode(CanvasNodeType.Image, position, { ...imageMetadata(image), freeResize: true }),
             position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
             width: size.width,
             height: size.height,
-            metadata: { ...imageMetadata(image), freeResize: true },
         };
 
         setNodes((prev) => [...prev, newNode]);
-        setSelectedNodeIds(new Set([id]));
+        setSelectedNodeIds(new Set([newNode.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(newNode.id);
+    }, [createCanvasNode]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position) => {
         const video = await uploadMediaFile(file, "video");
         const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-        const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const newNode: CanvasNodeData = {
+            ...createCanvasNode(CanvasNodeType.Video, position, videoMetadata(video)),
+            position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
+            width: size.width,
+            height: size.height,
+        };
         setNodes((prev) => [
             ...prev,
-            {
-                id,
-                type: CanvasNodeType.Video,
-                title: file.name,
-                position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-                width: size.width,
-                height: size.height,
-                metadata: videoMetadata(video),
-            },
+            newNode,
         ]);
-        setSelectedNodeIds(new Set([id]));
+        setSelectedNodeIds(new Set([newNode.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(newNode.id);
+    }, [createCanvasNode]);
 
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
         const audio = await uploadMediaFile(file, "audio");
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-        const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const newNode: CanvasNodeData = {
+            ...createCanvasNode(CanvasNodeType.Audio, position, audioMetadata(audio)),
+            position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
+            width: spec.width,
+            height: spec.height,
+        };
         setNodes((prev) => [
             ...prev,
-            {
-                id,
-                type: CanvasNodeType.Audio,
-                title: file.name,
-                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
-                width: spec.width,
-                height: spec.height,
-                metadata: audioMetadata(audio),
-            },
+            newNode,
         ]);
-        setSelectedNodeIds(new Set([id]));
+        setSelectedNodeIds(new Set([newNode.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(newNode.id);
+    }, [createCanvasNode]);
 
     const createTextFileNode = useCallback(
         async (file: File, position: Position) => {
@@ -1828,15 +1903,8 @@ function ReactFlowCanvasPage() {
             }
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
             const isScript = isScriptTextFile(file);
-            const id = `text-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const node: CanvasNodeData = {
-                id,
-                type: CanvasNodeType.Text,
-                title: file.name,
-                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
-                width: isScript ? 220 : spec.width,
-                height: isScript ? 160 : spec.height,
-                metadata: {
+                ...createCanvasNode(CanvasNodeType.Text, position, {
                     content: trimmed,
                     status: NODE_STATUS_SUCCESS,
                     fontSize: isScript ? 13 : 14,
@@ -1849,14 +1917,17 @@ function ReactFlowCanvasPage() {
                               scriptBody: trimmed,
                           }
                         : null),
-                },
+                }),
+                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
+                width: isScript ? 220 : spec.width,
+                height: isScript ? 160 : spec.height,
             };
             setNodes((prev) => [...prev, node]);
-            setSelectedNodeIds(new Set([id]));
+            setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(id);
+            setDialogNodeId(node.id);
         },
-        [message],
+        [createCanvasNode, message],
     );
 
     const createTextNodeFromClipboard = useCallback(
@@ -1864,10 +1935,7 @@ function ReactFlowCanvasPage() {
             const trimmed = text.trim();
             if (!trimmed) return false;
 
-            const node = {
-                ...createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
-                title: trimmed.slice(0, 32) || "剪切板文本",
-            };
+            const node = createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS });
 
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
@@ -1901,7 +1969,12 @@ function ReactFlowCanvasPage() {
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom]")) return;
+            const isEditingText =
+                event.target instanceof HTMLInputElement ||
+                event.target instanceof HTMLTextAreaElement ||
+                event.target instanceof HTMLSelectElement ||
+                Boolean(target?.closest("[contenteditable='true'],[role='textbox']"));
+            if (isEditingText) return;
 
             const key = event.key.toLowerCase();
             const isModifierShortcut = event.metaKey || event.ctrlKey;
@@ -2029,6 +2102,10 @@ function ReactFlowCanvasPage() {
     );
 
     const handleLeaferNodePointerDown = useCallback((nodeId: string, modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement && activeElement.closest("[data-canvas-composer]")) {
+            activeElement.blur();
+        }
         setContextMenu(null);
         setHoveredNodeId(null);
         setToolbarNodeId(null);
@@ -2309,34 +2386,36 @@ function ReactFlowCanvasPage() {
 
             const gap = 96;
             const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-            const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
             const centerY = node.position.y + node.height / 2;
             const textNode = {
                 ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: IMAGE_PROMPT_REVERSE_PRESET, prompt: IMAGE_PROMPT_REVERSE_PRESET, status: NODE_STATUS_SUCCESS, fontSize: 14 }),
-                title: "反推提示词",
             };
-            const configNode = {
+            const resultNode = {
                 ...createCanvasNode(
-                    CanvasNodeType.Config,
-                    { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
+                    CanvasNodeType.Text,
+                    { x: textNode.position.x + textNode.width + gap + textSpec.width / 2, y: centerY },
                     {
                         generationMode: "text",
                         model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
                         count: 1,
                         composerContent: `参考图片：@[node:${node.id}]\n任务说明：@[node:${textNode.id}]`,
+                        status: NODE_STATUS_IDLE,
                     },
                 ),
-                title: "反推提示词配置",
             };
 
-            setNodes((prev) => [...prev, textNode, configNode]);
-            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: configNode.id }, { id: nanoid(), fromNodeId: textNode.id, toNodeId: configNode.id }]);
-            setSelectedNodeIds(new Set([configNode.id]));
+            setNodes((prev) => [...prev, textNode, resultNode]);
+            setConnections((prev) => [
+                ...prev,
+                createCanvasConnection(node.id, resultNode.id),
+                createCanvasConnection(textNode.id, resultNode.id),
+            ]);
+            setSelectedNodeIds(new Set([resultNode.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(configNode.id);
+            setDialogNodeId(resultNode.id);
             setContextMenu(null);
         },
-        [effectiveConfig.model, effectiveConfig.textModel, message],
+        [createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.textModel, message],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -2345,25 +2424,28 @@ function ReactFlowCanvasPage() {
         const cropped = await cropDataUrl(url, crop);
         const image = await uploadImage(cropped);
         const width = Math.min(node.width, Math.max(220, image.width));
-        const childId = nanoid();
         const child: CanvasNodeData = {
-            id: childId,
-            type: CanvasNodeType.Image,
-            title: "Cropped Image",
+            ...createCanvasNode(
+                CanvasNodeType.Image,
+                {
+                    x: node.position.x + node.width + 96 + width / 2,
+                    y: node.position.y + (width * (image.height / image.width)) / 2,
+                },
+                {
+                    ...imageMetadata(image),
+                    prompt: node.metadata?.prompt,
+                },
+            ),
             position: { x: node.position.x + node.width + 96, y: node.position.y },
             width,
             height: width * (image.height / image.width),
-            metadata: {
-                ...imageMetadata(image),
-                prompt: node.metadata?.prompt,
-            },
         };
         setNodes((prev) => [...prev, child]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-        setSelectedNodeIds(new Set([childId]));
-        setDialogNodeId(childId);
+        setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+        setSelectedNodeIds(new Set([child.id]));
+        setDialogNodeId(child.id);
         setCropNodeId(null);
-    }, []);
+    }, [createCanvasConnection, createCanvasNode]);
 
     const splitImageNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageSplitParams) => {
@@ -2379,29 +2461,30 @@ function ReactFlowCanvasPage() {
             const childNodes = await Promise.all(
                 pieces.map(async (piece) => {
                     const image = await uploadImage(piece.dataUrl);
-                    const id = nanoid();
+                    const position = { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) };
                     return {
-                        id,
-                        type: CanvasNodeType.Image,
-                        title: `${node.title || "图片"} ${piece.row + 1}-${piece.column + 1}`,
-                        position: { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) },
+                        ...createCanvasNode(
+                            CanvasNodeType.Image,
+                            { x: position.x + cellWidth / 2, y: position.y + cellHeight / 2 },
+                            {
+                                ...imageMetadata(image),
+                                prompt: node.metadata?.prompt,
+                            },
+                        ),
+                        position,
                         width: cellWidth,
                         height: cellHeight,
-                        metadata: {
-                            ...imageMetadata(image),
-                            prompt: node.metadata?.prompt,
-                        },
                     } satisfies CanvasNodeData;
                 }),
             );
             setNodes((prev) => [...prev, ...childNodes]);
-            setConnections((prev) => [...prev, ...childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
+            setConnections((prev) => [...prev, ...childNodes.map((child) => createCanvasConnection(node.id, child.id))]);
             setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
             message.success(`已切分为 ${childNodes.length} 个子节点`);
         },
-        [message],
+        [createCanvasConnection, createCanvasNode, message],
     );
 
     const maskEditImageNode = useCallback(
@@ -2414,44 +2497,43 @@ function ReactFlowCanvasPage() {
             }
             const userPrompt = payload.prompt.trim();
             const prompt = `只修改蒙版透明区域，其他区域保持不变。${userPrompt}`;
-            const childId = nanoid();
             const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
+            const child = createCanvasNode(
+                CanvasNodeType.Image,
+                { x: node.position.x + node.width + 96 + node.width / 2, y: node.position.y + node.height / 2 },
+                { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+            );
+            child.position = { x: node.position.x + node.width + 96, y: node.position.y };
+            child.width = node.width;
+            child.height = node.height;
             setMaskEditNodeId(null);
-            setRunningNodeId(childId);
+            setRunningNodeId(child.id);
             setNodes((prev) => [
                 ...prev,
-                {
-                    id: childId,
-                    type: CanvasNodeType.Image,
-                    title: userPrompt.slice(0, 32) || "局部编辑结果",
-                    position: { x: node.position.x + node.width + 96, y: node.position.y },
-                    width: node.width,
-                    height: node.height,
-                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
-                },
+                child,
             ]);
-            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-            setSelectedNodeIds(new Set([childId]));
+            setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+            setSelectedNodeIds(new Set([child.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(childId);
-            const controller = startGenerationRequest(childId, node.id, childId);
+            setDialogNodeId(child.id);
+            const controller = startGenerationRequest(child.id, node.id, child.id);
             try {
                 const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "局部修改失败";
                 message.error(errorDetails);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
-                finishGenerationRequest(childId, controller);
+                finishGenerationRequest(child.id, controller);
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -2461,24 +2543,24 @@ function ReactFlowCanvasPage() {
         const upscaled = await upscaleDataUrl(url, params);
         const image = await uploadImage(upscaled);
         const size = fitNodeSize(image.width, image.height);
-        const childId = nanoid();
         const child: CanvasNodeData = {
-            id: childId,
-            type: CanvasNodeType.Image,
-            title: "Upscaled Image",
+            ...createCanvasNode(
+                CanvasNodeType.Image,
+                { x: node.position.x + node.width + 96 + size.width / 2, y: node.position.y + size.height / 2 },
+                {
+                    ...imageMetadata(image),
+                    prompt: node.metadata?.prompt,
+                },
+            ),
             position: { x: node.position.x + node.width + 96, y: node.position.y },
             width: size.width,
             height: size.height,
-            metadata: {
-                ...imageMetadata(image),
-                prompt: node.metadata?.prompt,
-            },
         };
         setNodes((prev) => [...prev, child]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-        setSelectedNodeIds(new Set([childId]));
-        setDialogNodeId(childId);
-    }, []);
+        setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+        setSelectedNodeIds(new Set([child.id]));
+        setDialogNodeId(child.id);
+    }, [createCanvasConnection, createCanvasNode]);
 
     const generateAngleNode = useCallback(
         async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
@@ -2488,31 +2570,29 @@ function ReactFlowCanvasPage() {
                 openConfigDialog(true);
                 return;
             }
-            const childId = nanoid();
             const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-            const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
                 { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
             ]);
+            const child = createCanvasNode(
+                CanvasNodeType.Image,
+                { x: node.position.x + node.width + 96 + imageConfig.width / 2, y: node.position.y + imageConfig.height / 2 },
+                { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+            );
+            child.position = { x: node.position.x + node.width + 96, y: node.position.y };
+            child.width = imageConfig.width;
+            child.height = imageConfig.height;
             setAngleNodeId(null);
-            setRunningNodeId(childId);
+            setRunningNodeId(child.id);
             setNodes((prev) => [
                 ...prev,
-                {
-                    id: childId,
-                    type: CanvasNodeType.Image,
-                    title,
-                    position: { x: node.position.x + node.width + 96, y: node.position.y },
-                    width: imageConfig.width,
-                    height: imageConfig.height,
-                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
-                },
+                child,
             ]);
-            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
-            setSelectedNodeIds(new Set([childId]));
-            setDialogNodeId(childId);
-            const controller = startGenerationRequest(childId, node.id, childId);
+            setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+            setSelectedNodeIds(new Set([child.id]));
+            setDialogNodeId(child.id);
+            const controller = startGenerationRequest(child.id, node.id, child.id);
             try {
                 const image = await requestEdit(
                     generationConfig,
@@ -2523,17 +2603,17 @@ function ReactFlowCanvasPage() {
                 ).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
-                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
-                finishGenerationRequest(childId, controller);
+                finishGenerationRequest(child.id, controller);
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest],
+        [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2575,7 +2655,6 @@ function ReactFlowCanvasPage() {
                                 ? {
                                       ...node,
                                       type: CanvasNodeType.Text,
-                                      title: file.name,
                                       position: { x: node.position.x + node.width / 2 - (script ? 220 : spec.width) / 2, y: node.position.y + node.height / 2 - (script ? 160 : spec.height) / 2 },
                                       width: script ? 220 : spec.width,
                                       height: script ? 160 : spec.height,
@@ -2613,7 +2692,6 @@ function ReactFlowCanvasPage() {
                                 ? {
                                       ...node,
                                       type: CanvasNodeType.Audio,
-                                      title: file.name,
                                       position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 },
                                       width: spec.width,
                                       height: spec.height,
@@ -2637,7 +2715,6 @@ function ReactFlowCanvasPage() {
                                 ? {
                                       ...node,
                                       type: CanvasNodeType.Video,
-                                      title: file.name,
                                       position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
                                       width: nextSize.width,
                                       height: nextSize.height,
@@ -2669,7 +2746,6 @@ function ReactFlowCanvasPage() {
                             ? {
                                   ...node,
                                   type: CanvasNodeType.Image,
-                                  title: file.name,
                                   width: size.width,
                                   height: size.height,
                                   metadata: {
@@ -2685,6 +2761,7 @@ function ReactFlowCanvasPage() {
                                       model: undefined,
                                       size: node.metadata?.canvasTool === "panorama360" ? node.metadata.size : undefined,
                                       quality: undefined,
+                                      resolution: undefined,
                                       count: undefined,
                                       references: undefined,
                                       primaryImageId: undefined,
@@ -2789,7 +2866,7 @@ function ReactFlowCanvasPage() {
                     const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
                     if (!result.images.length && !result.videos.length && !result.audios.length) throw new Error("ComfyUI 没有返回任何输出");
 
-                    const parentConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+                    const parentConfig = NODE_DEFAULT_SIZE[CanvasNodeType.ComfyUI];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const videoConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const audioConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
@@ -2801,71 +2878,83 @@ function ReactFlowCanvasPage() {
                     uploadedImages.forEach((image, index) => {
                         const imageSize = fitNodeSize(image.width, image.height, imageConfig.width, imageConfig.height);
                         allNodes.push({
-                            id: nanoid(),
-                            type: CanvasNodeType.Image,
-                            title: comfyWorkflow.title || "ComfyUI Image",
+                            ...createCanvasNode(
+                                CanvasNodeType.Image,
+                                {
+                                    x: parentPosition.x + parentConfig.width + 96 + (index % 2) * (imageConfig.width + 36) + imageSize.width / 2,
+                                    y: parentPosition.y + Math.floor(index / 2) * (imageConfig.height + 36) + imageSize.height / 2,
+                                },
+                                {
+                                    prompt: rawPrompt,
+                                    requestPrompt: effectivePrompt,
+                                    model: "ComfyUI",
+                                    comfyWorkflowId: comfyWorkflow.id,
+                                    ...imageMetadata(image),
+                                },
+                            ),
                             position: {
                                 x: parentPosition.x + parentConfig.width + 96 + (index % 2) * (imageConfig.width + 36),
                                 y: parentPosition.y + Math.floor(index / 2) * (imageConfig.height + 36),
                             },
                             width: imageSize.width,
                             height: imageSize.height,
-                            metadata: {
-                                prompt: rawPrompt,
-                                requestPrompt: effectivePrompt,
-                                model: "ComfyUI",
-                                comfyWorkflowId: comfyWorkflow.id,
-                                ...imageMetadata(image),
-                            },
                         });
                     });
                     const imageCount = uploadedImages.length;
                     uploadedVideos.forEach((video, index) => {
                         const videoSize = fitNodeSize(video.width || videoConfig.width, video.height || videoConfig.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         allNodes.push({
-                            id: nanoid(),
-                            type: CanvasNodeType.Video,
-                            title: comfyWorkflow.title || "ComfyUI Video",
+                            ...createCanvasNode(
+                                CanvasNodeType.Video,
+                                {
+                                    x: parentPosition.x + parentConfig.width + 96 + ((imageCount + index) % 2) * (videoConfig.width + 36) + videoSize.width / 2,
+                                    y: parentPosition.y + Math.floor((imageCount + index) / 2) * (videoConfig.height + 36) + videoSize.height / 2,
+                                },
+                                {
+                                    prompt: rawPrompt,
+                                    requestPrompt: effectivePrompt,
+                                    model: "ComfyUI",
+                                    comfyWorkflowId: comfyWorkflow.id,
+                                    ...videoMetadata(video),
+                                },
+                            ),
                             position: {
                                 x: parentPosition.x + parentConfig.width + 96 + ((imageCount + index) % 2) * (videoConfig.width + 36),
                                 y: parentPosition.y + Math.floor((imageCount + index) / 2) * (videoConfig.height + 36),
                             },
                             width: videoSize.width,
                             height: videoSize.height,
-                            metadata: {
-                                prompt: rawPrompt,
-                                requestPrompt: effectivePrompt,
-                                model: "ComfyUI",
-                                comfyWorkflowId: comfyWorkflow.id,
-                                ...videoMetadata(video),
-                            },
                         });
                     });
                     const videoCount = uploadedVideos.length;
                     uploadedAudios.forEach((audio, index) => {
                         const colIndex = imageCount + videoCount + index;
                         allNodes.push({
-                            id: nanoid(),
-                            type: CanvasNodeType.Audio,
-                            title: comfyWorkflow.title || "ComfyUI Audio",
+                            ...createCanvasNode(
+                                CanvasNodeType.Audio,
+                                {
+                                    x: parentPosition.x + parentConfig.width + 96 + (colIndex % 2) * (audioConfig.width + 36) + audioConfig.width / 2,
+                                    y: parentPosition.y + Math.floor(colIndex / 2) * (audioConfig.height + 36) + audioConfig.height / 2,
+                                },
+                                {
+                                    prompt: rawPrompt,
+                                    requestPrompt: effectivePrompt,
+                                    model: "ComfyUI",
+                                    comfyWorkflowId: comfyWorkflow.id,
+                                    ...audioMetadata(audio),
+                                },
+                            ),
                             position: {
                                 x: parentPosition.x + parentConfig.width + 96 + (colIndex % 2) * (audioConfig.width + 36),
                                 y: parentPosition.y + Math.floor(colIndex / 2) * (audioConfig.height + 36),
                             },
                             width: audioConfig.width,
                             height: audioConfig.height,
-                            metadata: {
-                                prompt: rawPrompt,
-                                requestPrompt: effectivePrompt,
-                                model: "ComfyUI",
-                                comfyWorkflowId: comfyWorkflow.id,
-                                ...audioMetadata(audio),
-                            },
                         });
                     });
                     pendingChildIds = allNodes.map((node) => node.id);
                     setNodes((prev) => [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)), ...allNodes]);
-                    setConnections((prev) => [...prev, ...allNodes.map((node) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: node.id }))]);
+                    setConnections((prev) => [...prev, ...allNodes.map((node) => createCanvasConnection(nodeId, node.id))]);
                     return;
                 }
 
@@ -2886,44 +2975,84 @@ function ReactFlowCanvasPage() {
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const gap = 96;
                     const rowGap = 36;
-                    const rootId = isEmptyImageNode ? nodeId : nanoid();
-                    const childIds = count > 1 ? Array.from({ length: count }, () => nanoid()) : [];
-                    const targetIds = count > 1 ? childIds : [rootId];
-                    pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
-                    const rootNode: CanvasNodeData = {
-                        id: rootId,
-                        type: CanvasNodeType.Image,
-                        title: effectivePrompt.slice(0, 32) || "Generated Image",
-                        position: {
-                            x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
-                            y: parentPosition.y + parentConfig.height / 2 - imageConfig.height / 2,
-                        },
-                        width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
-                        height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
-                        metadata: {
-                            prompt: rawPrompt,
-                            requestPrompt: effectivePrompt,
-                            status: NODE_STATUS_LOADING,
-                            isBatchRoot: count > 1,
-                            batchChildIds: count > 1 ? childIds : undefined,
-                            batchUsesReferenceImages: referenceImages.length > 0,
-                            ...generationMetadata,
-                            imageBatchExpanded: count > 1 ? true : undefined,
-                        },
+                    const rootPosition = {
+                        x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
+                        y: parentPosition.y + parentConfig.height / 2 - imageConfig.height / 2,
                     };
-                    const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
-                        id,
-                        type: CanvasNodeType.Image,
-                        title: effectivePrompt.slice(0, 32) || "Generated Image",
-                        position: {
-                            x: rootNode.position.x + rootNode.width + 120 + (index % 2) * (imageConfig.width + 36),
-                            y: rootNode.position.y + Math.floor(index / 2) * (imageConfig.height + rowGap),
-                        },
-                        width: imageConfig.width,
-                        height: imageConfig.height,
-                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: count > 1 ? rootId : undefined, ...generationMetadata },
-                    }));
-                    const batchConnections = [...(isEmptyImageNode ? [] : [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId }]), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId }))];
+                    const rootWidth = isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width;
+                    const rootHeight = isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height;
+                    const rootNode: CanvasNodeData =
+                        isEmptyImageNode && sourceNode
+                            ? {
+                                  ...sourceNode,
+                                  type: CanvasNodeType.Image,
+                                  position: rootPosition,
+                                  width: rootWidth,
+                                  height: rootHeight,
+                                  metadata: {
+                                      ...sourceNode.metadata,
+                                      prompt: rawPrompt,
+                                      requestPrompt: effectivePrompt,
+                                      status: NODE_STATUS_LOADING,
+                                      isBatchRoot: count > 1,
+                                      batchUsesReferenceImages: referenceImages.length > 0,
+                                      ...generationMetadata,
+                                      imageBatchExpanded: count > 1 ? true : undefined,
+                                      errorDetails: undefined,
+                                  },
+                              }
+                            : {
+                                  ...createCanvasNode(
+                                      CanvasNodeType.Image,
+                                      { x: rootPosition.x + rootWidth / 2, y: rootPosition.y + rootHeight / 2 },
+                                      {
+                                          prompt: rawPrompt,
+                                          requestPrompt: effectivePrompt,
+                                          status: NODE_STATUS_LOADING,
+                                          isBatchRoot: count > 1,
+                                          batchUsesReferenceImages: referenceImages.length > 0,
+                                          ...generationMetadata,
+                                          imageBatchExpanded: count > 1 ? true : undefined,
+                                      },
+                                  ),
+                                  position: rootPosition,
+                                  width: rootWidth,
+                                  height: rootHeight,
+                              };
+                    const childNodes: CanvasNodeData[] =
+                        count > 1
+                            ? Array.from({ length: count }, (_, index) => {
+                                  const position = {
+                                      x: rootNode.position.x + rootNode.width + 120 + (index % 2) * (imageConfig.width + 36),
+                                      y: rootNode.position.y + Math.floor(index / 2) * (imageConfig.height + rowGap),
+                                  };
+                                  return {
+                                      ...createCanvasNode(
+                                          CanvasNodeType.Image,
+                                          { x: position.x + imageConfig.width / 2, y: position.y + imageConfig.height / 2 },
+                                          {
+                                              prompt: rawPrompt,
+                                              requestPrompt: effectivePrompt,
+                                              status: NODE_STATUS_LOADING,
+                                              batchRootId: rootNode.id,
+                                              ...generationMetadata,
+                                          },
+                                      ),
+                                      position,
+                                      width: imageConfig.width,
+                                      height: imageConfig.height,
+                                  };
+                              })
+                            : [];
+                    const childIds = childNodes.map((node) => node.id);
+                    const rootId = rootNode.id;
+                    const targetIds = childIds.length ? childIds : [rootId];
+                    pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
+                    rootNode.metadata = { ...rootNode.metadata, batchChildIds: childIds.length ? childIds : undefined };
+                    const batchConnections = [
+                        ...(isEmptyImageNode ? [] : [createCanvasConnection(nodeId, rootId)]),
+                        ...childIds.map((childId) => createCanvasConnection(rootId, childId)),
+                    ];
 
                     setNodes((prev) => [
                         ...prev.map((node) =>
@@ -2939,7 +3068,6 @@ function ReactFlowCanvasPage() {
                                             position: rootNode.position,
                                             width: rootNode.width,
                                             height: rootNode.height,
-                                            title: rootNode.title,
                                             metadata: { ...node.metadata, ...rootNode.metadata, errorDetails: undefined },
                                         }
                                       : isImageNode
@@ -2950,7 +3078,6 @@ function ReactFlowCanvasPage() {
                                         : {
                                               ...node,
                                               type: CanvasNodeType.Text,
-                                              title: prompt.slice(0, 32) || "Prompt",
                                               width: parentConfig.width,
                                               height: parentConfig.height,
                                               metadata: { ...node.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS, fontSize: 14, errorDetails: undefined },
@@ -3040,37 +3167,42 @@ function ReactFlowCanvasPage() {
                 if (mode === "video") {
                     const spec = nodeSizeFromRatio(generationConfig.size, NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, NODE_DEFAULT_SIZE[CanvasNodeType.Video].height) || NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const isEmptyVideoNode = sourceNode?.type === CanvasNodeType.Video && !sourceNode.metadata?.content;
-                    const videoId = isEmptyVideoNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const videoNode: CanvasNodeData = {
-                        id: videoId,
-                        type: CanvasNodeType.Video,
-                        title: effectivePrompt.slice(0, 32) || "Generated Video",
-                        position: isEmptyVideoNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y },
-                        width: isEmptyVideoNode ? sourceNode.width : spec.width,
-                        height: isEmptyVideoNode ? sourceNode.height : spec.height,
-                        metadata: {
-                            prompt: rawPrompt,
-                            requestPrompt: effectivePrompt,
-                            status: NODE_STATUS_LOADING,
-                            model: generationConfig.model,
-                            size: generationConfig.size,
-                            seconds: generationConfig.videoSeconds,
-                            vquality: generationConfig.vquality,
-                            generateAudio: generationConfig.videoGenerateAudio,
-                            watermark: generationConfig.videoWatermark,
-                            draft: generationConfig.videoDraft,
-                            videoGenerationMode: sourceNode?.metadata?.videoGenerationMode,
-                            references: generationReferenceUrls(generationContext),
-                        },
+                    const videoPosition = isEmptyVideoNode && sourceNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y };
+                    const videoWidth = isEmptyVideoNode && sourceNode ? sourceNode.width : spec.width;
+                    const videoHeight = isEmptyVideoNode && sourceNode ? sourceNode.height : spec.height;
+                    const videoMetadata = {
+                        prompt: rawPrompt,
+                        requestPrompt: effectivePrompt,
+                        status: NODE_STATUS_LOADING,
+                        model: generationConfig.model,
+                        size: generationConfig.size,
+                        seconds: generationConfig.videoSeconds,
+                        vquality: generationConfig.vquality,
+                        generateAudio: generationConfig.videoGenerateAudio,
+                        watermark: generationConfig.videoWatermark,
+                        draft: generationConfig.videoDraft,
+                        videoGenerationMode: sourceNode?.metadata?.videoGenerationMode,
+                        references: generationReferenceUrls(generationContext),
+                        errorDetails: undefined,
                     };
+                    const videoNode: CanvasNodeData =
+                        isEmptyVideoNode && sourceNode
+                            ? { ...sourceNode, type: CanvasNodeType.Video, position: videoPosition, width: videoWidth, height: videoHeight, metadata: { ...sourceNode.metadata, ...videoMetadata } }
+                            : {
+                                  ...createCanvasNode(CanvasNodeType.Video, { x: videoPosition.x + videoWidth / 2, y: videoPosition.y + videoHeight / 2 }, videoMetadata),
+                                  position: videoPosition,
+                                  width: videoWidth,
+                                  height: videoHeight,
+                              };
+                    const videoId = videoNode.id;
                     pendingChildIds = [videoId];
                     setNodes((prev) =>
                         isEmptyVideoNode
                             ? prev.map((node) => (node.id === nodeId ? { ...node, ...videoNode } : node))
                             : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode],
                     );
-                    if (!isEmptyVideoNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: videoId }]);
+                    if (!isEmptyVideoNode) setConnections((prev) => [...prev, createCanvasConnection(nodeId, videoId)]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     try {
                         const video = await storeGeneratedVideo(
@@ -3116,24 +3248,28 @@ function ReactFlowCanvasPage() {
                 if (mode === "audio") {
                     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                     const isEmptyAudioNode = sourceNode?.type === CanvasNodeType.Audio && !sourceNode.metadata?.content;
-                    const audioId = isEmptyAudioNode ? nodeId : nanoid();
                     const parent = sourceNode?.position || { x: 0, y: 0 };
-                    const audioNode: CanvasNodeData = {
-                        id: audioId,
-                        type: CanvasNodeType.Audio,
-                        title: effectivePrompt.slice(0, 32) || "Generated Audio",
-                        position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
-                        width: isEmptyAudioNode ? sourceNode.width : spec.width,
-                        height: isEmptyAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
-                    };
+                    const audioPosition = isEmptyAudioNode && sourceNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 };
+                    const audioWidth = isEmptyAudioNode && sourceNode ? sourceNode.width : spec.width;
+                    const audioHeight = isEmptyAudioNode && sourceNode ? sourceNode.height : spec.height;
+                    const audioMetadata = { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig), errorDetails: undefined };
+                    const audioNode: CanvasNodeData =
+                        isEmptyAudioNode && sourceNode
+                            ? { ...sourceNode, type: CanvasNodeType.Audio, position: audioPosition, width: audioWidth, height: audioHeight, metadata: { ...sourceNode.metadata, ...audioMetadata } }
+                            : {
+                                  ...createCanvasNode(CanvasNodeType.Audio, { x: audioPosition.x + audioWidth / 2, y: audioPosition.y + audioHeight / 2 }, audioMetadata),
+                                  position: audioPosition,
+                                  width: audioWidth,
+                                  height: audioHeight,
+                              };
+                    const audioId = audioNode.id;
                     pendingChildIds = [audioId];
                     setNodes((prev) =>
                         isEmptyAudioNode
                             ? prev.map((node) => (node.id === nodeId ? { ...node, ...audioNode } : node))
                             : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode],
                     );
-                    if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
+                    if (!isEmptyAudioNode) setConnections((prev) => [...prev, createCanvasConnection(nodeId, audioId)]);
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
                         const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
@@ -3152,23 +3288,30 @@ function ReactFlowCanvasPage() {
                 const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : CanvasNodeType.Text];
                 const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
                 const parentPosition = sourceNode?.position || { x: 0, y: 0 };
-                const childIds = isConfigNode || editingTextNode ? Array.from({ length: textCount }, () => nanoid()) : [];
+                const childNodes: CanvasNodeData[] =
+                    isConfigNode || editingTextNode
+                        ? Array.from({ length: textCount }, (_, index) => {
+                              const position = {
+                                  x: parentPosition.x + parentConfig.width + 96,
+                                  y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (textCount - 1) / 2) * (textConfig.height + 36),
+                              };
+                              return {
+                                  ...createCanvasNode(
+                                      CanvasNodeType.Text,
+                                      { x: position.x + textConfig.width / 2, y: position.y + textConfig.height / 2 },
+                                      { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
+                                  ),
+                                  position,
+                                  width: textConfig.width,
+                                  height: textConfig.height,
+                              };
+                          })
+                        : [];
+                const childIds = childNodes.map((node) => node.id);
                 pendingChildIds = childIds;
                 if (isConfigNode || editingTextNode) {
-                    const childNodes: CanvasNodeData[] = childIds.map((id, index) => ({
-                        id,
-                        type: CanvasNodeType.Text,
-                        title: effectivePrompt.slice(0, 32) || "Generated Text",
-                        position: {
-                            x: parentPosition.x + parentConfig.width + 96,
-                            y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (textCount - 1) / 2) * (textConfig.height + 36),
-                        },
-                        width: textConfig.width,
-                        height: textConfig.height,
-                        metadata: { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, fontSize: 14 },
-                    }));
                     setNodes((prev) => [...prev.map((node) => (node.id === nodeId && isConfigNode ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes]);
-                    setConnections((prev) => [...prev, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))]);
+                    setConnections((prev) => [...prev, ...childIds.map((childId) => createCanvasConnection(nodeId, childId))]);
                 }
 
                 const controller = runController;
@@ -3200,8 +3343,8 @@ function ReactFlowCanvasPage() {
                             ? { ...node, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
                             : node.id === nodeId && isConfigNode
                               ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } }
-                              : node.id === nodeId && !editingTextNode
-                                ? { ...node, type: CanvasNodeType.Text, title: prompt.slice(0, 32) || "Generated Text", metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
+                            : node.id === nodeId && !editingTextNode
+                                ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
                                 : node,
                     ),
                 );
@@ -3217,7 +3360,7 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [comfyui, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3235,6 +3378,7 @@ function ReactFlowCanvasPage() {
                           ...effectiveConfig,
                           model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
+                          resolution: savedImageMetadata.resolution || effectiveConfig.resolution,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           count: "1",
                       }
@@ -3331,7 +3475,7 @@ function ReactFlowCanvasPage() {
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
                 const generationMetadata = savedImageMetadata?.generationType
-                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, count: savedImageMetadata.count || 1, references: savedImageMetadata.references }
+                    ? { generationType: savedImageMetadata.generationType, model: generationConfig.model, size: generationConfig.size, quality: generationConfig.quality, resolution: generationConfig.resolution, count: savedImageMetadata.count || 1, references: savedImageMetadata.references }
                     : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
                 setNodes((prev) =>
                     prev.map((item) =>
@@ -3368,32 +3512,34 @@ function ReactFlowCanvasPage() {
             }
             const sourceNode = nodesRef.current.find((item) => item.id === node.id);
             if (!sourceNode) return;
-            const nodeSize = getNodeSpec(CanvasNodeType.Config);
-            const configNode = createCanvasNode(
-                CanvasNodeType.Config,
+            const nodeSize = getNodeSpec(CanvasNodeType.Image);
+            const generationNode = createCanvasNode(
+                CanvasNodeType.Image,
                 {
                     x: sourceNode.position.x + sourceNode.width + 96 + nodeSize.width / 2,
                     y: sourceNode.position.y + sourceNode.height / 2,
                 },
                 {
-                    prompt: "",
+                    prompt,
+                    composerContent: prompt,
+                    generationMode: "image",
                     model: effectiveConfig.imageModel || effectiveConfig.model,
                     size: effectiveConfig.size,
                     count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                 },
             );
-            const connection = { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: configNode.id };
-            const nextNodes = nodesRef.current.map((item) => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS } } : item)).concat(configNode);
+            const connection = createCanvasConnection(sourceNode.id, generationNode.id);
+            const nextNodes = nodesRef.current.map((item) => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS } } : item)).concat(generationNode);
             const nextConnections = [...connectionsRef.current, connection];
             nodesRef.current = nextNodes;
             connectionsRef.current = nextConnections;
             setNodes(nextNodes);
             setConnections(nextConnections);
-            setSelectedNodeIds(new Set([configNode.id]));
+            setSelectedNodeIds(new Set([generationNode.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(configNode.id);
+            setDialogNodeId(generationNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message],
+        [createCanvasConnection, createCanvasNode, effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message],
     );
 
     const insertAssistantImage = useCallback(
@@ -3402,32 +3548,25 @@ function ReactFlowCanvasPage() {
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const node: CanvasNodeData = {
-                id,
-                type: CanvasNodeType.Image,
-                title: image.prompt.slice(0, 32) || "Generated Image",
+                ...createCanvasNode(CanvasNodeType.Image, center, { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt }),
                 position: { x: center.x - config.width / 2, y: center.y - config.height / 2 },
                 width: config.width,
                 height: config.height,
-                metadata: { ...imageMetadata({ ...storedImage, width: meta.width, height: meta.height }), prompt: image.prompt },
             };
 
             setNodes((prev) => [...prev, node]);
-            setSelectedNodeIds(new Set([id]));
+            setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(id);
+            setDialogNodeId(node.id);
         },
-        [screenToCanvas, size.height, size.width],
+        [createCanvasNode, screenToCanvas, size.height, size.width],
     );
 
     const insertAssistantText = useCallback(
         (text: string) => {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            const node = {
-                ...createCanvasNode(CanvasNodeType.Text, center, { content: text, status: NODE_STATUS_SUCCESS }),
-                title: text.slice(0, 32) || "Assistant Text",
-            };
+            const node = createCanvasNode(CanvasNodeType.Text, center, { content: text, status: NODE_STATUS_SUCCESS });
 
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
@@ -3443,44 +3582,38 @@ function ReactFlowCanvasPage() {
             } else if (payload.kind === "video") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const node = {
+                    ...createCanvasNode(CanvasNodeType.Video, center, { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height }),
+                    position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 },
+                    width: nextSize.width,
+                    height: nextSize.height,
+                };
                 setNodes((prev) => [
                     ...prev,
-                    {
-                        id,
-                        type: CanvasNodeType.Video,
-                        title: payload.title,
-                        position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 },
-                        width: nextSize.width,
-                        height: nextSize.height,
-                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height },
-                    },
+                    node,
                 ]);
-                setSelectedNodeIds(new Set([id]));
+                setSelectedNodeIds(new Set([node.id]));
             } else if (payload.kind === "audio") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const node = {
+                    ...createCanvasNode(CanvasNodeType.Audio, center, { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs }),
+                    position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 },
+                    width: spec.width,
+                    height: spec.height,
+                };
                 setNodes((prev) => [
                     ...prev,
-                    {
-                        id,
-                        type: CanvasNodeType.Audio,
-                        title: payload.title,
-                        position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 },
-                        width: spec.width,
-                        height: spec.height,
-                        metadata: { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs },
-                    },
+                    node,
                 ]);
-                setSelectedNodeIds(new Set([id]));
+                setSelectedNodeIds(new Set([node.id]));
             } else {
                 insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
             }
             setAssetPickerOpen(false);
         },
-        [insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
+        [createCanvasNode, insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
     const openMaterialLibrary = useCallback((tab: "styles" | "effects" | "assets" = "styles") => {
@@ -3493,7 +3626,6 @@ function ReactFlowCanvasPage() {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const node = {
                 ...createCanvasNode(CanvasNodeType.Text, center, { content: preset.prompt, status: NODE_STATUS_SUCCESS, fontSize: 13, generationMode: "text", prompt: preset.prompt }),
-                title: preset.title,
                 width: 220,
                 height: 132,
             };
@@ -3529,12 +3661,11 @@ function ReactFlowCanvasPage() {
                         status: NODE_STATUS_SUCCESS,
                     },
                 ),
-                title: `${videoNode.title || "视频"} - ${frameLabel}`,
                 width: size.width,
                 height: size.height,
             } satisfies CanvasNodeData;
             setNodes((previous) => [...previous, frameNode]);
-            setConnections((previous) => [...previous, { id: nanoid(), fromNodeId: videoNode.id, toNodeId: frameNode.id }]);
+            setConnections((previous) => [...previous, createCanvasConnection(videoNode.id, frameNode.id)]);
             setSelectedNodeIds(new Set([frameNode.id]));
             setSelectedConnectionId(null);
             message.success(`${frameLabel}已插入画布`);
@@ -3542,7 +3673,7 @@ function ReactFlowCanvasPage() {
             message.error(error instanceof Error ? error.message : "视频截帧插入失败");
             throw error;
         }
-    }, []);
+    }, [createCanvasConnection, createCanvasNode, message]);
 
     const insertDirectorCaptures = useCallback(
         async (directorNodeId: string, captures: DirectorDeskCapture[]) => {
@@ -3552,22 +3683,19 @@ function ReactFlowCanvasPage() {
 
             try {
                 const gap = 44;
-                const createdNodes = await Promise.all(
-                    captures.map(async (capture, index) => {
-                        const image = await uploadImage(capture.dataUrl);
-                        const imageSize = fitNodeSize(image.width, image.height);
-                        const id = `director-shot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-                        return {
-                            id,
-                            type: CanvasNodeType.Image,
-                            title: capture.fileName.replace(/\.[^.]+$/, "") || `导演台截图 ${index + 1}`,
-                            position: {
-                                x: directorNode.position.x + directorNode.width + 120 + index * (imageSize.width + gap),
-                                y: directorNode.position.y + index * 34,
-                            },
-                            width: imageSize.width,
-                            height: imageSize.height,
-                            metadata: {
+                const createdNodes: CanvasNodeData[] = [];
+                for (const [index, capture] of captures.entries()) {
+                    const image = await uploadImage(capture.dataUrl);
+                    const imageSize = fitNodeSize(image.width, image.height);
+                    const position = {
+                        x: directorNode.position.x + directorNode.width + 120 + index * (imageSize.width + gap),
+                        y: directorNode.position.y + index * 34,
+                    };
+                    createdNodes.push({
+                        ...createCanvasNode(
+                            CanvasNodeType.Image,
+                            { x: position.x + imageSize.width / 2, y: position.y + imageSize.height / 2 },
+                            {
                                 ...imageMetadata(image),
                                 prompt: `来自 ${directorNode.title} 的 3D 机位截图`,
                                 generationMode: "image",
@@ -3575,9 +3703,12 @@ function ReactFlowCanvasPage() {
                                 freeResize: true,
                                 status: NODE_STATUS_SUCCESS,
                             },
-                        } satisfies CanvasNodeData;
-                    }),
-                );
+                        ),
+                        position,
+                        width: imageSize.width,
+                        height: imageSize.height,
+                    });
+                }
                 const outputIds = createdNodes.map((node) => node.id);
                 setNodes((previous) => [
                     ...previous.map((node) =>
@@ -3594,10 +3725,7 @@ function ReactFlowCanvasPage() {
                     ),
                     ...createdNodes,
                 ]);
-                setConnections((previous) => [
-                    ...previous,
-                    ...createdNodes.map((node) => ({ id: nanoid(), fromNodeId: directorNodeId, toNodeId: node.id })),
-                ]);
+                setConnections((previous) => [...previous, ...createdNodes.map((node) => createCanvasConnection(directorNodeId, node.id))]);
                 setSelectedNodeIds(new Set(outputIds));
                 setSelectedConnectionId(null);
                 message.success(`${createdNodes.length} 张导演台截图已插入画布`);
@@ -3606,7 +3734,7 @@ function ReactFlowCanvasPage() {
                 throw error;
             }
         },
-        [message],
+        [createCanvasConnection, createCanvasNode, message],
     );
 
     const createScriptStoryboard = useCallback(
@@ -3617,78 +3745,80 @@ function ReactFlowCanvasPage() {
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
             const startX = scriptNode.position.x + scriptNode.width + 96;
             const startY = scriptNode.position.y;
-            const outputIds: string[] = [];
             const beatNodes = beats.map((beat, index) => {
-                const id = `script-shot-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-                outputIds.push(id);
+                const position = { x: startX + index * (spec.width + gap), y: startY };
                 return {
-                    id,
-                    type: CanvasNodeType.Image,
-                    title: beat.title,
-                    position: { x: startX + index * (spec.width + gap), y: startY },
+                    ...createCanvasNode(
+                        CanvasNodeType.Image,
+                        { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                        {
+                            content: scriptStoryboardDataUrl(beat.title, index),
+                            status: NODE_STATUS_SUCCESS,
+                            prompt: beat.prompt,
+                            generationMode: "image",
+                            generationType: "generation",
+                        },
+                    ),
+                    position,
                     width: spec.width,
                     height: spec.height,
-                    metadata: {
-                        content: scriptStoryboardDataUrl(beat.title, index),
-                        status: NODE_STATUS_SUCCESS,
-                        prompt: beat.prompt,
-                        generationMode: "image",
-                        generationType: "generation",
-                    },
                 } satisfies CanvasNodeData;
             });
+            const outputIds = beatNodes.map((node) => node.id);
             setNodes((prev) => [
                 ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: beats, scriptOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)),
                 ...beatNodes,
             ]);
-            setConnections((prev) => [...prev, ...beatNodes.map((node) => ({ id: nanoid(), fromNodeId: scriptNode.id, toNodeId: node.id }))]);
+            setConnections((prev) => [...prev, ...beatNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
             message.success(`已拆出 ${beatNodes.length} 个分镜`);
         },
-        [message],
+        [createCanvasConnection, createCanvasNode, message],
     );
 
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
         const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-        const id = `script-audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 196 };
         const node: CanvasNodeData = {
-            id,
-            type: CanvasNodeType.Audio,
-            title: "脚本旁白",
-            position: { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 196 },
+            ...createCanvasNode(
+                CanvasNodeType.Audio,
+                { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                { status: NODE_STATUS_IDLE, prompt: `请把下面脚本生成自然、有情绪层次的旁白音频：\n${body}`, generationMode: "audio" },
+            ),
+            position,
             width: spec.width,
             height: spec.height,
-            metadata: { status: NODE_STATUS_IDLE, prompt: `请把下面脚本生成自然、有情绪层次的旁白音频：\n${body}`, generationMode: "audio" },
         };
         setNodes((prev) => [...prev.map((item) => (item.id === scriptNode.id ? { ...item, metadata: { ...item.metadata, content: body, scriptBody: body } } : item)), node]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: scriptNode.id, toNodeId: id }]);
-        setSelectedNodeIds(new Set([id]));
+        setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
+        setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(node.id);
+    }, [createCanvasConnection, createCanvasNode]);
 
     const createScriptVideoNode = useCallback((scriptNode: CanvasNodeData) => {
         const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
-        const id = `script-video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 320 };
         const node: CanvasNodeData = {
-            id,
-            type: CanvasNodeType.Video,
-            title: "脚本视频",
-            position: { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 320 },
+            ...createCanvasNode(
+                CanvasNodeType.Video,
+                { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                { status: NODE_STATUS_IDLE, prompt: `请根据下面脚本生成连贯短视频，保留关键情节、角色动作和镜头节奏：\n${body}`, generationMode: "video" },
+            ),
+            position,
             width: spec.width,
             height: spec.height,
-            metadata: { status: NODE_STATUS_IDLE, prompt: `请根据下面脚本生成连贯短视频，保留关键情节、角色动作和镜头节奏：\n${body}`, generationMode: "video" },
         };
         setNodes((prev) => [...prev.map((item) => (item.id === scriptNode.id ? { ...item, metadata: { ...item.metadata, content: body, scriptBody: body } } : item)), node]);
-        setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: scriptNode.id, toNodeId: id }]);
-        setSelectedNodeIds(new Set([id]));
+        setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
+        setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, []);
+        setDialogNodeId(node.id);
+    }, [createCanvasConnection, createCanvasNode]);
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
@@ -3702,7 +3832,7 @@ function ReactFlowCanvasPage() {
                     onCreateVideo={() => createScriptVideoNode(panelNode)}
                     onClose={() => setDialogNodeId(null)}
                 />
-            ) : panelNode.type === CanvasNodeType.Config ? (
+            ) : isGenerationConfigNode(panelNode.type) ? (
                 <CanvasConfigComposer
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
@@ -3833,27 +3963,27 @@ function ReactFlowCanvasPage() {
             try {
                 const image = await uploadImage(dataUrl);
                 const nextSize = fitNodeSize(image.width, image.height);
-                const nodeId = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const position = {
                     x: sourceNode.position.x + sourceNode.width + 80,
                     y: sourceNode.position.y + sourceNode.height / 2 - nextSize.height / 2,
                 };
                 const node: CanvasNodeData = {
-                    id: nodeId,
-                    type: CanvasNodeType.Image,
-                    title: `${sourceNode.title || "360场景"} 截图`,
+                    ...createCanvasNode(
+                        CanvasNodeType.Image,
+                        { x: position.x + nextSize.width / 2, y: position.y + nextSize.height / 2 },
+                        {
+                            ...imageMetadata(image),
+                            prompt: "360全景沉浸式预览截图",
+                            generationMode: "image",
+                            freeResize: true,
+                        },
+                    ),
                     position,
                     width: nextSize.width,
                     height: nextSize.height,
-                    metadata: {
-                        ...imageMetadata(image),
-                        prompt: "360全景沉浸式预览截图",
-                        generationMode: "image",
-                        freeResize: true,
-                    },
                 };
                 setNodes((prev) => [...prev, node]);
-                setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: sourceNode.id, toNodeId: node.id }]);
+                setConnections((prev) => [...prev, createCanvasConnection(sourceNode.id, node.id)]);
                 setSelectedNodeIds(new Set([node.id]));
                 setSelectedConnectionId(null);
                 setDialogNodeId(node.id);
@@ -3862,7 +3992,7 @@ function ReactFlowCanvasPage() {
                 message.error(error instanceof Error ? error.message : "截图插入失败");
             }
         },
-        [message],
+        [createCanvasConnection, createCanvasNode, message],
     );
     const openNodeComposer = useCallback(
         (node: CanvasNodeData) => {
@@ -3944,11 +4074,10 @@ function ReactFlowCanvasPage() {
                           model: effectiveConfig.audioModel || effectiveConfig.model,
                       },
             );
-            target.title = type === CanvasNodeType.Video ? "文生视频" : "文字生音乐";
             target.width = spec.width;
             target.height = spec.height;
             const nextNodes = [...nodesRef.current, target];
-            const nextConnections = [...connectionsRef.current, { id: nanoid(), fromNodeId: source.id, toNodeId: target.id }];
+            const nextConnections = [...connectionsRef.current, createCanvasConnection(source.id, target.id)];
             nodesRef.current = nextNodes;
             connectionsRef.current = nextConnections;
             setNodes(nextNodes);
@@ -3958,7 +4087,7 @@ function ReactFlowCanvasPage() {
             setDialogNodeId(target.id);
             setEditingNodeId(null);
         },
-        [effectiveConfig.audioModel, effectiveConfig.model, effectiveConfig.videoModel],
+        [createCanvasConnection, createCanvasNode, effectiveConfig.audioModel, effectiveConfig.model, effectiveConfig.videoModel],
     );
 
     const handleNodeAction = useCallback(
@@ -4029,9 +4158,29 @@ function ReactFlowCanvasPage() {
         return node?.metadata?.canvasTool === "director" ? null : node;
     }, [dialogNodeId, visibleNodeItems]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
-    const composerWidth = dialogNode ? Math.min(dialogNode.type === CanvasNodeType.Config ? 500 : 760, Math.max(dialogNode.type === CanvasNodeType.Config ? 420 : 520, composerShellWidth - 48)) : 0;
+    const composerWidth = dialogNode ? Math.min(isGenerationConfigNode(dialogNode.type) ? 500 : 760, Math.max(isGenerationConfigNode(dialogNode.type) ? 420 : 520, composerShellWidth - 48)) : 0;
     dialogNodeRef.current = dialogNode;
     composerWidthRef.current = composerWidth;
+    useLayoutEffect(() => {
+        const panel = composerPanelRef.current;
+        if (!panel || !dialogNode) return;
+        let frame = 0;
+        const measure = () => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(() => {
+                const nextHeight = Math.max(180, panel.scrollHeight);
+                composerHeightRef.current = nextHeight;
+                setComposerContentHeight((current) => (Math.abs(current - nextHeight) < 1 ? current : nextHeight));
+            });
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(panel);
+        return () => {
+            cancelAnimationFrame(frame);
+            observer.disconnect();
+        };
+    }, [composerWidth, dialogNode?.id]);
     const composerPosition = dialogNode
         ? (() => {
               const shellRect = canvasShellRef.current?.getBoundingClientRect();
@@ -4042,22 +4191,12 @@ function ReactFlowCanvasPage() {
               const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
               const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
               const rawLeft = nodeRect ? nodeRect.left - shellOffsetX + nodeRect.width / 2 : containerOffsetX + (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
-              const nodeTop = nodeRect ? nodeRect.top - shellOffsetY : containerOffsetY + dialogNode.position.y * viewport.k + viewport.y;
               const nodeBottom = nodeRect ? nodeRect.bottom - shellOffsetY : containerOffsetY + (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y;
-              const estimatedHeight = dialogNode.type === CanvasNodeType.Config ? 260 : 168;
-              const shellHeight = shellRect?.height || size.height || 900;
-              const dockSafeBottom = shellHeight - 104;
-              const rawTop = nodeBottom + estimatedHeight > dockSafeBottom && nodeTop > estimatedHeight + 24 ? nodeTop - estimatedHeight - 14 : nodeBottom;
-              const minTop = 24;
-              const maxTop = Math.max(minTop, dockSafeBottom - estimatedHeight);
-              const halfWidth = composerWidth / 2;
-              const minLeft = halfWidth + 24;
-              const shellWidth = shellRect?.width || size.width;
-              const maxLeft = Math.max(minLeft, shellWidth - halfWidth - 24);
-              return {
-                  left: clampNumber(rawLeft, minLeft, maxLeft),
-                  top: clampNumber(rawTop, minTop, maxTop),
-              };
+              return resolveComposerOverlayPosition({
+                  rawLeft,
+                  nodeBottom,
+                  composerHeight: composerContentHeight,
+              });
           })()
         : null;
 
@@ -4074,24 +4213,17 @@ function ReactFlowCanvasPage() {
         const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
         const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
         const rawLeft = containerOffsetX + (node.position.x + node.width / 2) * next.k + next.x;
-        const nodeTop = containerOffsetY + node.position.y * next.k + next.y;
         const nodeBottom = containerOffsetY + (node.position.y + node.height) * next.k + next.y;
-        const estimatedHeight = node.type === CanvasNodeType.Config ? 260 : 168;
-        const shellHeight = shellRect?.height || size.height || 900;
-        const dockSafeBottom = shellHeight - 104;
-        const rawTop = nodeBottom + estimatedHeight > dockSafeBottom && nodeTop > estimatedHeight + 24
-            ? nodeTop - estimatedHeight - 14
-            : nodeBottom;
-        const minTop = 24;
-        const maxTop = Math.max(minTop, dockSafeBottom - estimatedHeight);
-        const width = composerWidthRef.current;
-        const halfWidth = width / 2;
-        const minLeft = halfWidth + 24;
-        const shellWidth = shellRect?.width || size.width;
-        const maxLeft = Math.max(minLeft, shellWidth - halfWidth - 24);
+        const position = resolveComposerOverlayPosition({
+            rawLeft,
+            nodeBottom,
+            composerHeight: composerHeightRef.current,
+        });
 
-        overlay.style.left = `${clampNumber(rawLeft, minLeft, maxLeft) - halfWidth}px`;
-        overlay.style.top = `${clampNumber(rawTop, minTop, maxTop)}px`;
+        overlay.style.left = `${position.left - composerWidthRef.current / 2}px`;
+        overlay.style.top = `${position.top}px`;
+        const panel = composerPanelRef.current;
+        if (panel) panel.style.maxHeight = `${position.maxHeight}px`;
     }, [size.height, size.width]);
     if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
     if (canvasSessionExpired) return <CanvasExpiredShell onBack={() => navigate("/canvas")} />;
@@ -4153,7 +4285,8 @@ function ReactFlowCanvasPage() {
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={(event, canvasPos) => {
                         event.preventDefault();
-                        setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY });
+                        lastCanvasPositionRef.current = canvasPos;
+                        setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY, canvasPosition: canvasPos });
                     }}
                     onConnectStart={handleLeaferConnectStart}
                     onConnectEnd={handleLeaferConnectEnd}
@@ -4320,7 +4453,7 @@ function ReactFlowCanvasPage() {
                     <div
                         ref={composerOverlayRef}
                         data-canvas-no-zoom
-                        className="pointer-events-none absolute z-[70] pt-4"
+                        className="pointer-events-none absolute z-[70]"
                         style={{
                             left: composerPosition.left - composerWidth / 2,
                             top: composerPosition.top,
@@ -4328,11 +4461,13 @@ function ReactFlowCanvasPage() {
                         }}
                     >
                         <div
+                            ref={composerPanelRef}
                             data-canvas-composer
-                            className="creative-os-composer-scroll pointer-events-auto max-h-[60vh] overflow-y-auto"
+                            className="creative-os-composer-scroll pointer-events-auto overflow-y-auto"
                             style={{
                                 width: composerWidth,
                                 maxWidth: "calc(100vw - 48px)",
+                                maxHeight: composerPosition.maxHeight,
                             }}
                             onWheel={(event) => {
                                 const el = event.currentTarget;
@@ -4430,7 +4565,7 @@ function ReactFlowCanvasPage() {
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
                     onAddAudio={() => createNode(CanvasNodeType.Audio)}
                     onAddText={() => createNode(CanvasNodeType.Text)}
-                    onAddConfig={() => createNode(CanvasNodeType.Config)}
+                    onAddComfyUI={() => createNode(CanvasNodeType.ComfyUI)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
@@ -4485,23 +4620,23 @@ function ReactFlowCanvasPage() {
                             setContextMenu(null);
                         }}
                         onAddImage={() => {
-                            createNode(CanvasNodeType.Image);
+                            createNode(CanvasNodeType.Image, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
                         onAddVideo={() => {
-                            createNode(CanvasNodeType.Video);
+                            createNode(CanvasNodeType.Video, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
                         onAddAudio={() => {
-                            createNode(CanvasNodeType.Audio);
+                            createNode(CanvasNodeType.Audio, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
                         onAddText={() => {
-                            createNode(CanvasNodeType.Text);
+                            createNode(CanvasNodeType.Text, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
-                        onAddConfig={() => {
-                            createNode(CanvasNodeType.Config);
+                        onAddComfyUI={() => {
+                            createNode(CanvasNodeType.ComfyUI, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
                     />
@@ -4681,10 +4816,6 @@ function ScriptDeskPanel({
             </div>
         </div>
     );
-}
-
-function clampNumber(value: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, value));
 }
 
 function findCanvasNodeElement(root: HTMLElement | null, nodeId: string) {
@@ -5220,6 +5351,7 @@ function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: A
         model: config.model,
         size: config.size,
         quality: config.quality,
+        resolution: config.resolution,
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };
@@ -5465,6 +5597,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         ...config,
         model: selectedModel,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
+        resolution: node?.metadata?.resolution || config.resolution || defaultConfig.resolution,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
@@ -5507,7 +5640,7 @@ function findRetrySourceNode(nodeId: string, nodeById: Map<string, CanvasNodeDat
         if (visited.has(id)) continue;
         visited.add(id);
         const node = nodeById.get(id);
-        if (node?.type === CanvasNodeType.Config) return node;
+        if (isGenerationConfigNode(node?.type)) return node;
         incomingByNodeId.get(id)?.forEach((connection) => queue.push(connection.fromNodeId));
     }
     return null;

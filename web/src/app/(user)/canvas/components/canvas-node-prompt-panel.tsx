@@ -10,6 +10,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
+import { CanvasReferenceStrip } from "./canvas-reference-strip";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -187,6 +188,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <Maximize2 className="size-4" />
                 </button>
             </div>
+            <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
 
             {mode === "video" && (isVideoCapabilityPending || isVideoCapabilityUnavailable) ? (
                 <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs" style={{ borderColor: theme.ui.hairline, color: theme.node.muted }}>
@@ -308,6 +310,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         ...globalConfig,
         model: selectedModel,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
+        resolution: node.metadata?.resolution || globalConfig.resolution || defaultConfig.resolution,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
@@ -322,6 +325,15 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     };
 }
 
+const VIDEO_GENERATION_MODE_LABELS: Record<VideoGenerationMode, string> = {
+    "text-to-video": "文生视频",
+    "all-in-one-reference": "全能参考",
+    "image-to-video": "首帧图生视频",
+    "first-last-frame": "首尾帧图生视频",
+    "image-reference": "图片参考",
+    "multi-frame": "智能多帧",
+};
+
 const VIDEO_GENERATION_MODES: Record<VideoGenerationMode, { label: string; icon: ReactNode }> = {
     "text-to-video": { label: "文生视频", icon: <FileText className="size-3.5" /> },
     "all-in-one-reference": { label: "全能参考", icon: <BadgePlus className="size-3.5" /> },
@@ -332,7 +344,7 @@ const VIDEO_GENERATION_MODES: Record<VideoGenerationMode, { label: string; icon:
 };
 
 function VideoGenerationModeMenu({ open, value, modes, disabled, loading, theme, onOpenChange, onChange }: { open: boolean; value?: VideoGenerationMode; modes: VideoGenerationMode[]; disabled: boolean; loading: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenChange: (open: boolean) => void; onChange: (value: VideoGenerationMode) => void }) {
-    const items = modes.map((mode) => ({ value: mode, ...VIDEO_GENERATION_MODES[mode] }));
+    const items = modes.map((mode) => ({ value: mode, ...VIDEO_GENERATION_MODES[mode], label: VIDEO_GENERATION_MODE_LABELS[mode] }));
     const selected = items.find((item) => item.value === value) || items[0];
     return (
         <div className="relative shrink-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>

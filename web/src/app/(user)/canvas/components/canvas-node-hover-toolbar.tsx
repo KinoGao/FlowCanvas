@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -104,7 +104,7 @@ export function CanvasNodeHoverToolbar({
     const currentNode = node;
 
     const left = viewport.x + (currentNode.position.x + currentNode.width / 2) * viewport.k;
-    const top = viewport.y + currentNode.position.y * viewport.k - 14;
+    const top = viewport.y + currentNode.position.y * viewport.k - 30;
     const isImage = currentNode.type === CanvasNodeType.Image;
     const isVideo = currentNode.type === CanvasNodeType.Video;
     const isAudio = currentNode.type === CanvasNodeType.Audio;
@@ -114,6 +114,7 @@ export function CanvasNodeHoverToolbar({
     const hasAudio = isAudio && hasStoredMedia;
     const isText = currentNode.type === CanvasNodeType.Text;
     const isConfig = currentNode.type === CanvasNodeType.Config;
+    const isComfyUi = currentNode.type === CanvasNodeType.ComfyUI;
     const canOpenDialog = isText || hasImage || isVideo;
     const canRetry = currentNode.metadata?.status === "error";
     const quickImageToolIdSet = new Set(quickImageToolIds);
@@ -145,7 +146,8 @@ export function CanvasNodeHoverToolbar({
         ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "editText", title: "编辑文本", label: "编辑文字", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
-        ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
+        ...(isConfig ? [{ id: "config", title: "打开生成配置", label: "配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
+        ...(isComfyUi ? [{ id: "comfyui", title: "打开 ComfyUI", label: "ComfyUI", icon: <Workflow className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
         ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
         ...(isImage && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
@@ -257,7 +259,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                     {view === "info" ? (
                         <div className="thin-scrollbar h-full space-y-3 overflow-auto pr-1">
                             <InfoRow label="ID" value={node.id} />
-                            <InfoRow label="类型" value={node.type === CanvasNodeType.Text ? "文本" : node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : "生成配置"} />
+                            <InfoRow label="类型" value={node.type === CanvasNodeType.Text ? "文本" : node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : node.type === CanvasNodeType.Config ? "生成配置" : node.type === CanvasNodeType.ComfyUI ? "ComfyUI" : "节点"} />
                             <InfoRow label="尺寸" value={`${Math.round(node.width)} x ${Math.round(node.height)}`} />
                             <InfoRow label="位置" value={`${Math.round(node.position.x)}, ${Math.round(node.position.y)}`} />
                             <InfoRow label="状态" value={node.metadata?.status || "idle"} />

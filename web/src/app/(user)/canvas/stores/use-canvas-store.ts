@@ -2,7 +2,8 @@ import { nanoid } from "nanoid";
 import { create } from "zustand";
 
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
+import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
 
 export type CanvasProject = {
     id: string;
@@ -11,6 +12,8 @@ export type CanvasProject = {
     updatedAt: string;
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
+    nodeSequenceCounters: CanvasNodeSequenceCounters;
+    referenceOrderCounter: number;
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
@@ -18,7 +21,7 @@ export type CanvasProject = {
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -39,6 +42,8 @@ function emptyProjectDetail(): CanvasProjectDetail {
     return {
         nodes: [],
         connections: [],
+        nodeSequenceCounters: {},
+        referenceOrderCounter: 0,
         chatSessions: [],
         activeChatId: null,
         backgroundMode: "lines",
@@ -48,9 +53,19 @@ function emptyProjectDetail(): CanvasProjectDetail {
 }
 
 function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): CanvasProjectDetail {
+    const nodeIdentity = normalizeCanvasNodeIdentities(
+        Array.isArray(source.nodes) ? source.nodes : [],
+        source.nodeSequenceCounters,
+    );
+    const connectionOrder = normalizeCanvasConnectionOrders(
+        Array.isArray(source.connections) ? source.connections : [],
+        source.referenceOrderCounter,
+    );
     return {
-        nodes: Array.isArray(source.nodes) ? source.nodes : [],
-        connections: Array.isArray(source.connections) ? source.connections : [],
+        nodes: nodeIdentity.nodes,
+        connections: connectionOrder.connections,
+        nodeSequenceCounters: nodeIdentity.nodeSequenceCounters,
+        referenceOrderCounter: connectionOrder.referenceOrderCounter,
         chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",

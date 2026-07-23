@@ -1,5 +1,6 @@
 import type {
     ImageCapabilities,
+    AudioCapabilities,
     ModelCategory,
     PlatformComfyUi,
     PlatformConfigDocument,
@@ -47,6 +48,7 @@ export function defaultImageCapabilities(): ImageCapabilities {
         maxOutputs: 1,
         maxTotalImages: 0,
         sequentialImageGeneration: false,
+        interactiveEdit: false,
         watermark: false,
         documentationUrl: "",
         officialTemplate: "",
@@ -70,6 +72,10 @@ export function defaultVideoCapabilities(): VideoCapabilities {
     };
 }
 
+export function defaultAudioCapabilities(): AudioCapabilities {
+    return { modes: ["text-to-speech"], voices: ["alloy"], formats: ["mp3"], speeds: [1], instructions: true };
+}
+
 export function emptyModel(providerId: string, category: ModelCategory = "image", requestModel = ""): PlatformModel {
     return applyModelCategory({
         id: stableModelId([providerId, requestModel].filter(Boolean).join("-")),
@@ -87,6 +93,7 @@ export function emptyModel(providerId: string, category: ModelCategory = "image"
         textCapabilities: null,
         imageCapabilities: null,
         videoCapabilities: null,
+        audioCapabilities: null,
     }, category);
 }
 
@@ -97,6 +104,7 @@ export function applyModelCategory(model: PlatformModel, category: ModelCategory
         textCapabilities: category === "text" ? cloneText(model.textCapabilities || defaultTextCapabilities()) : null,
         imageCapabilities: category === "image" ? cloneImage(model.imageCapabilities || defaultImageCapabilities()) : null,
         videoCapabilities: category === "video" ? cloneVideo(model.videoCapabilities || defaultVideoCapabilities()) : null,
+        audioCapabilities: category === "audio" ? cloneAudio(model.audioCapabilities || defaultAudioCapabilities()) : null,
     };
 }
 
@@ -107,11 +115,12 @@ export function cloneModel(model: PlatformModel): PlatformModel {
         textCapabilities: model.textCapabilities ? cloneText(model.textCapabilities) : null,
         imageCapabilities: model.imageCapabilities ? cloneImage(model.imageCapabilities) : null,
         videoCapabilities: model.videoCapabilities ? cloneVideo(model.videoCapabilities) : null,
+        audioCapabilities: model.audioCapabilities ? cloneAudio(model.audioCapabilities) : null,
     };
 }
 
 export function normalizeModel(model: PlatformModel): PlatformModel {
-    const category: ModelCategory = ["text", "image", "video"].includes(model.category) ? model.category : "image";
+    const category: ModelCategory = ["text", "image", "video", "audio"].includes(model.category) ? model.category : "image";
     const normalized = applyModelCategory(cloneModel(model), category);
     const verificationStatus = ["unverified", "verified", "failed"].includes(normalized.verificationStatus) ? normalized.verificationStatus : "unverified";
     return {
@@ -137,6 +146,7 @@ export function normalizeModel(model: PlatformModel): PlatformModel {
             maxImages: Math.max(0, normalized.imageCapabilities.maxImages || 0),
             maxOutputs: Math.max(0, normalized.imageCapabilities.maxOutputs || 0),
             maxTotalImages: Math.max(0, normalized.imageCapabilities.maxTotalImages || 0),
+            interactiveEdit: Boolean(normalized.imageCapabilities.interactiveEdit),
             documentationUrl: normalized.imageCapabilities.documentationUrl.trim(),
             officialTemplate: normalized.imageCapabilities.officialTemplate.trim(),
         } : null,
@@ -151,6 +161,13 @@ export function normalizeModel(model: PlatformModel): PlatformModel {
             maxImages: Math.max(0, normalized.videoCapabilities.maxImages || 0),
             maxVideos: Math.max(0, normalized.videoCapabilities.maxVideos || 0),
             maxAudios: Math.max(0, normalized.videoCapabilities.maxAudios || 0),
+        } : null,
+        audioCapabilities: normalized.audioCapabilities ? {
+            ...normalized.audioCapabilities,
+            modes: normalized.audioCapabilities.modes.includes("text-to-speech") ? ["text-to-speech"] : [],
+            voices: cleanStrings(normalized.audioCapabilities.voices),
+            formats: cleanStrings(normalized.audioCapabilities.formats.map((value) => value.toLowerCase())),
+            speeds: cleanDecimals(normalized.audioCapabilities.speeds),
         } : null,
     };
 }
@@ -184,10 +201,18 @@ function cloneVideo(value: VideoCapabilities): VideoCapabilities {
     return { ...value, modes: [...value.modes], ratios: [...value.ratios], resolutions: [...value.resolutions], durations: [...value.durations], frameRates: [...(value.frameRates || [])], counts: [...value.counts] };
 }
 
+function cloneAudio(value: AudioCapabilities): AudioCapabilities {
+    return { ...value, modes: [...value.modes], voices: [...value.voices], formats: [...value.formats], speeds: [...value.speeds] };
+}
+
 function cleanStrings(values: readonly string[]) {
     return [...new Set((values || []).map((value) => value.trim()).filter(Boolean))];
 }
 
 function cleanNumbers(values: readonly number[]) {
     return [...new Set((values || []).map(Number).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b);
+}
+
+function cleanDecimals(values: readonly number[]) {
+    return [...new Set((values || []).map(Number).filter((value) => Number.isFinite(value) && value > 0 && value <= 4))].sort((a, b) => a - b);
 }

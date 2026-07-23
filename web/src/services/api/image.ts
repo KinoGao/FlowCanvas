@@ -112,17 +112,17 @@ type GeminiPayload = {
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 type RequestOptions = { signal?: AbortSignal };
 
-const QUALITY_BASE: Record<string, number> = {
-    low: 1024,
-    medium: 2048,
-    high: 2880,
-    standard: 1024,
-    hd: 2048,
+const RESOLUTION_BASE: Record<string, number> = {
+    "1k": 1024,
+    "2k": 2048,
+    "4k": 2880,
 };
-const QUALITY_ALIASES: Record<string, string> = {
-    "1k": "low",
-    "2k": "medium",
-    "4k": "high",
+const LEGACY_RESOLUTION_ALIASES: Record<string, string> = {
+    low: "1k",
+    standard: "2k",
+    medium: "2k",
+    hd: "2k",
+    high: "4k",
 };
 const DEFAULT_IMAGE_SHORT_SIDE = 1024;
 const IMAGE_SIZE_STEP = 16;
@@ -161,14 +161,29 @@ export function shouldUseB64JsonResponse(config: Pick<AiConfig, "imageResponseFo
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
-    const normalized = QUALITY_ALIASES[value] || value;
-    return QUALITY_BASE[normalized] ? normalized : undefined;
+    return ["low", "medium", "high", "standard", "hd"].includes(value) ? value : undefined;
 }
 
-/** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". */
-function resolveSize(quality: string | undefined, ratio: string): string {
+function normalizeResolution(resolution: string | undefined) {
+    const value = String(resolution || "").trim().toLowerCase();
+    const normalized = LEGACY_RESOLUTION_ALIASES[value] || value;
+    return RESOLUTION_BASE[normalized] ? normalized : undefined;
+}
+
+function requestQuality(quality: string | undefined, capability: ImageModelCapability | null) {
+    const normalized = normalizeQuality(quality || "");
+    if (!normalized || !capability?.qualities.length) return normalized;
+    const accepted = capability.qualities.map((item) => item.toLowerCase());
+    if (accepted.includes(normalized)) return normalized;
+    if (normalized === "medium" && accepted.includes("standard")) return "standard";
+    if (normalized === "standard" && accepted.includes("medium")) return "medium";
+    return normalized;
+}
+
+/** Map "resolution + ratio" to an explicit pixel dimension like "3840x2160". */
+function resolveSize(resolution: string | undefined, ratio: string): string {
     const parsedRatio = parseImageRatio(ratio);
-    const basePixels = quality ? QUALITY_BASE[quality] : undefined;
+    const basePixels = resolution ? RESOLUTION_BASE[resolution] : undefined;
     const isLandscape = parsedRatio.width >= parsedRatio.height;
     const longRatio = isLandscape ? parsedRatio.width / parsedRatio.height : parsedRatio.height / parsedRatio.width;
     let longSide: number;
@@ -178,7 +193,7 @@ function resolveSize(quality: string | undefined, ratio: string): string {
         const targetPixels = basePixels * basePixels;
         const longSideRaw = Math.sqrt(targetPixels * longRatio);
         longSide = Math.floor(longSideRaw / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
-        shortSide = Math.round(longSide / longRatio / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
+        shortSide = Math.floor(longSide / longRatio / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
     } else {
         shortSide = DEFAULT_IMAGE_SHORT_SIDE;
         longSide = Math.round((shortSide * longRatio) / IMAGE_SIZE_STEP) * IMAGE_SIZE_STEP;
@@ -215,7 +230,7 @@ function validateImageSize(width: number, height: number) {
     if (pixels < IMAGE_MIN_PIXELS || pixels > IMAGE_MAX_PIXELS) throw new Error("图像总像素需在 655360 到 8294400 之间，请调整尺寸");
 }
 
-function resolveRequestSize(quality: string | undefined, size: string) {
+function resolveRequestSize(resolution: string | undefined, size: string) {
     const value = size.trim();
     if (!value || value.toLowerCase() === "auto") return undefined;
     const dimensions = parseImageDimensions(value);
@@ -223,7 +238,7 @@ function resolveRequestSize(quality: string | undefined, size: string) {
         validateImageSize(dimensions.width, dimensions.height);
         return `${dimensions.width}x${dimensions.height}`;
     }
-    if (value.includes(":")) return resolveSize(quality, value);
+    if (value.includes(":")) return resolveSize(resolution, value);
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
 }
 
@@ -806,11 +821,12 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
+    const quality = requestQuality(config.quality, capability);
+    const resolution = normalizeResolution(config.resolution || config.quality);
     const seedream = isSeedreamImageModel(requestConfig.model);
     const seedreamError = seedream ? seedreamGenerationError(requestConfig.model) : "";
     if (seedreamError) throw new Error(seedreamError);
-    const requestSize = seedream ? resolveSeedreamSize(requestConfig.model, config.quality, config.size) : resolveRequestSize(quality, config.size);
+    const requestSize = seedream ? resolveSeedreamSize(requestConfig.model, resolution, config.size) : resolveRequestSize(resolution, config.size);
     if (isAgnesImageModel(requestConfig.model)) {
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, prompt), [], n, requestSize, options);
     }
@@ -853,7 +869,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         if (mask) throw new Error("当前 Seedream/SeedEdit 接入暂不支持蒙版编辑");
         const seedreamError = seedreamEditError(requestConfig.model, references.length);
         if (seedreamError) throw new Error(seedreamError);
-        return requestSeedreamImages(requestConfig, requestPrompt, references, n, config.quality, config.size, generationMode, capability, options);
+        return requestSeedreamImages(requestConfig, requestPrompt, references, n, config.resolution || config.quality, config.size, generationMode, capability, options);
     }
     if (requestConfig.apiFormat === "gemini") {
         if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
@@ -863,8 +879,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
+    const quality = requestQuality(config.quality, capability);
+    const resolution = normalizeResolution(config.resolution || config.quality);
+    const requestSize = resolveRequestSize(resolution, config.size);
     if (isAgnesImageModel(requestConfig.model)) {
         if (mask) throw new Error("Agnes 图像接口暂不支持蒙版编辑");
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, requestSize, options);
@@ -953,9 +970,9 @@ function readAgnesImageError(error: unknown, size: string | undefined) {
     return message;
 }
 
-async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, quality: string, size: string, mode: ImageGenerationMode, capability: ImageModelCapability | null, options?: RequestOptions) {
+async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, resolution: string, size: string, mode: ImageGenerationMode, capability: ImageModelCapability | null, options?: RequestOptions) {
     try {
-        const requestSize = resolveSeedreamSize(config.model, quality, size);
+        const requestSize = resolveSeedreamSize(config.model, normalizeResolution(resolution), size);
         const useB64Json = shouldUseB64JsonResponse(config, config.model);
         const imageUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
         const response = await axios.post<ImageApiResponse>(
@@ -1002,7 +1019,7 @@ function validateImageCapability(capability: ImageModelCapability | null, mode: 
 
 function imageOutputCountPayload(capability: ImageModelCapability | null, count: number) {
     if (!capability?.sequentialImageGeneration) return { n: count };
-    if (count <= 1) return {};
+    if (count <= 1) return { n: 1, sequential_image_generation: "disabled" };
     return {
         sequential_image_generation: "auto",
         sequential_image_generation_options: { max_images: count },
