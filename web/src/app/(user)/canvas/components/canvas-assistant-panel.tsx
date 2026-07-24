@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Bot, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Trash2, X } from "lucide-react";
+import { Bot, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
 import { Button, Modal, Segmented, Select, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 
@@ -11,6 +11,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
+import { getMediaBlob } from "@/services/file-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -943,7 +944,11 @@ function AssistantReferenceChip({ item, label, onRemove }: { item: CanvasAssista
     const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || "文";
     return (
         <div className="group/chip relative inline-flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
-            {item.dataUrl ? (
+            {item.type === CanvasNodeType.Video ? (
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg border" style={{ background: theme.node.panel, borderColor: theme.node.activeStroke }}>
+                    <Video className="size-4" />
+                </span>
+            ) : item.dataUrl ? (
                 <span className="relative block size-8 shrink-0">
                     <img src={item.dataUrl} alt="" className="size-8 rounded-lg object-cover" />
                     {label ? <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-medium leading-none text-white">{label}</span> : null}
@@ -1359,6 +1364,16 @@ function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null 
     if (node.type === CanvasNodeType.Text && node.metadata?.content) {
         return { id: node.id, type: node.type, title: node.title, text: node.metadata.content };
     }
+    if (node.type === CanvasNodeType.Video && (node.metadata?.content || node.metadata?.storageKey)) {
+        return {
+            id: node.id,
+            type: node.type,
+            title: node.title,
+            mediaUrl: node.metadata.content,
+            storageKey: node.metadata.storageKey,
+            mimeType: node.metadata.mimeType,
+        };
+    }
     return null;
 }
 
@@ -1373,6 +1388,7 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
 
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
+    const videoFrames = await Promise.all(refs.filter((item) => item.type === CanvasNodeType.Video).map(videoReferenceToFrames));
     return [
         { role: "system", content: ONLINE_AGENT_PROMPT },
         ...history
@@ -1383,11 +1399,96 @@ async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: Ca
             role: "user",
             content: [
                 ...refs.flatMap((item) => (item.text ? [{ type: "text" as const, text: `选中节点 ${item.title}：${item.text}` }] : [])),
+                ...videoFrames.flatMap(({ title, frames, error }) => [
+                    { type: "text" as const, text: error ? `视频节点 ${title} 无法读取：${error}` : `视频节点 ${title} 已按时间顺序抽取 ${frames.length} 帧，请结合这些画面理解视频内容。` },
+                    ...frames.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+                ]),
                 { type: "text", text: `当前画布：${JSON.stringify(compactSnapshot(snapshot))}\n\n用户需求：${userMessage.text}` },
                 ...(await Promise.all(refs.filter((item) => item.dataUrl).map(async (item) => ({ type: "image_url" as const, image_url: { url: await imageToDataUrl(item) } })))),
             ],
         },
     ];
+}
+
+async function videoReferenceToFrames(reference: CanvasAssistantReference) {
+    let objectUrl = "";
+    const video = document.createElement("video");
+    try {
+        const blob = reference.storageKey ? await getMediaBlob(reference.storageKey) : null;
+        objectUrl = blob ? URL.createObjectURL(blob) : "";
+        const source = objectUrl || reference.mediaUrl;
+        if (!source) throw new Error("视频文件已不可用");
+        video.preload = "auto";
+        video.muted = true;
+        video.playsInline = true;
+        video.src = source;
+        await waitForAssistantVideoEvent(video, "loadedmetadata");
+        if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) await waitForAssistantVideoEvent(video, "loadeddata");
+        const duration = Number.isFinite(video.duration) ? video.duration : 0;
+        const times = Array.from(new Set([Math.min(0.1, Math.max(0, duration - 0.01)), duration / 2, Math.max(0, duration - 0.05)].map((time) => Number(time.toFixed(3)))));
+        const frames: string[] = [];
+        for (const time of times) {
+            if (Math.abs(video.currentTime - time) > 0.001) {
+                const seeked = waitForAssistantVideoEvent(video, "seeked");
+                video.currentTime = time;
+                await seeked;
+            }
+            await waitForAssistantVideoFrame(video);
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            if (!width || !height) throw new Error("视频画面尚未解码");
+            const scale = Math.min(1, 960 / Math.max(width, height));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("无法创建视频帧画布");
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            frames.push(canvas.toDataURL("image/jpeg", 0.86));
+        }
+        return { title: reference.title, frames, error: "" };
+    } catch (error) {
+        return { title: reference.title, frames: [], error: error instanceof Error ? error.message : "视频读取失败" };
+    } finally {
+        video.removeAttribute("src");
+        video.load();
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
+}
+
+function waitForAssistantVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked") {
+    return new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+            video.removeEventListener(eventName, onSuccess);
+            video.removeEventListener("error", onError);
+        };
+        const onSuccess = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = () => {
+            cleanup();
+            reject(new Error("视频解码失败"));
+        };
+        video.addEventListener(eventName, onSuccess, { once: true });
+        video.addEventListener("error", onError, { once: true });
+    });
+}
+
+function waitForAssistantVideoFrame(video: HTMLVideoElement) {
+    return new Promise<void>((resolve) => {
+        let timeout = 0;
+        const finish = () => {
+            window.clearTimeout(timeout);
+            resolve();
+        };
+        timeout = window.setTimeout(finish, 800);
+        if ("requestVideoFrameCallback" in video) {
+            video.requestVideoFrameCallback(() => finish());
+            return;
+        }
+        window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
+    });
 }
 
 function compactSnapshot(snapshot: CanvasAgentSnapshot) {

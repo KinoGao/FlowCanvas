@@ -8,7 +8,8 @@ import { saveAs } from "file-saver";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
-import { uploadImage } from "@/services/image-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -157,10 +158,15 @@ export default function AssetsPage() {
         copyText(asset.data.content, "文本已复制");
     };
 
-    const downloadImage = (asset: Asset) => {
+    const downloadImage = async (asset: Asset) => {
         if (asset.kind !== "image" && asset.kind !== "video" && asset.kind !== "audio") return;
-        const url = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
-        saveAs(url, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || (asset.kind === "audio" ? "mp3" : "png")}`);
+        try {
+            const url = await resolveAssetUrl(asset);
+            if (!url) throw new Error("素材文件不可用");
+            saveAs(url, `${asset.title || "asset"}.${asset.data.mimeType.split("/")[1] || (asset.kind === "audio" ? "mp3" : "png")}`);
+        } catch {
+            message.error("素材文件不可用");
+        }
     };
 
     const exportAllAssets = async () => {
@@ -412,8 +418,8 @@ export default function AssetsPage() {
     );
 }
 
-function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void; onDelete: () => void }) {
-    const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
+function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { asset: Asset; onOpen: () => void; onEdit: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void | Promise<void>; onDelete: () => void }) {
+    const cover = useAssetPreviewUrl(asset);
     const summary = assetSummary(asset);
     return (
         <Card
@@ -422,7 +428,9 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
-                    {cover ? (
+                    {asset.kind === "video" && cover ? (
+                        <video src={cover} muted playsInline preload="metadata" className="aspect-[4/3] w-full bg-black object-cover" />
+                    ) : cover ? (
                         <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
                     ) : (
                         <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm leading-6 text-stone-600 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>
@@ -469,7 +477,7 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
                     </Button>
                 ) : null}
                 {asset.kind === "image" || asset.kind === "video" || asset.kind === "audio" ? (
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
+                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => void onDownload(asset)}>
                         下载
                     </Button>
                 ) : null}
@@ -481,8 +489,9 @@ function AssetCard({ asset, onOpen, onEdit, onCopy, onDownload, onDelete }: { as
     );
 }
 
-function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void }) {
-    const cover = asset ? asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "") : "";
+function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | null; onClose: () => void; onCopy: (asset: Asset) => void; onDownload: (asset: Asset) => void | Promise<void> }) {
+    const mediaUrl = useAssetPreviewUrl(asset);
+    const cover = asset?.kind === "image" ? mediaUrl : asset?.coverUrl || "";
     return (
         <Drawer title="素材详情" open={Boolean(asset)} size="large" onClose={onClose}>
             {asset ? (
@@ -510,10 +519,10 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                         {asset.kind === "text" ? (
                             <Typography.Paragraph className="mt-2 whitespace-pre-wrap">{asset.data.content}</Typography.Paragraph>
                         ) : asset.kind === "video" ? (
-                            <video src={asset.data.url} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
+                            <video src={mediaUrl} controls className="mt-2 aspect-video w-full rounded-lg bg-black" />
                         ) : asset.kind === "audio" ? (
                             <div className="mt-2 space-y-2">
-                                <audio src={asset.data.url} controls className="w-full" />
+                                <audio src={mediaUrl} controls className="w-full" />
                                 <Typography.Text className="block">
                                     {formatBytes(asset.data.bytes)} · {asset.data.mimeType}
                                 </Typography.Text>
@@ -537,7 +546,7 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
                             </Button>
                         ) : null}
                         {asset.kind === "image" || asset.kind === "video" || asset.kind === "audio" ? (
-                            <Button type="primary" icon={<Download className="size-4" />} onClick={() => onDownload(asset)}>
+                            <Button type="primary" icon={<Download className="size-4" />} onClick={() => void onDownload(asset)}>
                                 {asset.kind === "video" ? "下载视频" : asset.kind === "audio" ? "下载音频" : "下载图片"}
                             </Button>
                         ) : null}
@@ -546,6 +555,36 @@ function AssetDrawer({ asset, onClose, onCopy, onDownload }: { asset: Asset | nu
             ) : null}
         </Drawer>
     );
+}
+
+function useAssetPreviewUrl(asset: Asset | null) {
+    const kind = asset?.kind;
+    const storageKey = asset && asset.kind !== "text" ? asset.data.storageKey : undefined;
+    const fallback = asset ? asset.kind === "image" ? asset.data.dataUrl || asset.coverUrl : asset.kind === "text" ? asset.coverUrl : asset.data.url || asset.coverUrl : "";
+    const [url, setUrl] = useState(fallback);
+
+    useEffect(() => {
+        let cancelled = false;
+        setUrl(fallback);
+        if (!asset || !storageKey || kind === "text") return;
+        const resolve = kind === "image" ? resolveImageUrl : resolveMediaUrl;
+        void resolve(storageKey, fallback)
+            .then((nextUrl) => {
+                if (!cancelled && nextUrl) setUrl(nextUrl);
+            })
+            .catch(() => {
+                if (!cancelled) setUrl(fallback);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [asset, fallback, kind, storageKey]);
+
+    return url;
+}
+
+function resolveAssetUrl(asset: Exclude<Asset, { kind: "text" }>) {
+    return asset.kind === "image" ? resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl) : resolveMediaUrl(asset.data.storageKey, asset.data.url || asset.coverUrl);
 }
 
 function assetSummary(asset: Asset) {

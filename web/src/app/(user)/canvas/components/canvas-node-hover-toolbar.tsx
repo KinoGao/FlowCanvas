@@ -191,7 +191,7 @@ export function CanvasNodeHoverToolbar({
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
             >
-                <span className="pointer-events-auto absolute inset-x-0 top-full h-4" aria-hidden />
+                <span className="pointer-events-auto absolute inset-x-0 top-full h-8" aria-hidden />
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}

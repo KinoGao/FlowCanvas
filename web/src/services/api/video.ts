@@ -51,6 +51,8 @@ type RequestOptions = { signal?: AbortSignal; generationMode?: VideoGenerationMo
 
 /** 视频创建任务请求超时（毫秒） */
 const VIDEO_CREATE_TIMEOUT_MS = 60_000;
+/** Agnes 会在创建时拉取公网参考图，响应可能明显慢于其他视频接口。 */
+const AGNES_VIDEO_CREATE_TIMEOUT_MS = 180_000;
 /** 视频轮询单次请求超时（毫秒） */
 const VIDEO_POLL_TIMEOUT_MS = 30_000;
 
@@ -397,12 +399,16 @@ async function createAgnesVideoTask(
 
     const token = useUserStore.getState().token.trim();
     if (!token) throw new Error("本地参考图需要先登录后端账号，才能上传为 Agnes 可访问的公网图片");
+    let publicUrls: string[];
     try {
-        const publicUrls = await uploadReferencesToBackend(references, token, options?.signal);
+        publicUrls = await uploadReferencesToBackend(references, token, options?.signal);
+    } catch (error) {
+        throw new Error(`参考图上传至账号后端失败。请检查 backend-config.yml 中的后端公网访问地址和媒体路由是否可用。详细：${readAxiosError(error, "参考图上传失败")}`);
+    }
+    try {
         return await sendAgnesCreateRequest(config, model, prompt, publicUrls, generationMode, capability, options);
     } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new Error(`参考图无法通过账号后端提供给 Agnes。请检查 backend-config.yml 中的后端公网访问地址和媒体路由是否可用。详细：${detail}`);
+        throw new Error(readAxiosError(error, "Agnes 视频任务创建失败"));
     }
 }
 
@@ -429,7 +435,7 @@ async function sendAgnesCreateRequest(
     };
     if (urls.length) body.input_reference = urls;
 
-    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data;
+    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: AGNES_VIDEO_CREATE_TIMEOUT_MS })).data;
     if (created.error?.message) throw new Error(created.error.message);
     const taskId = created.video_id || created.task_id || created.id;
     if (!taskId) throw new Error("Agnes 视频接口没有返回任务 ID");

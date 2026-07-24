@@ -10,7 +10,8 @@ import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
-import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask, type VideoGenerationTask } from "@/services/api/video";
+import { pushBackendProjects } from "@/services/api/backend-storage";
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -60,6 +61,7 @@ import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
     type CanvasAssistantImage,
+    type CanvasAssistantReference,
     type CanvasAssistantSession,
     type CanvasConnection,
     type CanvasImageGenerationType,
@@ -709,6 +711,63 @@ function ReactFlowCanvasPage() {
         if (request?.controller === controller) generationRequestsRef.current.delete(targetNodeId);
     }, []);
 
+    const finishCanvasVideoTask = useCallback(
+        async (nodeId: string, generationConfig: AiConfig, task: VideoGenerationTask, startedAt: number, controller: AbortController) => {
+            try {
+                const video = await storeGeneratedVideo(
+                    await waitForVideoGenerationTask(generationConfig, task, {
+                        signal: controller.signal,
+                        generationMode: nodesRef.current.find((node) => node.id === nodeId)?.metadata?.videoGenerationMode,
+                        startedAt,
+                    }),
+                );
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        if (node.id !== nodeId) return node;
+                        const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                        return {
+                            ...node,
+                            width: videoSize.width,
+                            height: videoSize.height,
+                            position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
+                            metadata: { ...node.metadata, ...videoMetadata(video), videoTask: undefined, videoTaskStartedAt: undefined, errorDetails: undefined },
+                        };
+                    }),
+                );
+            } catch (error) {
+                if (isGenerationCanceled(error)) return;
+                const errorDetails = error instanceof Error ? error.message : "视频生成失败";
+                setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, videoTask: undefined, videoTaskStartedAt: undefined } } : node)));
+                message.error(errorDetails);
+            } finally {
+                finishGenerationRequest(nodeId, controller);
+            }
+        },
+        [finishGenerationRequest, message],
+    );
+
+    const saveCanvasVideoTask = useCallback(
+        async (nodeId: string, task: VideoGenerationTask, startedAt: number) => {
+            await new Promise<void>((resolve) => {
+                setNodes((prev) => {
+                    const next = prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, videoTask: task, videoTaskStartedAt: startedAt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node));
+                    updateProject(projectId, { nodes: next });
+                    resolve();
+                    return next;
+                });
+            });
+            if (saveMode === "backend" && token) {
+                try {
+                    const latest = useCanvasStore.getState();
+                    await pushBackendProjects(token, latest.projects, latest.projectTombstones);
+                } catch (error) {
+                    console.warn("[canvas-video] pending task save will retry through workspace sync", error);
+                }
+            }
+        },
+        [projectId, saveMode, token, updateProject],
+    );
+
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         const affectedNodeIds = new Set<string>();
         generationRequestsRef.current.forEach((request) => {
@@ -720,7 +779,13 @@ function ReactFlowCanvasPage() {
         });
         setRunningNodeId((current) => (current === runningId ? null : current));
         if (!affectedNodeIds.size) return;
-        setNodes((prev) => prev.map((node) => (affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
+        setNodes((prev) =>
+            prev.map((node) =>
+                affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING
+                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined, ...(node.type === CanvasNodeType.Video ? { videoTask: undefined, videoTaskStartedAt: undefined } : null) } }
+                    : node,
+            ),
+        );
     }, []);
 
     const confirmStopGeneration = useCallback(
@@ -844,6 +909,18 @@ function ReactFlowCanvasPage() {
         };
     }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
 
+    useEffect(() => {
+        if (!projectLoaded) return;
+        nodes.forEach((node) => {
+            const task = node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING ? node.metadata.videoTask : undefined;
+            const startedAt = node.metadata?.videoTaskStartedAt;
+            if (!task || !startedAt || generationRequestsRef.current.has(node.id)) return;
+            const controller = startGenerationRequest(node.id, node.id, node.id);
+            setRunningNodeId(node.id);
+            void finishCanvasVideoTask(node.id, buildGenerationConfig(effectiveConfig, node, "video"), task, startedAt, controller).finally(() => setRunningNodeId((current) => (current === node.id ? null : current)));
+        });
+    }, [effectiveConfig, finishCanvasVideoTask, nodes, projectLoaded, startGenerationRequest]);
+
     useEffect(
         () => () => {
             if (agentCloseTimerRef.current) clearTimeout(agentCloseTimerRef.current);
@@ -858,6 +935,12 @@ function ReactFlowCanvasPage() {
             projectSaveTimerRef.current = null;
             updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, showImageInfo });
         }, 300);
+        return () => {
+            if (projectSaveTimerRef.current) {
+                clearTimeout(projectSaveTimerRef.current);
+                projectSaveTimerRef.current = null;
+            }
+        };
     }, [activeChatId, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, updateProject]);
 
     useEffect(() => {
@@ -2153,7 +2236,7 @@ function ReactFlowCanvasPage() {
                 changed = true;
                 return { ...node, width, height, position: nextPosition };
             });
-            return changed ? next : prev;
+            return changed ? reconcileGroupMembership(next) : prev;
         });
     }, []);
 
@@ -3171,7 +3254,7 @@ function ReactFlowCanvasPage() {
                     const videoPosition = isEmptyVideoNode && sourceNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y };
                     const videoWidth = isEmptyVideoNode && sourceNode ? sourceNode.width : spec.width;
                     const videoHeight = isEmptyVideoNode && sourceNode ? sourceNode.height : spec.height;
-                    const videoMetadata = {
+                    const pendingVideoMeta = {
                         prompt: rawPrompt,
                         requestPrompt: effectivePrompt,
                         status: NODE_STATUS_LOADING,
@@ -3188,9 +3271,9 @@ function ReactFlowCanvasPage() {
                     };
                     const videoNode: CanvasNodeData =
                         isEmptyVideoNode && sourceNode
-                            ? { ...sourceNode, type: CanvasNodeType.Video, position: videoPosition, width: videoWidth, height: videoHeight, metadata: { ...sourceNode.metadata, ...videoMetadata } }
+                            ? { ...sourceNode, type: CanvasNodeType.Video, position: videoPosition, width: videoWidth, height: videoHeight, metadata: { ...sourceNode.metadata, ...pendingVideoMeta } }
                             : {
-                                  ...createCanvasNode(CanvasNodeType.Video, { x: videoPosition.x + videoWidth / 2, y: videoPosition.y + videoHeight / 2 }, videoMetadata),
+                                  ...createCanvasNode(CanvasNodeType.Video, { x: videoPosition.x + videoWidth / 2, y: videoPosition.y + videoHeight / 2 }, pendingVideoMeta),
                                   position: videoPosition,
                                   width: videoWidth,
                                   height: videoHeight,
@@ -3204,44 +3287,13 @@ function ReactFlowCanvasPage() {
                     );
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, createCanvasConnection(nodeId, videoId)]);
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
-                    try {
-                        const video = await storeGeneratedVideo(
-                            await requestVideoGeneration(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
-                                signal: controller.signal,
-                                generationMode: sourceNode?.metadata?.videoGenerationMode,
-                            }),
-                        );
-                        const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) =>
-                            prev.map((node) =>
-                                node.id === videoId
-                                    ? {
-                                          ...node,
-                                          width: videoSize.width,
-                                          height: videoSize.height,
-                                          position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
-                                          metadata: {
-                                              ...node.metadata,
-                                              ...videoMetadata(video),
-                                              prompt: rawPrompt,
-                                              requestPrompt: effectivePrompt,
-                                              model: generationConfig.model,
-                                              size: generationConfig.size,
-                                              seconds: generationConfig.videoSeconds,
-                                              vquality: generationConfig.vquality,
-                                              generateAudio: generationConfig.videoGenerateAudio,
-                                              watermark: generationConfig.videoWatermark,
-                                              draft: generationConfig.videoDraft,
-                                              videoGenerationMode: sourceNode?.metadata?.videoGenerationMode,
-                                              references: generationReferenceUrls(generationContext),
-                                          },
-                                      }
-                                    : node,
-                            ),
-                        );
-                    } finally {
-                        finishGenerationRequest(videoId, controller);
-                    }
+                    const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
+                        signal: controller.signal,
+                        generationMode: sourceNode?.metadata?.videoGenerationMode,
+                    });
+                    const startedAt = Date.now();
+                    await saveCanvasVideoTask(videoId, task, startedAt);
+                    await finishCanvasVideoTask(videoId, generationConfig, task, startedAt, controller);
                     return;
                 }
 
@@ -3252,12 +3304,12 @@ function ReactFlowCanvasPage() {
                     const audioPosition = isEmptyAudioNode && sourceNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 };
                     const audioWidth = isEmptyAudioNode && sourceNode ? sourceNode.width : spec.width;
                     const audioHeight = isEmptyAudioNode && sourceNode ? sourceNode.height : spec.height;
-                    const audioMetadata = { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig), errorDetails: undefined };
+                    const pendingAudioMeta = { prompt: rawPrompt, requestPrompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig), errorDetails: undefined };
                     const audioNode: CanvasNodeData =
                         isEmptyAudioNode && sourceNode
-                            ? { ...sourceNode, type: CanvasNodeType.Audio, position: audioPosition, width: audioWidth, height: audioHeight, metadata: { ...sourceNode.metadata, ...audioMetadata } }
+                            ? { ...sourceNode, type: CanvasNodeType.Audio, position: audioPosition, width: audioWidth, height: audioHeight, metadata: { ...sourceNode.metadata, ...pendingAudioMeta } }
                             : {
-                                  ...createCanvasNode(CanvasNodeType.Audio, { x: audioPosition.x + audioWidth / 2, y: audioPosition.y + audioHeight / 2 }, audioMetadata),
+                                  ...createCanvasNode(CanvasNodeType.Audio, { x: audioPosition.x + audioWidth / 2, y: audioPosition.y + audioHeight / 2 }, pendingAudioMeta),
                                   position: audioPosition,
                                   width: audioWidth,
                                   height: audioHeight,
@@ -3360,7 +3412,7 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasVideoTask, startGenerationRequest],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -3428,38 +3480,10 @@ function ReactFlowCanvasPage() {
                 }
                 if (node.type === CanvasNodeType.Video) {
                     const videoGenerationMode = node.metadata?.videoGenerationMode ?? sourceNode.metadata?.videoGenerationMode;
-                    const video = await storeGeneratedVideo(
-                        await requestVideoGeneration(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], {
-                            signal: controller.signal,
-                            generationMode: videoGenerationMode,
-                        }),
-                    );
-                    const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) =>
-                        prev.map((item) =>
-                            item.id === node.id
-                                ? {
-                                      ...item,
-                                      width: videoSize.width,
-                                      height: videoSize.height,
-                                      position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 },
-                                      metadata: {
-                                          ...item.metadata,
-                                          ...videoMetadata(video),
-                                          prompt,
-                                          model: generationConfig.model,
-                                          size: generationConfig.size,
-                                          seconds: generationConfig.videoSeconds,
-                                          vquality: generationConfig.vquality,
-                                          generateAudio: generationConfig.videoGenerateAudio,
-                                          watermark: generationConfig.videoWatermark,
-                                          draft: generationConfig.videoDraft,
-                                          videoGenerationMode,
-                                      },
-                                  }
-                                : item,
-                        ),
-                    );
+                    const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal, generationMode: videoGenerationMode });
+                    const startedAt = Date.now();
+                    await saveCanvasVideoTask(node.id, task, startedAt);
+                    await finishCanvasVideoTask(node.id, generationConfig, task, startedAt, controller);
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
@@ -3500,7 +3524,7 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [connectionAdjacency, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [connectionAdjacency, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasVideoTask, startGenerationRequest],
     );
 
     const generateImageFromTextNode = useCallback(
@@ -3544,7 +3568,9 @@ function ReactFlowCanvasPage() {
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
-            const storedImage = image.storageKey ? { url: image.dataUrl, storageKey: image.storageKey, width: 1, height: 1, bytes: 0, mimeType: "image/png" } : await uploadImage(image.dataUrl);
+            const storedImage = image.storageKey
+                ? { url: image.dataUrl, storageKey: image.storageKey, width: image.width || 1, height: image.height || 1, bytes: image.bytes || 0, mimeType: image.mimeType || "image/png" }
+                : await uploadImage(image.dataUrl);
             const meta = storedImage.width === 1 && storedImage.height === 1 ? await readImageMeta(storedImage.url) : storedImage;
             const config = fitNodeSize(meta.width, meta.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -3609,7 +3635,16 @@ function ReactFlowCanvasPage() {
                 ]);
                 setSelectedNodeIds(new Set([node.id]));
             } else {
-                insertAssistantImage({ id: `asset-${Date.now()}`, prompt: payload.title, dataUrl: payload.dataUrl, storageKey: payload.storageKey });
+                insertAssistantImage({
+                    id: `asset-${Date.now()}`,
+                    prompt: payload.title,
+                    dataUrl: payload.dataUrl,
+                    storageKey: payload.storageKey,
+                    width: payload.width,
+                    height: payload.height,
+                    bytes: payload.bytes,
+                    mimeType: payload.mimeType,
+                });
             }
             setAssetPickerOpen(false);
         },
@@ -5522,7 +5557,11 @@ async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
 }
 
 async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
-    const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
+    const hydrateItem = async (item: CanvasAssistantReference) => {
+        if (item.type === CanvasNodeType.Video) {
+            if (!item.storageKey) return item;
+            return { ...item, mediaUrl: await resolveMediaUrl(item.storageKey, item.mediaUrl || "") };
+        }
         if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {
             const image = await uploadImage(item.dataUrl);
@@ -5625,7 +5664,11 @@ function mergeActiveGenerationNodes(restoredNodes: CanvasNodeData[], liveNodes: 
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
+    return nodes.map((node) =>
+        node.metadata?.status === "loading" && !(node.type === CanvasNodeType.Video && node.metadata.videoTask && node.metadata.videoTaskStartedAt)
+            ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } }
+            : node,
+    );
 }
 
 function isGenerationCanceled(error: unknown) {

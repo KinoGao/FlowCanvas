@@ -5,11 +5,13 @@ import { Empty, Input, Modal, Pagination, Tag } from "antd";
 import { Music2, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string }
     | { kind: "video"; url: string; title: string; storageKey?: string; width?: number; height?: number }
     | { kind: "audio"; url: string; title: string; storageKey?: string; mimeType?: string; durationMs?: number };
 
@@ -37,7 +39,9 @@ const kindOptions = [
     { label: "音频", value: "audio" },
 ];
 
-function PickerCard({ title, kind, cover, onClick }: { title: string; kind: string; cover: string; onClick: () => void }) {
+function PickerCard({ asset, onClick }: { asset: Asset; onClick: () => void }) {
+    const cover = useAssetCover(asset);
+    const { title, kind } = asset;
     return (
         <button
             type="button"
@@ -49,6 +53,8 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
                     <Music2 className="size-6" />
                     <span className="line-clamp-2">{title}</span>
                 </div>
+            ) : kind === "video" && cover ? (
+                <video src={cover} className="aspect-[4/3] w-full object-cover" muted preload="metadata" />
             ) : cover ? (
                 <img src={cover} alt={title} className="aspect-[4/3] w-full object-cover" />
             ) : (
@@ -63,6 +69,34 @@ function PickerCard({ title, kind, cover, onClick }: { title: string; kind: stri
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">插入</div>
         </button>
     );
+}
+
+function useAssetCover(asset: Asset) {
+    const visualKind = asset.kind === "image" ? "image" : asset.kind === "video" ? "video" : null;
+    const storageKey = asset.kind === "image" || asset.kind === "video" ? asset.data.storageKey : undefined;
+    const fallback = asset.kind === "image" ? asset.coverUrl || asset.data.dataUrl : asset.kind === "video" ? asset.coverUrl || asset.data.url : "";
+    const safeFallback = fallback.startsWith("blob:") ? "" : fallback;
+    const cached = visualKind === "image" ? peekCachedImageUrl(storageKey) : visualKind === "video" ? peekCachedMediaUrl(storageKey) : undefined;
+    const [cover, setCover] = useState(() => cached || safeFallback);
+
+    useEffect(() => {
+        let cancelled = false;
+        setCover(cached || safeFallback);
+        if (!visualKind || !storageKey) return;
+        const resolve = visualKind === "image" ? resolveImageUrl : resolveMediaUrl;
+        void resolve(storageKey, "")
+            .then((url) => {
+                if (!cancelled && url) setCover(url);
+            })
+            .catch(() => {
+                if (!cancelled) setCover(safeFallback);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [cached, safeFallback, storageKey, visualKind]);
+
+    return cover;
 }
 
 function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => void }) {
@@ -95,7 +129,16 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
             onInsert(
                 asset.kind === "video"
                     ? { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, width: asset.data.width, height: asset.data.height }
-                    : { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title },
+                    : {
+                          kind: "image",
+                          dataUrl: asset.data.dataUrl,
+                          storageKey: asset.data.storageKey,
+                          title: asset.title,
+                          width: asset.data.width,
+                          height: asset.data.height,
+                          bytes: asset.data.bytes,
+                          mimeType: asset.data.mimeType,
+                      },
             );
         }
     };
@@ -135,7 +178,7 @@ function MyAssetsTab({ onInsert }: { onInsert: (payload: InsertAssetPayload) => 
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
-                        <PickerCard key={asset.id} title={asset.title} kind={asset.kind} cover={asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "")} onClick={() => handleInsert(asset)} />
+                        <PickerCard key={asset.id} asset={asset} onClick={() => handleInsert(asset)} />
                     ))}
                 </div>
             ) : (

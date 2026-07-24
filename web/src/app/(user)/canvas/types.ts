@@ -72,6 +72,8 @@ export type CanvasGenerationMetadata = {
     watermark?: string;
     draft?: string;
     videoGenerationMode?: VideoGenerationMode;
+    videoTask?: { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
+    videoTaskStartedAt?: number;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;
@@ -129,7 +131,9 @@ export type CanvasAssistantReference = {
     type: CanvasNodeType;
     title: string;
     dataUrl?: string;
+    mediaUrl?: string;
     storageKey?: string;
+    mimeType?: string;
     text?: string;
 };
 
@@ -138,6 +142,10 @@ export type CanvasAssistantImage = {
     dataUrl: string;
     storageKey?: string;
     prompt: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    mimeType?: string;
 };
 
 export type CanvasAssistantMessage = {

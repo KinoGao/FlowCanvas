@@ -357,6 +357,7 @@ export function LeaferCanvas({
         const isNode = !!target.closest("[data-node-id]");
         const isHandle = !!target.closest("[data-handle]");
         const isEdge = !!target.closest("[data-connection-id]");
+        const isTextEditableContent = !!target.closest("[data-node-text-editable]");
         const cb = callbacksRef.current;
 
         const shouldPanFromPointer = event.button === 1 || (event.button === 0 && isSpacePressedRef.current);
@@ -407,6 +408,9 @@ export function LeaferCanvas({
                         metaKey: event.metaKey || trackedModifiers.metaKey,
                     }) ?? true;
                     if (!shouldStartDrag) return;
+                    // Preserve native click/double-click behavior for text content.
+                    // The node remains draggable from its title or frame.
+                    if (isTextEditableContent) return;
                     dragRef.current = {
                         type: "node", nodeId,
                         startScreenX: event.clientX, startScreenY: event.clientY,

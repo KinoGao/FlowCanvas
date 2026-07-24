@@ -3,8 +3,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
-import * as THREE from "three";
-
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { cn } from "@/lib/utils";
@@ -12,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { imageToDataUrl, peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
 import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
@@ -278,6 +276,11 @@ export const CanvasNode = React.memo(function CanvasNode({
         return () => window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
     }, [isEditingContent]);
 
+    // Stable refs so resize callbacks never need to be removed/re-added when
+    // data.type or positioned changes mid-drag.
+    const handleResizeMoveRef = useRef<((event: PointerEvent) => void) | null>(null);
+    const handleResizeUpRef = useRef<(() => void) | null>(null);
+
     const handleResizeMove = useCallback(
         (event: PointerEvent) => {
             if (!resizeRef.current.isResizing) return;
@@ -286,10 +289,11 @@ export const CanvasNode = React.memo(function CanvasNode({
             const dx = (event.clientX - resizeRef.current.startX) / scale;
             const dy = (event.clientY - resizeRef.current.startY) / scale;
             const isMediaNode = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video;
-            const minWidth = data.type === CanvasNodeType.Image ? 120 : data.type === CanvasNodeType.Video ? 160 : 220;
-            const minHeight = data.type === CanvasNodeType.Image ? 96 : data.type === CanvasNodeType.Video ? 96 : 160;
-            const maxWidth = isMediaNode ? 640 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 720 : 520;
-            const maxHeight = data.type === CanvasNodeType.Image ? 640 : data.type === CanvasNodeType.Video ? 480 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 640 : 480;
+            const isGroup = data.type === CanvasNodeType.Group;
+            const minWidth = data.type === CanvasNodeType.Image ? 120 : data.type === CanvasNodeType.Video ? 160 : isGroup ? 180 : 220;
+            const minHeight = data.type === CanvasNodeType.Image ? 96 : data.type === CanvasNodeType.Video ? 96 : isGroup ? 120 : 160;
+            const maxWidth = isGroup ? 4000 : isMediaNode ? 640 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 720 : 520;
+            const maxHeight = isGroup ? 3000 : data.type === CanvasNodeType.Image ? 640 : data.type === CanvasNodeType.Video ? 480 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 640 : 480;
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
             const startBottom = resizeRef.current.startTop + resizeRef.current.startHeight;
             const fromLeft = resizeRef.current.corner.includes("left");
@@ -337,6 +341,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         },
         [data.metadata?.freeResize, data.type, positioned, scaleRef],
     );
+    handleResizeMoveRef.current = handleResizeMove;
 
     const handleResizeUp = useCallback(() => {
         if (!resizeRef.current.isResizing) return;
@@ -348,11 +353,16 @@ export const CanvasNode = React.memo(function CanvasNode({
         onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        window.removeEventListener("pointermove", handleResizeMove);
-        window.removeEventListener("pointerup", handleResizeUp);
-        window.removeEventListener("pointercancel", handleResizeUp);
-        window.removeEventListener("blur", handleResizeUp);
-    }, [data.id, handleResizeMove, onResize]);
+        // Remove the same stable wrappers that were registered in handleResizeMouseDown.
+        const r = resizeRef.current as typeof resizeRef.current & { _moveStable?: (e: PointerEvent) => void; _upStable?: () => void };
+        if (r._moveStable) window.removeEventListener("pointermove", r._moveStable);
+        if (r._upStable) {
+            window.removeEventListener("pointerup", r._upStable);
+            window.removeEventListener("pointercancel", r._upStable);
+            window.removeEventListener("blur", r._upStable);
+        }
+    }, [data.id, onResize]);
+    handleResizeUpRef.current = handleResizeUp;
 
     const handleResizeMouseDown = (event: ResizeStartEvent, corner: ResizeCorner) => {
         event.stopPropagation();
@@ -380,10 +390,18 @@ export const CanvasNode = React.memo(function CanvasNode({
             element.style.height = `${data.height}px`;
             if (positioned) element.style.transform = `translate(${data.position.x}px, ${data.position.y}px)`;
         }
-        window.addEventListener("pointermove", handleResizeMove);
-        window.addEventListener("pointerup", handleResizeUp);
-        window.addEventListener("pointercancel", handleResizeUp);
-        window.addEventListener("blur", handleResizeUp);
+        // Use stable wrapper functions that always delegate to the latest callback
+        // via refs, so we never need to remove/re-add listeners when the callbacks
+        // are recreated by useCallback.
+        const moveStable = (e: PointerEvent) => handleResizeMoveRef.current?.(e);
+        const upStable = () => handleResizeUpRef.current?.();
+        // Store on resizeRef so the cleanup effect can remove the same references.
+        (resizeRef.current as typeof resizeRef.current & { _moveStable?: typeof moveStable; _upStable?: typeof upStable })._moveStable = moveStable;
+        (resizeRef.current as typeof resizeRef.current & { _moveStable?: typeof moveStable; _upStable?: typeof upStable })._upStable = upStable;
+        window.addEventListener("pointermove", moveStable);
+        window.addEventListener("pointerup", upStable);
+        window.addEventListener("pointercancel", upStable);
+        window.addEventListener("blur", upStable);
     };
 
     useEffect(() => {
@@ -391,12 +409,15 @@ export const CanvasNode = React.memo(function CanvasNode({
             if (resizeFrameRef.current) cancelAnimationFrame(resizeFrameRef.current);
             document.body.style.cursor = "";
             document.body.style.userSelect = "";
-            window.removeEventListener("pointermove", handleResizeMove);
-            window.removeEventListener("pointerup", handleResizeUp);
-            window.removeEventListener("pointercancel", handleResizeUp);
-            window.removeEventListener("blur", handleResizeUp);
+            const r = resizeRef.current as typeof resizeRef.current & { _moveStable?: (e: PointerEvent) => void; _upStable?: () => void };
+            if (r._moveStable) window.removeEventListener("pointermove", r._moveStable);
+            if (r._upStable) {
+                window.removeEventListener("pointerup", r._upStable);
+                window.removeEventListener("pointercancel", r._upStable);
+                window.removeEventListener("blur", r._upStable);
+            }
         };
-    }, [handleResizeMove, handleResizeUp]);
+    }, []);
 
     const shouldUseOverview = isOverview && !showPanel && !isEditingContent;
     const panelWidthClass =
@@ -545,7 +566,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
-    const Renderer = nodeContentRenderers[props.node.type];
+    const Renderer = nodeContentRenderers[props.node.type] ?? UnknownNodeContent;
     return <>{Renderer(props)}</>;
 }
 
@@ -606,8 +627,8 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
             className="canvas-generation-loading relative h-full w-full overflow-hidden rounded-[inherit]"
             style={
                 {
-                    "--canvas-generation-base": canvasThemes.dark.canvas.background,
-                    "--canvas-generation-glow": canvasThemes.dark.node.text,
+                    "--canvas-generation-base": theme.canvas.background,
+                    "--canvas-generation-glow": theme.node.text,
                     "--canvas-generation-dot": theme.node.placeholder,
                 } as React.CSSProperties
             }
@@ -665,7 +686,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     const isEmpty = !node.metadata?.content?.trim();
 
     return (
-        <div className="flex h-full w-full flex-col overflow-hidden pt-8">
+        <div data-node-text-editable className="flex h-full w-full flex-col overflow-hidden pt-8">
             {!isEmpty ? (
                 <Button
                     type="button"
@@ -727,6 +748,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-5 pb-5 pr-16 pt-0"
                     style={textStyle}
                     onDoubleClick={(event) => {
+                        event.preventDefault();
                         event.stopPropagation();
                         onStartEditing?.();
                     }}
@@ -1049,7 +1071,7 @@ function formatVideoTime(seconds: number) {
     return `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
-function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "seeked") {
+function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "loadeddata" | "seeked") {
     return new Promise<void>((resolve, reject) => {
         const cleanup = () => {
             video.removeEventListener(eventName, handleSuccess);
@@ -1065,6 +1087,31 @@ function waitForVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" 
         };
         video.addEventListener(eventName, handleSuccess, { once: true });
         video.addEventListener("error", handleError, { once: true });
+    });
+}
+
+function waitForDecodedVideoFrame(video: HTMLVideoElement) {
+    return new Promise<void>((resolve, reject) => {
+        let timeout = 0;
+        const cleanup = () => {
+            window.clearTimeout(timeout);
+            video.removeEventListener("error", onError);
+        };
+        const finish = () => {
+            cleanup();
+            resolve();
+        };
+        const onError = () => {
+            cleanup();
+            reject(new Error("视频帧解码失败"));
+        };
+        video.addEventListener("error", onError, { once: true });
+        timeout = window.setTimeout(finish, 800);
+        if ("requestVideoFrameCallback" in video) {
+            video.requestVideoFrameCallback(() => finish());
+            return;
+        }
+        window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
     });
 }
 
@@ -1116,16 +1163,33 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame }: Node
                         temporaryVideo.playsInline = true;
                         temporaryVideo.src = objectUrl;
                         await waitForVideoEvent(temporaryVideo, "loadedmetadata");
+                        if (temporaryVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+                            await waitForVideoEvent(temporaryVideo, "loadeddata");
+                        }
                         captureVideo = temporaryVideo;
                     }
                 }
+                if (!temporaryVideo && (visibleVideo.currentSrc || visibleVideo.src)) {
+                    temporaryVideo = document.createElement("video");
+                    temporaryVideo.crossOrigin = "anonymous";
+                    temporaryVideo.preload = "auto";
+                    temporaryVideo.muted = true;
+                    temporaryVideo.playsInline = true;
+                    temporaryVideo.src = visibleVideo.currentSrc || visibleVideo.src;
+                    await waitForVideoEvent(temporaryVideo, "loadedmetadata");
+                    if (temporaryVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+                        await waitForVideoEvent(temporaryVideo, "loadeddata");
+                    }
+                    captureVideo = temporaryVideo;
+                }
                 const captureDuration = Number.isFinite(captureVideo.duration) ? captureVideo.duration : duration;
-                const targetTime = kind === "first" ? 0.001 : kind === "last" ? Math.max(0, captureDuration - 0.05) : Math.min(restoreTime, Math.max(0, captureDuration - 0.01));
-                if (Math.abs(captureVideo.currentTime - targetTime) > 0.01) {
+                const targetTime = kind === "first" ? Math.min(0.1, Math.max(0, captureDuration - 0.01)) : kind === "last" ? Math.max(0, captureDuration - 0.05) : Math.min(restoreTime, Math.max(0, captureDuration - 0.01));
+                if (Math.abs(captureVideo.currentTime - targetTime) > 0.001) {
                     const seeked = waitForVideoEvent(captureVideo, "seeked");
                     captureVideo.currentTime = targetTime;
                     await seeked;
                 }
+                await waitForDecodedVideoFrame(captureVideo);
                 const width = captureVideo.videoWidth;
                 const height = captureVideo.videoHeight;
                 if (!width || !height) throw new Error("视频画面尚未加载完成");
@@ -1356,109 +1420,6 @@ function ImageContent({
                 </Button>
             ) : null}
         </BatchFrame>
-    );
-}
-
-function Panorama360Viewer({ src, title }: { src: string; title: string }) {
-    const hostRef = useRef<HTMLDivElement | null>(null);
-    const [textureSrc, setTextureSrc] = useState(src);
-    const [loadError, setLoadError] = useState("");
-
-    useEffect(() => {
-        let cancelled = false;
-        setLoadError("");
-        if (!/^https?:/i.test(src)) {
-            setTextureSrc(src);
-            return;
-        }
-        setTextureSrc("");
-        imageToDataUrl({ url: src })
-            .then((dataUrl) => {
-                if (!cancelled) setTextureSrc(dataUrl);
-            })
-            .catch((error) => {
-                if (!cancelled) setLoadError(error instanceof Error ? error.message : "360贴图加载失败");
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [src]);
-
-    useEffect(() => {
-        if (!textureSrc) return;
-        const host = hostRef.current;
-        if (!host) return;
-
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        renderer.setClearColor(0x050505, 1);
-        host.appendChild(renderer.domElement);
-
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1100);
-        camera.position.set(0, 0, 0);
-        let disposed = false;
-        let yaw = 0;
-        let pitch = 0;
-
-        const geometry = new THREE.SphereGeometry(500, 96, 48);
-        geometry.scale(-1, 1, 1);
-        const loader = new THREE.TextureLoader();
-        loader.setCrossOrigin("anonymous");
-        const texture = loader.load(textureSrc, render, undefined, () => {
-            if (!disposed) setLoadError("360贴图加载失败");
-        });
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        const sphere = new THREE.Mesh(geometry, material);
-        scene.add(sphere);
-
-        const updateCameraDirection = () => {
-            const direction = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
-            camera.lookAt(direction);
-        };
-        updateCameraDirection();
-
-        const resize = () => {
-            if (!host || disposed) return;
-            const width = Math.max(1, host.clientWidth);
-            const height = Math.max(1, host.clientHeight);
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-            renderer.setSize(width, height, false);
-            render();
-        };
-        function render() {
-            if (disposed) return;
-            renderer.render(scene, camera);
-        }
-        const observer = new ResizeObserver(resize);
-        observer.observe(host);
-        renderer.domElement.className = "block h-full w-full";
-        renderer.domElement.style.pointerEvents = "none";
-        resize();
-
-        return () => {
-            disposed = true;
-            observer.disconnect();
-            texture.dispose();
-            geometry.dispose();
-            material.dispose();
-            renderer.dispose();
-            renderer.domElement.remove();
-        };
-    }, [textureSrc]);
-
-    return (
-        <div ref={hostRef} className="relative h-full w-full bg-black" aria-label={title || "360场景"}>
-            {!textureSrc || loadError ? (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4 text-center text-xs text-white/70">
-                    {loadError || "正在准备360贴图"}
-                </div>
-            ) : null}
-        </div>
     );
 }
 

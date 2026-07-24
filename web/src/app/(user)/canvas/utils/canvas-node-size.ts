@@ -15,9 +15,9 @@ export const VIDEO_NODE_SIZE_RANGE = {
 export function fitNodeSize(
     width: number,
     height: number,
-    maxWidth = IMAGE_NODE_SIZE_RANGE.maxWidth,
-    maxHeight = IMAGE_NODE_SIZE_RANGE.maxHeight,
-    minLongEdge = IMAGE_NODE_SIZE_RANGE.minLongEdge,
+    maxWidth: number = IMAGE_NODE_SIZE_RANGE.maxWidth,
+    maxHeight: number = IMAGE_NODE_SIZE_RANGE.maxHeight,
+    minLongEdge: number = IMAGE_NODE_SIZE_RANGE.minLongEdge,
 ) {
     const w = Math.max(1, width);
     const h = Math.max(1, height);
