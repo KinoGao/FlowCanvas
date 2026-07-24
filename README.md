@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="web/public/logo.svg" width="96" alt="infinite-canvas logo">
+  <img src="web/public/logo.svg" width="96" alt="FlowCanvas logo">
 </p>
 
-<h1 align="center">无限画布 (infinite-canvas)</h1>
+<h1 align="center">FlowCanvas</h1>
+
+<p align="center">开源的无限画布 AI 创作工作台</p>
 
 <p align="center">
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/Linux.do-Community-2b6de8?style=flat-square" alt="Linux.do"></a>
@@ -14,125 +16,139 @@
   <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-React-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite React"></a>
 </p>
 
-无限画布是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
+FlowCanvas 将素材、提示词、模型和生成结果放在同一块无限画布中。你可以通过节点与连线组织图像、视频、音频和文本工作流，持续调整、复用并沉淀自己的创作方法。
 
-> [!CAUTION]
-> 项目目前处于开发阶段，不保证历史数据兼容。各种数据库结构和存储格式都可能直接调整，欢迎关注后续更新，当前更适合个人/本地部署，不建议直接公网多人共用。
->
-> 如果你需要稳定维护自己的分支，建议自行 fork 后独立开发。二次开发与 PR 请保留原作者信息和前端页面标识。
+> [!WARNING]
+> 项目仍在快速迭代，数据结构和模型适配可能发生变化。当前更适合单机或自托管场景；部署前请自行完成备份、访问控制与模型账号配置。
 
-## 核心功能
+## 核心能力
 
-- 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
-- AI 创作：浏览器前台直连你配置的 OpenAI 兼容接口，支持文生图、图生图、参考图编辑、文本问答、音频和视频生成；Seedance 2.0 可通过火山方舟 Agent Plan 接入。
-- 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
-- 本地 Agent：通过本机 Canvas Agent 连接 Codex / Claude Code，让 Agent 通过 MCP 操作当前画布。
-- 提示词库：Spring Boot 后端抓取多个 GitHub 开源项目，并缓存在运行实例内存中。
+### 无限画布与节点工作流
 
-完整功能说明见 [功能介绍](docs/content/docs/overview/features.mdx)。
+- 文本、图片、视频、音频与脚本节点，支持拖拽、缩放、连线、分组、命名和删除。
+- 节点按画布创建顺序生成默认名称；素材结果会按原始比例展示，并在合理范围内约束尺寸。
+- Composer 位于节点下方，用于将上游文本、图片、视频和音频组合为下一次生成的输入。
+- 支持从视频截取首帧或当前帧，生成结果可继续作为后续节点的参考素材。
+- 文本节点支持单击选中、双击进入编辑；键盘 `Delete` 可直接删除选中的节点。
 
-如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
+### 多模型生成与运行时配置
 
-## 技术栈
+- 后端全局模型注册中心统一管理厂商地址、API Key、模型 ID 与可用能力；密钥不会下发到浏览器。
+- 支持按模型能力配置文生图、图生图、文生视频、首帧 / 首尾帧视频、多模态参考、文本与音频等工作流。
+- Seedance 2.0 通过火山方舟 Agent Plan 接入；也可按 OpenAI 兼容协议接入已配置的图像、视频、音频或多模态模型。
+- 生成任务在后端持续执行并保存状态。关闭画布后再次打开，同一画布中尚未完成的任务会恢复查询；超过 30 分钟未返回的任务会结束并提示重试。
+- ComfyUI 作为独立节点接入，可用于编排本地或远程 ComfyUI 工作流。
 
-- 前端：Vite、React、React Flow、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
-- 后端：Spring Boot 提供配置同步、提示词缓存、WebDAV/ComfyUI/AI 可选代理。
-- 部署：Vercel 或 Docker。
+### 素材、工作区与 Agent
 
-## 快速开始
+- 画布、素材、媒体文件、生成记录和运行时配置由后端账号工作区保存；WebDAV 是可选的独立同步通道。
+- 左侧资产面板可管理并复用图片、视频、音频与文本素材，节点悬停时可预览内容。
+- 可选安装 Canvas Agent，通过 MCP 与 Codex 或 Claude Code 协作，在本地画布中执行创作辅助操作。
 
-推荐先启动后端，再进入 `web/` 启动 Vite 前端。AI API Key、Base URL、画布、素材和生成记录默认保存在浏览器本地。
-
-```bash
-git clone git@github.com:basketikun/infinite-canvas.git
-cd infinite-canvas
-cd web
-bun install
-bun run dev
-```
-
-Docker 运行：
-
-```bash
-docker build -t infinite-canvas .
-docker run --rm -p 9800:9800 infinite-canvas
-```
-
-运行后默认端口9800，可访问 `http://localhost:9800`。
-
-首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
-
-## New API 自动配置
-
-如果使用 New API，可在 `系统设置 -> 聊天方式 -> 添加聊天设置` 中填入：
-
-```text
-https://canvas.best?apiKey={key}&baseUrl={address}
-```
-
-跳转后会自动打开配置弹窗并填入 API Key 和 Base URL。
-如果自己部署了，可以把 `https://canvas.best` 替换成你部署的地址。
-
-## 效果展示
+## 界面预览
 
 <table width="100%">
   <tr>
-    <td width="50%"><img src="https://i.ibb.co/TDFvGWDT/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/zVwJq3YS/image.png" alt="image" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/TDFvGWDT/image.png" alt="FlowCanvas 画布" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/zVwJq3YS/image.png" alt="FlowCanvas 节点工作流" border="0"></td>
   </tr>
   <tr>
-    <td width="50%"><img src="https://i.ibb.co/PvY3qhhK/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/7D04LwN/image.png" alt="image" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/PvY3qhhK/image.png" alt="FlowCanvas 模型配置" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/7D04LwN/image.png" alt="FlowCanvas 素材管理" border="0"></td>
   </tr>
   <tr>
-    <td width="50%"><img src="https://i.ibb.co/bj30FtS5/5.png" alt="5" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/hxRvjw51/image.png" alt="image" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/bj30FtS5/5.png" alt="FlowCanvas 视频工作流" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/hxRvjw51/image.png" alt="FlowCanvas 节点生成" border="0"></td>
   </tr>
   <tr>
-    <td width="50%"><img src="https://i.ibb.co/jkWsF8q1/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/XrnfXHx7/image.png" alt="image" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/jkWsF8q1/image.png" alt="FlowCanvas 图片创作" border="0"></td>
+    <td width="50%"><img src="https://i.ibb.co/XrnfXHx7/image.png" alt="FlowCanvas 画布视图" border="0"></td>
   </tr>
 </table>
 
+## 快速开始
+
+### 环境要求
+
+- Node.js 18+
+- pnpm（或 Bun）
+- Java 21
+- Maven 3.9+
+
+### 本地开发
+
+```bash
+git clone https://github.com/basketikun/infinite-canvas.git
+cd infinite-canvas
+
+# 终端 1：启动后端（默认 http://localhost:9801）
+cd backend
+mvn spring-boot:run
+
+# 终端 2：启动前端（默认 http://localhost:9800）
+cd web
+pnpm install
+pnpm dev
+```
+
+打开 [http://localhost:9800](http://localhost:9800)。首次使用时，先在后端管理配置中登记模型厂商、API Key、模型 ID 和能力选项，再进入画布创建节点。
+
+### Docker Compose
+
+```bash
+# 使用已发布镜像
+docker compose up -d
+
+# 本地构建镜像
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+前端服务默认运行在 `9800`，后端服务默认运行在 `9801`。生产部署前请根据自己的域名与网络环境配置 `AUTH_CODE`、数据库卷和后端公网媒体访问地址。
+
+## 模型与媒体配置说明
+
+- AI 请求始终通过后端代理发出，浏览器只读取脱敏后的运行时模型目录。
+- 需要引用图片、视频或音频的厂商，必须能够访问后端提供的公网媒体地址。使用首帧、尾帧、参考视频或 Agnes 等模型前，请正确配置 `backend/backend-config.yml` 中的公网访问地址与媒体路由。
+- 不同厂商对尺寸、比例、时长、首尾帧、参考素材数量及音频的支持不同。请在后台模型能力配置中按实际接口填写，不要假设不同模型可以共用全部参数。
+- 请勿将包含 API Key 的配置文件或环境变量提交到 Git 仓库。
+
+## Canvas Agent（可选）
+
+Canvas Agent 是独立的本地 MCP 服务，默认监听 `127.0.0.1:17371`。它可将 FlowCanvas 与 Codex、Claude Code 等本地编码助手连接起来。
+
+```bash
+cd canvas-agent
+npm install
+npm run dev
+```
+
+详细的安装、鉴权和 MCP 配置请参阅 [canvas-agent/README.md](canvas-agent/README.md)。
+
 ## 文档
 
-- [快速开始](docs/content/docs/overview/quick-start.mdx)
-- [功能介绍](docs/content/docs/overview/features.mdx)
-- [Render 部署](docs/content/docs/overview/render.mdx)
-- [Docker 部署](docs/content/docs/overview/docker.mdx)
-- [画布节点操作手册](docs/content/docs/canvas/canvas-node-manual.mdx)
+- [文档首页](docs/content/docs/overview/quick-start.mdx)
+- [核心功能](docs/content/docs/overview/features.mdx)
+- [画布节点说明](docs/content/docs/canvas/canvas-node-manual.mdx)
 - [画布快捷键](docs/content/docs/canvas/canvas-shortcuts.mdx)
-- [贡献者协议](CLA.md)
-- [漏洞提交](SECURITY.md)
-- [待办事项](docs/content/docs/progress/todo.mdx)
-- [本地 Canvas Agent](canvas-agent/README.md)
+- [后端本地开发](docs/content/docs/backend/local-development.mdx)
+- [Docker 部署](docs/content/docs/overview/docker.mdx)
+- [Render 部署](docs/content/docs/overview/render.mdx)
 
-## 赞助支持
+## 项目范围
 
-<div align="center">
+FlowCanvas 的重点是开源、自托管的创作工作台：无限画布、节点工作流、模型适配、素材复用和本地 Agent 协作。积分、会员、社区、发布审核等平台商业化能力不在当前 v1 范围内。
 
-如果这个项目对你有帮助，欢迎通过爱发电赞助支持，你的每一份鼓励都是持续更新的动力！
+## 支持项目
 
-<br>
+如果 FlowCanvas 对你有帮助，欢迎通过以下方式支持维护：
 
 <a href="https://ifdian.net/a/basketikun">
   <img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%B5%9E%E5%8A%A9%E4%BD%9C%E8%80%85-946ce6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyMS4zNWwtMS40NS0xLjMyQzUuNCAxNS4zNiAyIDEyLjI4IDIgOC41IDIgNS40MiA0LjQyIDMgNy41IDNjMS43NCAwIDMuNDEuODEgNC41IDIuMDlDMTMuMDkgMy44MSAxNC43NiAzIDE2LjUgMyAxOS41OCAzIDIyIDUuNDIgMjIgOC41YzAgMy43OC0zLjQgNi44Ni04LjU1IDExLjU0TDEyIDIxLjM1eiIvPjwvc3ZnPg==&logoColor=white" alt="爱发电赞助" />
 </a>
 
-<br>
-<br>
+## License
 
-</div>
-
-## 社区支持
-
-学 AI，上 L 站：[LinuxDO](https://linux.do/)
-
-点击链接加入群聊【AI开源交流】：https://qm.qq.com/q/DFnKzZ807u
-
-## 开源协议
-
-本项目使用 GNU Affero General Public License v3.0，见 [LICENSE](LICENSE)。
+本项目采用 [AGPL-3.0](LICENSE) 许可证发布。
 
 ## Star History
 
