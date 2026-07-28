@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { cn } from "@/lib/utils";
@@ -686,7 +686,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     const isEmpty = !node.metadata?.content?.trim();
 
     return (
-        <div data-node-text-editable className="flex h-full w-full flex-col overflow-hidden pt-8">
+        <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
             {!isEmpty ? (
                 <Button
                     type="button"
@@ -725,7 +725,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 />
             ) : isEmpty && node.metadata?.canvasTool === "script" ? (
-                <TryActionList
+                <NodeStarterPanel kind="text"
                     theme={theme}
                     actions={[
                         { label: "自己编写脚本", onClick: () => onNodeAction?.("script-edit") },
@@ -735,7 +735,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     ]}
                 />
             ) : isEmpty ? (
-                <TryActionList
+                <NodeStarterPanel kind="text"
                     theme={theme}
                     actions={[
                         { label: "自己编写内容", onClick: onStartEditing },
@@ -1000,6 +1000,65 @@ function TryActionList({ theme, actions }: { theme: (typeof canvasThemes)[keyof 
     );
 }
 
+type NodeStarterKind = "text" | "image" | "video" | "comfyui" | "audio";
+
+const nodeStarterVisuals: Record<NodeStarterKind, { label: string; description: string; icon: React.ElementType }> = {
+    text: { label: "文本创作", description: "记录灵感，或直接衔接下游生成。", icon: FileText },
+    image: { label: "图片素材", description: "上传参考图，作为后续创作的视觉基础。", icon: ImageIcon },
+    video: { label: "视频素材", description: "导入视频后，可截帧、延长或作为参考。", icon: Video },
+    comfyui: { label: "ComfyUI 工作流", description: "选择工作流并连接上游素材后运行。", icon: Workflow },
+    audio: { label: "音频素材", description: "导入声音素材，或连接到音频生成流程。", icon: Music2 },
+};
+
+function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; kind?: NodeStarterKind; actions: Array<{ label: string; onClick?: () => void }> }) {
+    const visual = nodeStarterVisuals[kind];
+    const NodeIcon = visual.icon;
+    const actionIcons = kind === "text" ? [FileText, Video, Music2, Clapperboard] : kind === "image" ? [ImageIcon, Sparkles] : kind === "video" ? [Video, ImageIcon] : kind === "comfyui" ? [Workflow, Sparkles] : [Music2, Sparkles];
+
+    return (
+        <div className="relative flex h-full w-full overflow-hidden rounded-[inherit] p-4 text-left" style={{ background: `linear-gradient(145deg, ${theme.node.panel}, ${theme.node.fill})` }}>
+            <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-56 rounded-full blur-3xl" style={{ background: theme.ui.accentSoft }} />
+            <div className="relative z-10 flex h-full w-full flex-col">
+                <div className="flex items-start gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-lg border" style={{ background: theme.toolbar.activeBg, borderColor: theme.ui.accentSoft, color: theme.ui.accent }}>
+                        <NodeIcon className="size-[18px]" />
+                    </span>
+                    <div className="min-w-0 pt-0.5">
+                        <div className="text-[11px] font-semibold" style={{ color: theme.node.text }}>{visual.label}</div>
+                        <p className="mt-1 text-[10px] leading-4" style={{ color: theme.node.muted }}>{visual.description}</p>
+                    </div>
+                </div>
+                <div className="mt-auto grid gap-1.5 pt-4">
+                    {actions.map((action, index) => {
+                        const ActionIcon = actionIcons[index] ?? Sparkles;
+                        return (
+                            <button
+                                key={action.label}
+                                type="button"
+                                data-canvas-no-zoom
+                                className="group/node-action flex h-9 w-full items-center gap-2 rounded-md border px-2.5 text-left text-[11px] font-medium transition-colors"
+                                style={{ background: index === 0 ? theme.toolbar.activeBg : theme.ui.controlFill, borderColor: index === 0 ? theme.ui.accentSoft : theme.ui.hairline, color: theme.node.text }}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    action.onClick?.();
+                                }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
+                                onMouseLeave={(event) => (event.currentTarget.style.background = index === 0 ? theme.toolbar.activeBg : theme.ui.controlFill)}
+                            >
+                                <ActionIcon className="size-3.5 shrink-0" style={{ color: index === 0 ? theme.ui.accent : theme.node.muted }} />
+                                <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                                <ChevronRight className="size-3 shrink-0 opacity-35 transition-transform group-hover/node-action:translate-x-0.5" />
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
     return <Badge className={cn("pointer-events-none absolute right-2 top-2 z-30 h-auto rounded-md px-1.5 py-0.5 text-[10px]", reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75")}>{reference.label}</Badge>;
 }
@@ -1040,7 +1099,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
 function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload }: NodeContentRendererProps) {
     if (node.metadata?.canvasTool === "panorama360") {
         return (
-            <TryActionList
+            <NodeStarterPanel kind="image"
                 theme={theme}
                 actions={[
                     { label: "生成360全景", onClick: () => onNodeAction?.("image-to-panorama") },
@@ -1050,7 +1109,7 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
         );
     }
     const content = (
-        <TryActionList
+        <NodeStarterPanel kind="image"
             theme={theme}
             actions={[{ label: "上传图片", onClick: onUpload }]}
         />
@@ -1115,7 +1174,7 @@ function waitForDecodedVideoFrame(video: HTMLVideoElement) {
     });
 }
 
-function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUpload }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -1213,7 +1272,7 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame }: Node
         [capturing, duration, node, onCaptureVideoFrame],
     );
 
-    if (!src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="空视频节点" theme={theme} />;
+    if (!src) return <NodeStarterPanel kind="video" theme={theme} actions={[{ label: "上传视频", onClick: onUpload }]} />;
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
 
     return (

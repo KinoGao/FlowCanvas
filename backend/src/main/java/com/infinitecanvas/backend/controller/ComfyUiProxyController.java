@@ -1,6 +1,8 @@
 package com.infinitecanvas.backend.controller;
 
 import com.infinitecanvas.backend.service.PlatformConfigService;
+import com.infinitecanvas.backend.service.GenerationJobService;
+import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -50,6 +52,7 @@ public class ComfyUiProxyController {
     );
 
     private final PlatformConfigService platformConfigService;
+    private final GenerationJobService generationJobService;
     private final WebClient webClient = WebClient.builder()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(COMFY_PROXY_MAX_IN_MEMORY_SIZE))
             .build();
@@ -58,8 +61,9 @@ public class ComfyUiProxyController {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
-    public ComfyUiProxyController(PlatformConfigService platformConfigService) {
+    public ComfyUiProxyController(PlatformConfigService platformConfigService, GenerationJobService generationJobService) {
         this.platformConfigService = platformConfigService;
+        this.generationJobService = generationJobService;
     }
 
     @GetMapping
@@ -96,15 +100,18 @@ public class ComfyUiProxyController {
     }
 
     @PostMapping
-    public ResponseEntity<byte[]> post(@RequestBody Map<String, Object> payload) {
+    public ResponseEntity<?> post(@RequestBody Map<String, Object> payload, HttpServletRequest request) throws Exception {
         String baseUrl = String.valueOf(payload.getOrDefault("baseUrl", ""));
         String path = String.valueOf(payload.getOrDefault("path", ""));
         HttpMethod method = "GET".equals(payload.get("method")) ? HttpMethod.GET : HttpMethod.POST;
-        try {
-            return proxyBuffered(buildTargetUrl(baseUrl, path), method, payload.get("body"), null);
-        } catch (IllegalArgumentException e) {
-            return jsonResponse(HttpStatus.BAD_REQUEST, e.getMessage());
-        }
+        String jobKey = "/prompt".equals(requestPath(path)) ? request.getHeader("X-FlowCanvas-Job-Id") : null;
+        return generationJobService.execute(UserRequestContext.currentUser(request), jobKey, () -> {
+            try {
+                return proxyBuffered(buildTargetUrl(baseUrl, path), method, payload.get("body"), null);
+            } catch (IllegalArgumentException e) {
+                return jsonResponse(HttpStatus.BAD_REQUEST, e.getMessage());
+            }
+        });
     }
 
     private ResponseEntity<byte[]> proxyBuffered(URI target, HttpMethod method, Object body, MultiValueMap<String, Object> multipart) {

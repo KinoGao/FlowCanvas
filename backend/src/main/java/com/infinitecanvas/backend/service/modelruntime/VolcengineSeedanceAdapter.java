@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
 /** Translates the normalized video contract to Volcengine Seedance's async task API. */
 @Service
 public class VolcengineSeedanceAdapter implements ModelRequestAdapter {
-    private static final Duration TIMEOUT = Duration.ofMinutes(20);
+    private static final Duration TIMEOUT = Duration.ofMinutes(30);
     private static final Pattern TASK_PATH = Pattern.compile("^/videos/([^/]+)(/content)?$");
     private static final Set<String> TRANSIENT_STATUSES = Set.of("queued", "pending", "processing", "running", "in_progress");
     private static final Set<String> CREATE_FIELDS = Set.of(
@@ -64,6 +64,15 @@ public class VolcengineSeedanceAdapter implements ModelRequestAdapter {
 
     @Override
     public int order() { return 0; }
+
+    @Override
+    public List<ModelProtocol> protocols() {
+        return List.of(
+                new ModelProtocol("seedance-v1", "方舟 / Ark 任务协议 · Seedance 1.0", "火山方舟 Seedance 1.0 异步视频任务"),
+                new ModelProtocol("seedance-v1.5", "方舟 / Ark 任务协议 · Seedance 1.5", "火山方舟 Seedance 1.5 异步视频任务"),
+                new ModelProtocol("seedance-v2", "方舟 / Ark 任务协议 · Seedance 2.0", "火山方舟 Seedance 2.0 多模态异步视频任务")
+        );
+    }
 
     @Override
     public boolean supports(PlatformConfigService.RuntimeModel runtime, String suffix) {
@@ -356,7 +365,7 @@ public class VolcengineSeedanceAdapter implements ModelRequestAdapter {
 
     private void validateFlag(ObjectNode payload, String name, boolean supported, String label) {
         validateBoolean(payload, name, label);
-        if (payload.has(name) && !supported) throw new IllegalArgumentException("当前模型不支持" + label);
+        if (payload.path(name).asBoolean(false) && !supported) throw new IllegalArgumentException("当前模型不支持" + label);
     }
 
     private void validateReferenceLimit(ObjectNode payload, String type, int max, String label) {

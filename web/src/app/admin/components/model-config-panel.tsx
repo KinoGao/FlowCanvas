@@ -1,10 +1,10 @@
 import { App, Button, Checkbox, Drawer, Form, Input, InputNumber, Segmented, Select, Space, Switch, Table, Tag } from "antd";
 import { Pencil, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AdminCard } from "./admin-card";
 import { applyModelCategory, cloneModel, emptyModel, emptyProvider, IMAGE_RATIOS, normalizeModel, normalizePlatformConfig, numberOr, replaceById } from "../platform-config-utils";
-import { discoverProviderModels, savePlatformConfig, verifyPlatformModel, type AudioCapabilities, type ImageCapabilities, type ModelCategory, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
+import { discoverProviderModels, fetchModelProtocols, savePlatformConfig, verifyPlatformModel, type AudioCapabilities, type ImageCapabilities, type ModelCategory, type ModelProtocol, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
 
 const CATEGORY_OPTIONS = [{ value: "text", label: "文本" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" }];
 const CATEGORY_LABELS: Record<ModelCategory, string> = { text: "文本", image: "图像", video: "视频", audio: "音频" };
@@ -17,6 +17,14 @@ const VIDEO_MODES = [
     { value: "image-to-video", label: "首帧图生视频" }, { value: "first-last-frame", label: "首尾帧图生视频" },
     { value: "image-reference", label: "图片参考" }, { value: "multi-frame", label: "智能多帧" },
 ];
+const FALLBACK_PROTOCOLS: ModelProtocol[] = [
+    { id: "openai", name: "OpenAI 直连", description: "OpenAI 兼容的同步或异步接口" },
+    { id: "gemini", name: "Gemini 协议", description: "Gemini 原生接口" },
+    { id: "agnes-v2", name: "异步协议 · Agnes Video V2", description: "Agnes 视频任务接口" },
+    { id: "seedance-v1", name: "方舟 / Ark 任务协议 · Seedance 1.0", description: "火山方舟异步视频任务" },
+    { id: "seedance-v1.5", name: "方舟 / Ark 任务协议 · Seedance 1.5", description: "火山方舟异步视频任务" },
+    { id: "seedance-v2", name: "方舟 / Ark 任务协议 · Seedance 2.0", description: "火山方舟异步视频任务" },
+];
 
 type Props = { authToken: string; config: PlatformConfigDocument; onChange: (config: PlatformConfigDocument) => void };
 
@@ -27,8 +35,17 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
     const [modelDraft, setModelDraft] = useState<PlatformModel | null>(null);
     const [modelOriginalId, setModelOriginalId] = useState("");
     const [discovered, setDiscovered] = useState<Record<string, string[]>>({});
+    const [protocols, setProtocols] = useState<ModelProtocol[]>(FALLBACK_PROTOCOLS);
     const [discovering, setDiscovering] = useState("");
     const [verifying, setVerifying] = useState("");
+
+    useEffect(() => {
+        let cancelled = false;
+        void fetchModelProtocols(authToken).then((items) => {
+            if (!cancelled && items.length) setProtocols(items);
+        }).catch(() => undefined);
+        return () => { cancelled = true; };
+    }, [authToken]);
 
     const editProvider = (item?: PlatformProvider) => { setProviderOriginalId(item?.id || ""); setProviderDraft(item ? { ...item } : emptyProvider()); };
     const editModel = (item?: PlatformModel) => { setModelOriginalId(item?.id || ""); setModelDraft(item ? cloneModel(item) : emptyModel(config.providers[0]?.id || "")); };
@@ -119,7 +136,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
         </AdminCard>
 
         <ProviderDrawer draft={providerDraft} onChange={setProviderDraft} onClose={() => setProviderDraft(null)} onSave={saveProvider} />
-        <ModelDrawer draft={modelDraft} providers={config.providers} discovered={discovered} onChange={setModelDraft} onClose={() => setModelDraft(null)} onSave={saveModel} />
+        <ModelDrawer draft={modelDraft} providers={config.providers} discovered={discovered} protocols={protocols} onChange={setModelDraft} onClose={() => setModelDraft(null)} onSave={saveModel} />
     </div>;
 }
 
@@ -139,7 +156,7 @@ function ProviderDrawer(props: { draft: PlatformProvider | null; onChange: (valu
     </Form> : null}</Drawer>;
 }
 
-function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformProvider[]; discovered: Record<string, string[]>; onChange: (value: PlatformModel | null) => void; onClose: () => void; onSave: () => void }) {
+function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformProvider[]; discovered: Record<string, string[]>; protocols: ModelProtocol[]; onChange: (value: PlatformModel | null) => void; onClose: () => void; onSave: () => void }) {
     const draft = props.draft;
     if (!draft) return <Drawer open={false} onClose={props.onClose} />;
     const update = (patch: Partial<PlatformModel>) => props.onChange({ ...draft, ...patch });
@@ -148,6 +165,10 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
     const updateVideo = (patch: Partial<VideoCapabilities>) => draft.videoCapabilities && update({ videoCapabilities: { ...draft.videoCapabilities, ...patch } });
     const updateAudio = (patch: Partial<AudioCapabilities>) => draft.audioCapabilities && update({ audioCapabilities: { ...draft.audioCapabilities, ...patch } });
     const discoveredOptions = (props.discovered[draft.providerId] || []).map((value) => ({ value, label: value }));
+    const protocolOptions = props.protocols.some((item) => item.id === draft.requestAdapter)
+        ? props.protocols
+        : [...props.protocols, { id: draft.requestAdapter, name: `当前协议：${draft.requestAdapter}`, description: "保留已有配置；请确认后再改为可选协议" }];
+    const selectedProtocol = protocolOptions.find((item) => item.id === draft.requestAdapter);
     return <Drawer size="large" title="模型分类与能力" open onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}><Form layout="vertical">
         <Form.Item label="模型分类" required><Segmented block value={draft.category} options={CATEGORY_OPTIONS} onChange={(category) => props.onChange(applyModelCategory(draft, category as ModelCategory))} /></Form.Item>
         <div className="grid gap-x-4 md:grid-cols-2">
@@ -155,9 +176,10 @@ function ModelDrawer(props: { draft: PlatformModel | null; providers: PlatformPr
             <Form.Item label="画布显示名称" required><Input value={draft.displayName} placeholder="例如 Seedance 2.0 Pro" onChange={(event) => update({ displayName: event.target.value })} /></Form.Item>
             <Form.Item label="厂商" required><Select value={draft.providerId} options={props.providers.map((item) => ({ value: item.id, label: item.name }))} onChange={(providerId) => update({ providerId, requestModel: "" })} /></Form.Item>
             <Form.Item label="实际请求模型名称" required><Select mode="tags" maxCount={1} showSearch options={discoveredOptions} value={draft.requestModel ? [draft.requestModel] : []} placeholder={discoveredOptions.length ? "选择已拉取模型或手动输入" : "先拉取模型，或手动输入"} onChange={(values) => update({ requestModel: values.at(-1) || "" })} /></Form.Item>
-            <Form.Item label="请求适配器"><Input value={draft.requestAdapter} placeholder="openai / seedance-v2 / agnes" onChange={(event) => update({ requestAdapter: event.target.value })} /></Form.Item>
+            <Form.Item label="调用协议"><Select value={draft.requestAdapter} options={protocolOptions.map((item) => ({ value: item.id, label: item.name }))} onChange={(requestAdapter) => update({ requestAdapter })} /></Form.Item>
             <Form.Item label="模型名称匹配规则"><Select mode="tags" tokenSeparators={[","]} value={draft.modelPatterns} onChange={(modelPatterns) => update({ modelPatterns })} placeholder="例如 seedance-2" /></Form.Item>
         </div>
+        {selectedProtocol ? <div className="-mt-2 mb-4 text-xs text-gray-500">{selectedProtocol.description}</div> : null}
         <div className="mb-4"><VerificationStatus model={draft} />{draft.verificationMessage ? <span className="ml-2 text-xs text-gray-500">{draft.verificationMessage}</span> : null}</div>
         {draft.category === "text" && draft.textCapabilities ? <TextCapabilityForm value={draft.textCapabilities} onChange={updateText} /> : null}
         {draft.category === "image" && draft.imageCapabilities ? <ImageCapabilityForm value={draft.imageCapabilities} onChange={updateImage} /> : null}

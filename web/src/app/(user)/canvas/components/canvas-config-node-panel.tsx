@@ -242,15 +242,22 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
 
     return (
         <ConfigProvider theme={antdTheme}>
-        <div className="creative-os-config-panel flex h-full min-h-0 min-w-0 w-full cursor-default flex-col rounded-[inherit] px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text, background: theme.node.panel }}>
-            <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="shrink-0 cursor-move text-sm font-semibold">
+        <div className="creative-os-config-panel relative flex h-full min-h-0 min-w-0 w-full cursor-default flex-col overflow-hidden rounded-[inherit] px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text, background: `linear-gradient(145deg, ${theme.node.panel}, ${theme.node.fill})` }}>
+            <span aria-hidden className="pointer-events-none absolute -right-24 -top-24 size-56 rounded-full blur-3xl" style={{ background: theme.ui.accentSoft }} />
+            <div className="relative z-10 flex h-full min-h-0 w-full flex-col">
+            <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg border" style={{ background: theme.toolbar.activeBg, borderColor: theme.ui.accentSoft, color: theme.ui.accent }}>
+                        {isStandaloneComfyUi ? <Workflow className="size-4" /> : <Settings2 className="size-4" />}
+                    </span>
+                    <div className="shrink-0 cursor-move text-sm font-semibold">
                     {isStandaloneComfyUi ? (
                         <span className="inline-flex items-center gap-1.5">
                             <Workflow className="size-4" />
                             ComfyUI
                         </span>
                     ) : "生成配置"}
+                </div>
                 </div>
                 {!isStandaloneComfyUi ? (
                     <div className="creative-os-hidden-scroll min-w-0 overflow-x-auto cursor-default" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
@@ -409,6 +416,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
                     )}
                 </span>
             </Button>
+        </div>
         </div>
         </ConfigProvider>
     );

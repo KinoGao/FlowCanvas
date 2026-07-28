@@ -14,6 +14,7 @@ export type PlatformProvider = {
 
 export type ModelCategory = "text" | "image" | "video" | "audio";
 export type ModelVerificationStatus = "unverified" | "verified" | "failed";
+export type ModelProtocol = { id: string; name: string; description: string };
 
 export type TextCapabilities = {
     modes: Array<"text" | "vision">;
@@ -150,6 +151,10 @@ export async function fetchRuntimeConfig() {
 
 export async function fetchPlatformConfig(authCode: string) {
     return readApi<PlatformConfigDocument>(await fetch(apiUrl("/api/admin/platform-config"), { headers: adminHeaders(authCode) }));
+}
+
+export async function fetchModelProtocols(authCode: string) {
+    return readApi<ModelProtocol[]>(await fetch(apiUrl("/api/admin/model-protocols"), { headers: adminHeaders(authCode) }));
 }
 
 export async function savePlatformConfig(authCode: string, config: PlatformConfigDocument) {

@@ -165,8 +165,25 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `created_at` | TIMESTAMP | 创建时间 |
 | `updated_at` | TIMESTAMP | 最后更新时间 |
 
+### user_generation_jobs 表
+
+按用户保存画布生成请求的幂等任务响应。节点在调用模型前先保存稳定的 `generationJobId`；页面刷新或关闭后，前端使用同一 ID 重新请求，后端返回已经完成的原始响应，或等待仍在执行的同一请求，不会重复提交厂商任务。缓存记录保留 7 天。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 后端任务记录 ID |
+| `user_id` | VARCHAR (FK) | 所属用户 |
+| `job_key` | VARCHAR | 节点保存的稳定任务 ID，与 `user_id` 联合唯一 |
+| `status` | VARCHAR | `RUNNING`、`COMPLETED` 或 `FAILED` |
+| `response_status` | INTEGER | 厂商代理响应的 HTTP 状态码 |
+| `response_headers_json` | TEXT | 需要回放的响应头 |
+| `response_body` | BLOB | 图片、文本、音频或任务创建响应的原始响应体 |
+| `error_message` | TEXT | 后端执行异常 |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
+
 ### 保存通道说明
 
-- `backend`：正常业务唯一账号存储。登录并完成 bootstrap 后读写 `user_configs`、`canvas_projects`、`assets`、`user_files` 和 `user_generation_logs`，不同账号数据隔离。未登录、工作区加载失败或后端不可用时，前端锁定用户页面，不回退浏览器数据。
+- `backend`：正常业务唯一账号存储。登录并完成 bootstrap 后读写 `user_configs`、`canvas_projects`、`assets`、`user_files`、`user_generation_logs` 和 `user_generation_jobs`，不同账号数据隔离。未登录、工作区加载失败或后端不可用时，前端锁定用户页面，不回退浏览器数据。
 - `webdav`：用户显式选择的独立保存/同步通道，继续通过 WebDAV manifest 与文件同步；WebDAV 配置页和后端 WebDAV proxy 保留，不依赖后端账号工作区。
 - 浏览器 `localforage`：仅用于一次性旧数据迁移和 WebDAV 传输缓存，不是可选择的保存模式。旧数据成功导入账号后，以后端账号工作区为权威。

@@ -98,6 +98,7 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",
+        snapToGrid: Boolean(source.snapToGrid),
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || { x: 0, y: 0, k: 1 },
     };

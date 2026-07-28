@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { apiUrl } from "@/constant/env";
 import type { ComfyUiConfig } from "@/stores/use-config-store";
 import type { ComfyWorkflowJson } from "@/services/comfyui-workflows";
+import { durableGenerationHeaders } from "@/services/api/generation-jobs";
 
 export type ComfyPromptResponse = {
     prompt_id?: string;
@@ -26,6 +27,12 @@ export type ComfyOutputFile = {
 
 type ComfyMediaKind = "image" | "video" | "audio";
 
+export type ComfyTextOutput = {
+    nodeId: string;
+    title?: string;
+    text: string;
+};
+
 const COMFY_MEDIA_EXTENSIONS: Record<ComfyMediaKind, Set<string>> = {
     image: new Set(["avif", "bmp", "gif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]),
     video: new Set(["avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm", "wmv"]),
@@ -38,10 +45,13 @@ const COMFY_OUTPUT_KEY_HINTS: Record<ComfyMediaKind, Set<string>> = {
     audio: new Set(["audio", "audios"]),
 };
 
+const COMFY_TEXT_OUTPUT_KEY_HINTS = new Set(["caption", "captions", "description", "descriptions", "message", "messages", "output", "outputs", "prompt", "prompts", "result", "results", "string", "strings", "text", "texts"]);
+
 type ComfyRequestOptions = {
     method?: "GET" | "POST";
     body?: unknown;
     signal?: AbortSignal;
+    jobId?: string;
 };
 class ComfyRequestError extends Error {
     constructor(
@@ -64,7 +74,7 @@ export async function testComfyConnection(config: ComfyUiConfig) {
     }
 }
 
-export async function queueComfyPrompt(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
+export async function queueComfyPrompt(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal, jobId?: string) {
     const payload = await comfyRequest<ComfyPromptResponse>(config, "/prompt", {
         method: "POST",
         body: {
@@ -72,6 +82,7 @@ export async function queueComfyPrompt(config: ComfyUiConfig, workflow: ComfyWor
             client_id: config.clientId.trim() || `flow-canvas-${nanoid(8)}`,
         },
         signal,
+        jobId,
     });
     if (!payload.prompt_id) throw new Error("ComfyUI 没有返回 prompt_id");
     if (payload.node_errors && Object.keys(payload.node_errors).length) throw new Error("ComfyUI 工作流节点校验失败");
@@ -117,6 +128,23 @@ export function extractComfyOutputAudios(history: ComfyHistoryItem) {
     return extractComfyOutputFiles(history, "audio");
 }
 
+export function extractComfyOutputTexts(history: ComfyHistoryItem, workflow?: ComfyWorkflowJson): ComfyTextOutput[] {
+    const workflowOrder = new Map(Object.keys(workflow || {}).map((nodeId, index) => [nodeId, index]));
+    const outputs = Object.entries(history.outputs || {}).sort(([left], [right]) => (workflowOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (workflowOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
+    const texts: ComfyTextOutput[] = [];
+    const seen = new Set<string>();
+    outputs.forEach(([nodeId, output]) => {
+        collectComfyOutputStrings(output).forEach((text) => {
+            const normalized = text.trim();
+            const identity = `${nodeId}\u0000${normalized}`;
+            if (!normalized || seen.has(identity)) return;
+            seen.add(identity);
+            texts.push({ nodeId, title: workflow?.[nodeId]?._meta?.title, text: normalized });
+        });
+    });
+    return texts;
+}
+
 export type ComfyUploadResult = {
     name: string;
     subfolder?: string;
@@ -149,13 +177,14 @@ export function buildComfyViewUrl(config: ComfyUiConfig, file: ComfyOutputFile) 
     return apiUrl(`/api/comfyui-proxy?${proxyParams}`);
 }
 
-export async function runComfyWorkflow(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal) {
-    const queued = await queueComfyPrompt(config, workflow, signal);
+export async function runComfyWorkflow(config: ComfyUiConfig, workflow: ComfyWorkflowJson, signal?: AbortSignal, jobId?: string) {
+    const queued = await queueComfyPrompt(config, workflow, signal, jobId);
     const history = await waitForComfyHistory(config, queued.prompt_id!, signal);
     const images = extractComfyOutputImages(history).map((file) => buildComfyViewUrl(config, file));
     const videos = extractComfyOutputVideos(history).map((file) => buildComfyViewUrl(config, file));
     const audios = extractComfyOutputAudios(history).map((file) => buildComfyViewUrl(config, file));
-    return { promptId: queued.prompt_id!, history, images, videos, audios };
+    const texts = extractComfyOutputTexts(history, workflow);
+    return { promptId: queued.prompt_id!, history, images, videos, audios, texts };
 }
 
 async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: ComfyRequestOptions = {}): Promise<T> {
@@ -171,7 +200,7 @@ async function comfyRequest<T>(config: ComfyUiConfig, path: string, options: Com
         config.proxyMode === "backend"
             ? await fetch(apiUrl("/api/comfyui-proxy"), {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: { "Content-Type": "application/json", ...durableGenerationHeaders(apiUrl("/api/comfyui-proxy"), options.jobId) },
                   body: JSON.stringify({ baseUrl, path, method, body: options.body }),
                   signal: options.signal,
               })
@@ -205,6 +234,13 @@ function collectComfyOutputFiles(value: unknown): ComfyOutputFile[] {
     if (Array.isArray(value)) return value.flatMap(collectComfyOutputFiles);
     if (!value || typeof value !== "object") return [];
     return Object.values(value).flatMap(collectComfyOutputFiles);
+}
+
+function collectComfyOutputStrings(value: unknown, textField = false): string[] {
+    if (typeof value === "string") return textField ? [value] : [];
+    if (Array.isArray(value)) return value.flatMap((item) => collectComfyOutputStrings(item, textField));
+    if (!value || typeof value !== "object" || isComfyOutputFile(value)) return [];
+    return Object.entries(value).flatMap(([key, item]) => collectComfyOutputStrings(item, textField || COMFY_TEXT_OUTPUT_KEY_HINTS.has(key.toLowerCase())));
 }
 
 function detectComfyMediaKind(file: ComfyOutputFile, outputKey: string): ComfyMediaKind | undefined {

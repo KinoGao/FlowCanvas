@@ -22,6 +22,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { normalizeVideoGenerationMode, resolveVideoModelCapabilityForRequest, type VideoGenerationMode, type VideoModelCapability } from "@/services/api/model-capabilities";
 import { VideoGenerationTimeoutError, assertVideoGenerationActive, remainingVideoGenerationTime } from "@/services/api/video-generation-timeout";
+import { durableGenerationHeaders, type DurableGenerationOptions } from "@/services/api/generation-jobs";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -47,14 +48,14 @@ type AgnesTask = {
     message?: string;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal; generationMode?: VideoGenerationMode };
+type RequestOptions = DurableGenerationOptions & { generationMode?: VideoGenerationMode };
 
 /** 视频创建任务请求超时（毫秒） */
-const VIDEO_CREATE_TIMEOUT_MS = 60_000;
+const VIDEO_CREATE_TIMEOUT_MS = 1_800_000;
 /** Agnes 会在创建时拉取公网参考图，响应可能明显慢于其他视频接口。 */
-const AGNES_VIDEO_CREATE_TIMEOUT_MS = 180_000;
+const AGNES_VIDEO_CREATE_TIMEOUT_MS = 1_800_000;
 /** 视频轮询单次请求超时（毫秒） */
-const VIDEO_POLL_TIMEOUT_MS = 30_000;
+const VIDEO_POLL_TIMEOUT_MS = 60_000;
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
@@ -79,21 +80,31 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 
 export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions & { startedAt?: number }): Promise<VideoGenerationResult> {
     const startedAt = options?.startedAt ?? Date.now();
-    assertVideoGenerationActive(startedAt);
     if (options?.signal?.aborted) throw abortError();
 
     const controller = new AbortController();
     let deadlineExpired = false;
     const abortFromParent = () => controller.abort();
     options?.signal?.addEventListener("abort", abortFromParent, { once: true });
-    const deadlineTimer = setTimeout(() => {
-        deadlineExpired = true;
-        controller.abort();
-    }, remainingVideoGenerationTime(startedAt));
     const pollOptions: RequestOptions = { signal: controller.signal, generationMode: options?.generationMode };
     const pollDelayMs = task.provider === "openai" ? 2500 : 5000;
+    const remainingAtStart = remainingVideoGenerationTime(startedAt);
+    const deadlineTimer = remainingAtStart > 0
+        ? setTimeout(() => {
+              deadlineExpired = true;
+              controller.abort();
+          }, remainingAtStart)
+        : null;
 
     try {
+        // A canvas can reopen after the 30-minute local deadline while the provider task
+        // has already completed. Poll once before enforcing the timeout so that result can
+        // still be restored instead of being discarded solely because the page was closed.
+        const initialState = await pollVideoGenerationTask(config, task, pollOptions);
+        if (initialState.status === "completed") return initialState.result;
+        if (initialState.status === "failed") throw new Error(initialState.error);
+        if (remainingAtStart <= 0) throw new VideoGenerationTimeoutError();
+
         while (true) {
             assertVideoGenerationActive(startedAt);
             const state = await pollVideoGenerationTask(config, task, pollOptions);
@@ -103,11 +114,11 @@ export async function waitForVideoGenerationTask(config: AiConfig, task: VideoGe
             await delay(Math.min(pollDelayMs, remainingVideoGenerationTime(startedAt)), controller.signal);
         }
     } catch (error) {
-        if (deadlineExpired || remainingVideoGenerationTime(startedAt) <= 0) throw new VideoGenerationTimeoutError();
+        if (error instanceof VideoGenerationTimeoutError || deadlineExpired) throw new VideoGenerationTimeoutError();
         if (options?.signal?.aborted) throw abortError();
         throw error;
     } finally {
-        clearTimeout(deadlineTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
         options?.signal?.removeEventListener("abort", abortFromParent);
     }
 }
@@ -230,7 +241,8 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
     const files = await Promise.all(references.slice(0, 7).map(imageToFile));
     files.forEach((file) => body.append("input_reference[]", file));
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
+        const url = aiApiUrl(config, "/videos");
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(url, body, { headers: { ...aiHeaders(config), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -290,7 +302,8 @@ async function createSeedanceTask(
     if (capability?.draft) payload.draft = draft;
 
     try {
-        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
+        const url = aiApiUrl(config, "/videos");
+        const created = unwrapSeedanceTask((await axios.post<ApiEnvelope<SeedanceTask>>(url, payload, { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: VIDEO_CREATE_TIMEOUT_MS })).data);
         if (!created.id) throw new Error("Seedance 接口没有返回任务 ID");
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
@@ -435,7 +448,8 @@ async function sendAgnesCreateRequest(
     };
     if (urls.length) body.input_reference = urls;
 
-    const created = (await axios.post<AgnesTask>(agnesVideoCreateUrl(config), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: AGNES_VIDEO_CREATE_TIMEOUT_MS })).data;
+    const url = agnesVideoCreateUrl(config);
+    const created = (await axios.post<AgnesTask>(url, body, { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: AGNES_VIDEO_CREATE_TIMEOUT_MS })).data;
     if (created.error?.message) throw new Error(created.error.message);
     const taskId = created.video_id || created.task_id || created.id;
     if (!taskId) throw new Error("Agnes 视频接口没有返回任务 ID");

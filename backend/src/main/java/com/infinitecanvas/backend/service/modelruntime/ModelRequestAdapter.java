@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Pluggable bridge between the canvas-facing model proxy and a vendor-specific
@@ -52,4 +53,7 @@ public interface ModelRequestAdapter {
 
     /** Diagnostic identifier used in logs and admin UI. */
     default String name() { return getClass().getSimpleName(); }
+
+    /** Protocols that can be selected for a model in the admin configuration. */
+    default List<ModelProtocol> protocols() { return List.of(); }
 }

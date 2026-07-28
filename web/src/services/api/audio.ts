@@ -3,12 +3,13 @@ import axios from "axios";
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { resolveAudioModelCapabilityForRequest } from "@/services/api/model-capabilities";
+import { durableGenerationHeaders, type DurableGenerationOptions } from "@/services/api/generation-jobs";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = DurableGenerationOptions;
 
 /** 音频生成请求超时（毫秒） */
-const AUDIO_GENERATION_TIMEOUT_MS = 120_000;
+const AUDIO_GENERATION_TIMEOUT_MS = 1_800_000;
 
 function aiApiUrl(config: AiConfig, path: string) {
     return buildApiUrl(config.baseUrl, path, config.useProxy);
@@ -30,9 +31,10 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
     const format = normalizeAudioFormatValue(config.audioFormat);
     const instructions = config.audioInstructions.trim();
 
+    const url = aiApiUrl(requestConfig, "/audio/speech");
     try {
         const response = await axios.post<Blob>(
-            aiApiUrl(requestConfig, "/audio/speech"),
+            url,
             {
                 model,
                 input: prompt,
@@ -41,7 +43,7 @@ export async function requestAudioGeneration(config: AiConfig, prompt: string, o
                 speed: Number(normalizeAudioSpeedValue(config.audioSpeed)),
                 ...(instructions ? { instructions } : {}),
             },
-            { headers: aiHeaders(requestConfig), responseType: "blob", signal: options?.signal, timeout: AUDIO_GENERATION_TIMEOUT_MS },
+            { headers: { ...aiHeaders(requestConfig), ...durableGenerationHeaders(url, options?.jobId) }, responseType: "blob", signal: options?.signal, timeout: AUDIO_GENERATION_TIMEOUT_MS },
         );
         await assertAudioBlob(response.data);
         return response.data.type.startsWith("audio/") ? response.data : new Blob([response.data], { type: audioMimeType(format) });

@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  */
 @Service
 public class GenericOpenAiAdapter implements ModelRequestAdapter {
-    private static final Duration TIMEOUT = Duration.ofMinutes(20);
+    private static final Duration TIMEOUT = Duration.ofMinutes(30);
     private static final Set<String> HOP_HEADERS = Set.of(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "trailers", "transfer-encoding", "upgrade",
@@ -58,6 +58,14 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
 
     @Override
     public int order() { return Integer.MAX_VALUE; }
+
+    @Override
+    public List<ModelProtocol> protocols() {
+        return List.of(
+                new ModelProtocol("openai", "OpenAI 直连", "OpenAI 兼容的同步或异步接口"),
+                new ModelProtocol("gemini", "Gemini 协议", "Gemini 原生接口；厂商协议需选择 Gemini")
+        );
+    }
 
     @Override
     public boolean supports(PlatformConfigService.RuntimeModel runtime, String suffix) {

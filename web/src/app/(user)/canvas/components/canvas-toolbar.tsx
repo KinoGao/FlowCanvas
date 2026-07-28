@@ -42,6 +42,7 @@ export function CanvasToolbar({
     canUndo,
     canRedo,
     backgroundMode,
+    snapToGrid,
     showImageInfo,
     onAddImage,
     onAddVideo,
@@ -61,6 +62,7 @@ export function CanvasToolbar({
     onDelete,
     onClear,
     onBackgroundModeChange,
+    onSnapToGridChange,
     onShowImageInfoChange,
     onOpenMyAssets,
     onOpenMaterialLibrary,
@@ -71,6 +73,7 @@ export function CanvasToolbar({
     canUndo: boolean;
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
+    snapToGrid: boolean;
     showImageInfo: boolean;
     onAddImage: () => void;
     onAddVideo: () => void;
@@ -92,6 +95,7 @@ export function CanvasToolbar({
     onClear: () => void;
     onDeselect: () => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
+    onSnapToGridChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
@@ -303,6 +307,13 @@ export function CanvasToolbar({
                             },
                         ]}
                     />
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium opacity-65">
+                            <Grid2x2 className="size-3.5" />
+                            对齐网格
+                        </span>
+                        <Switch size="small" checked={snapToGrid} onChange={onSnapToGridChange} />
+                    </div>
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
                         <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium opacity-65">
                             <Info className="size-3.5" />

@@ -350,6 +350,23 @@ class VolcengineSeedanceAdapterTest {
     }
 
     @Test
+    void allowsExplicitlyDisabledUnsupportedFlags() throws Exception {
+        PlatformConfigService.RuntimeModel runtime = runtimeWithModes(List.of("text-to-video"));
+        runtime.model().getVideoCapabilities().setGenerateAudio(false);
+        runtime.model().getVideoCapabilities().setWatermark(false);
+        runtime.model().getVideoCapabilities().setDraft(false);
+        runtime.model().setRequestAdapter("seedance-v1");
+        runtime.model().setRequestModel("doubao-seedance-1-0-lite-t2v-250428");
+
+        ResponseEntity<?> response = create(runtime, """
+                {"content":[{"type":"text","text":"Silent clip"}],"duration":5,
+                 "resolution":"720p","ratio":"16:9","generate_audio":false,"watermark":false,"draft":false}
+                """);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    @Test
     void rejectsFirstLastFrameForSeedance10ProFast() throws Exception {
         PlatformConfigService.RuntimeModel runtime = runtimeWithModes(List.of("text-to-video", "image-to-video"));
         runtime.model().setRequestAdapter("seedance-v1");

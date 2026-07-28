@@ -140,7 +140,7 @@ export const defaultComfyUiConfig: ComfyUiConfig = {
     baseUrl: "http://127.0.0.1:8188",
     clientId: "flow-canvas",
     defaultWorkflowId: "",
-    timeoutSeconds: "300",
+    timeoutSeconds: "1800",
     pollIntervalMs: "1200",
 };
 

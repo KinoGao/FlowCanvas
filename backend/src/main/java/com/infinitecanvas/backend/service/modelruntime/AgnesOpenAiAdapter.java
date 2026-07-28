@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class AgnesOpenAiAdapter implements ModelRequestAdapter {
-    private static final Duration TIMEOUT = Duration.ofMinutes(20);
+    private static final Duration TIMEOUT = Duration.ofMinutes(30);
     private static final List<Duration> CREATE_RETRY_DELAYS = List.of(Duration.ofSeconds(1), Duration.ofSeconds(2));
     private static final Set<Integer> TRANSIENT_CREATE_STATUSES = Set.of(429, 502, 503, 504);
     private static final Pattern TASK_PATH = Pattern.compile("^/videos/([^/]+)(/content)?$");
@@ -79,6 +79,11 @@ public class AgnesOpenAiAdapter implements ModelRequestAdapter {
 
     @Override
     public int order() { return 0; }
+
+    @Override
+    public List<ModelProtocol> protocols() {
+        return List.of(new ModelProtocol("agnes-v2", "异步协议 · Agnes Video V2", "Agnes 视频创建、轮询与媒体回传接口"));
+    }
 
     @Override
     public boolean supports(PlatformConfigService.RuntimeModel runtime, String suffix) {

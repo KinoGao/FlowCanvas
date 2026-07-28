@@ -7,6 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { isSeedreamImageModel, resolveSeedreamSize, seedreamEditError, seedreamGenerationError, seedreamSupportsOutputFormat } from "@/lib/seedream-image";
 import { uploadImageToCurrentBackend } from "@/services/api/backend";
+import { durableGenerationHeaders, type DurableGenerationOptions } from "@/services/api/generation-jobs";
 import {
     resolveImageModelCapabilityForRequest,
     type ImageGenerationMode,
@@ -17,9 +18,9 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 /** 图像生成请求超时（毫秒），高分辨率生成可能需要较长时间 */
-const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
+const IMAGE_GENERATION_TIMEOUT_MS = 1_800_000;
 /** 流式聊天请求超时（毫秒） */
-const STREAMING_CHAT_TIMEOUT_MS = 120_000;
+const STREAMING_CHAT_TIMEOUT_MS = 1_800_000;
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -110,7 +111,7 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = DurableGenerationOptions;
 
 const RESOLUTION_BASE: Record<string, number> = {
     "1k": 1024,
@@ -599,9 +600,10 @@ function mergeChatDeltaToolCall(toolCalls: ResponseToolCall[], delta: ChatDeltaT
 async function requestStreamingChatCompletion(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const timeoutSignal = AbortSignal.timeout(STREAMING_CHAT_TIMEOUT_MS);
     const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
-    const response = await fetch(aiApiUrl(config, "/chat/completions"), {
+    const url = aiApiUrl(config, "/chat/completions");
+    const response = await fetch(url, {
         method: "POST",
-        headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
+        headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId), Accept: "text/event-stream" },
         body: JSON.stringify({ ...body, stream: true }),
         signal,
     });
@@ -695,9 +697,10 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
 async function requestGeminiStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const timeoutSignal = AbortSignal.timeout(STREAMING_CHAT_TIMEOUT_MS);
     const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
-    const response = await fetch(`${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, {
+    const url = `${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`;
+    const response = await fetch(url, {
         method: "POST",
-        headers: geminiHeaders(config),
+        headers: { ...geminiHeaders(config), ...durableGenerationHeaders(url, options?.jobId) },
         body: JSON.stringify(body),
         signal,
     });
@@ -781,13 +784,14 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
     for (const image of references) {
         parts.push(toGeminiImagePart(await imageToDataUrl(image)));
     }
+    const url = geminiApiUrl(config, "generateContent");
     const response = await axios.post<GeminiPayload>(
-        geminiApiUrl(config, "generateContent"),
+        url,
         {
             ...toGeminiBody(config, [{ role: "user", content: prompt }], { generationConfig: { responseModalities: ["TEXT", "IMAGE"] } }),
             contents: [{ role: "user", parts }],
         },
-        { headers: geminiHeaders(config), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
+        { headers: { ...geminiHeaders(config), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
     );
     return parseGeminiImagePayload(response.data, config.useProxy);
 }
@@ -832,8 +836,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
     const useB64Json = shouldUseB64JsonResponse(config, requestConfig.model);
     try {
+        const url = aiApiUrl(requestConfig, "/images/generations");
         const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
+            url,
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
@@ -844,7 +849,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
             },
             {
-                headers: aiHeaders(requestConfig, "application/json"),
+                headers: { ...aiHeaders(requestConfig, "application/json"), ...durableGenerationHeaders(url, options?.jobId) },
                 signal: options?.signal,
                 timeout: IMAGE_GENERATION_TIMEOUT_MS,
             },
@@ -906,7 +911,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
+        const url = aiApiUrl(requestConfig, "/images/edits");
+        const response = await axios.post<ImageApiResponse>(url, formData, { headers: { ...aiHeaders(requestConfig), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
         const images = parseImagePayload(response.data, requestConfig.useProxy);
         return images;
     } catch (error) {
@@ -926,7 +932,8 @@ async function requestAgnesImages(config: AiConfig, prompt: string, references: 
         };
         if (images.length) body.image = images.length === 1 ? images[0] : images;
         if (responseFormat === "b64_json" || config.imageResponseFormat === "url") body.response_format = responseFormat;
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/generations"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
+        const url = aiApiUrl(config, "/images/generations");
+        const response = await axios.post<ImageApiResponse>(url, body, { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
         return parseImagePayload(response.data, config.useProxy);
     } catch (error) {
         throw new Error(readAgnesImageError(error, size));
@@ -975,8 +982,9 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
         const requestSize = resolveSeedreamSize(config.model, normalizeResolution(resolution), size);
         const useB64Json = shouldUseB64JsonResponse(config, config.model);
         const imageUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const url = aiApiUrl(config, "/images/generations");
         const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(config, "/images/generations"),
+            url,
             {
                 model: config.model,
                 prompt: withSystemPrompt(config, prompt),
@@ -986,7 +994,7 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
             },
-            { headers: aiHeaders(config, "application/json"), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
+            { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
         );
         return parseImagePayload(response.data, config.useProxy);
     } catch (error) {

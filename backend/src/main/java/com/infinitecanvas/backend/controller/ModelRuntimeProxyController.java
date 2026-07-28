@@ -1,6 +1,8 @@
 package com.infinitecanvas.backend.controller;
 
 import com.infinitecanvas.backend.service.PlatformConfigService;
+import com.infinitecanvas.backend.service.GenerationJobService;
+import com.infinitecanvas.backend.service.UserRequestContext;
 import com.infinitecanvas.backend.service.modelruntime.ModelRequestAdapter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -25,17 +27,28 @@ import java.util.Locale;
 @RequestMapping("/api/model-runtime/models")
 public class ModelRuntimeProxyController {
     private final PlatformConfigService configService;
+    private final GenerationJobService generationJobService;
     private final List<ModelRequestAdapter> adapters;
 
-    public ModelRuntimeProxyController(PlatformConfigService configService, List<ModelRequestAdapter> adapters) {
+    public ModelRuntimeProxyController(PlatformConfigService configService, GenerationJobService generationJobService, List<ModelRequestAdapter> adapters) {
         this.configService = configService;
+        this.generationJobService = generationJobService;
         this.adapters = adapters.stream()
                 .sorted(Comparator.comparingInt(ModelRequestAdapter::order))
                 .toList();
     }
 
     @RequestMapping("/{modelId}/**")
-    public ResponseEntity<?> proxy(HttpServletRequest request) throws IOException, InterruptedException {
+    public ResponseEntity<?> proxy(HttpServletRequest request) throws Exception {
+        String jobKey = request.getHeader("X-FlowCanvas-Job-Id");
+        return generationJobService.execute(
+                UserRequestContext.currentUser(request),
+                jobKey,
+                () -> proxyNow(request)
+        );
+    }
+
+    private ResponseEntity<?> proxyNow(HttpServletRequest request) throws IOException, InterruptedException {
         String modelId = pathModelId(request);
         PlatformConfigService.RuntimeModel runtime;
         try {

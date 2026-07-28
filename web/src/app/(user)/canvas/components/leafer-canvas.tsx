@@ -5,7 +5,7 @@ import * as LUI from "leafer-ui";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
 import { buildConnectionPathFromPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
 import { canvasToScreen, clampViewport, screenToCanvas, viewportToCssTransform, sameViewport } from "./leafer-viewport";
@@ -16,6 +16,7 @@ type LeaferCanvasProps = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
     backgroundMode?: CanvasBackgroundMode;
+    alignmentGuides?: CanvasAlignmentGuides | null;
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
     onViewportChange: (viewport: ViewportTransform) => void;
@@ -56,6 +57,7 @@ export function LeaferCanvas({
     nodes = EMPTY_NODES,
     connections = EMPTY_CONNECTIONS,
     backgroundMode = "lines",
+    alignmentGuides,
     selectedNodeIds,
     selectedConnectionId,
     onViewportChange,
@@ -209,7 +211,7 @@ export function LeaferCanvas({
                     : 1;
             const wheelDelta = Math.max(-120, Math.min(120, e.deltaY * deltaScale));
             const zoomFactor = Math.exp(-wheelDelta * 0.0025);
-            const newK = Math.max(0.05, Math.min(5, vp.k * zoomFactor));
+            const newK = Math.max(0.2, Math.min(5, vp.k * zoomFactor));
             const newX = mouseX - (mouseX - vp.x) * (newK / vp.k);
             const newY = mouseY - (mouseY - vp.y) * (newK / vp.k);
             const next = clampViewport({ x: newX, y: newY, k: newK }, rect.width, rect.height);
@@ -662,6 +664,30 @@ export function LeaferCanvas({
                 className="pointer-events-none absolute inset-0 z-[60] h-full w-full overflow-visible"
                 aria-hidden
             >
+                {alignmentGuides?.vertical !== undefined ? (
+                    <line
+                        x1={viewport.x + alignmentGuides.vertical * viewport.k}
+                        x2={viewport.x + alignmentGuides.vertical * viewport.k}
+                        y1="0"
+                        y2="100%"
+                        stroke={theme.ui.accent}
+                        strokeWidth="1"
+                        strokeDasharray="5 5"
+                        vectorEffect="non-scaling-stroke"
+                    />
+                ) : null}
+                {alignmentGuides?.horizontal !== undefined ? (
+                    <line
+                        x1="0"
+                        x2="100%"
+                        y1={viewport.y + alignmentGuides.horizontal * viewport.k}
+                        y2={viewport.y + alignmentGuides.horizontal * viewport.k}
+                        stroke={theme.ui.accent}
+                        strokeWidth="1"
+                        strokeDasharray="5 5"
+                        vectorEffect="non-scaling-stroke"
+                    />
+                ) : null}
                 <path
                     ref={tempEdgePathRef}
                     className="canvas-flow-edge"

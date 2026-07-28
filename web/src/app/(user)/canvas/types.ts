@@ -12,6 +12,11 @@ export type ViewportTransform = {
     k: number;
 };
 
+export type CanvasAlignmentGuides = {
+    vertical?: number;
+    horizontal?: number;
+};
+
 export enum CanvasNodeType {
     Image = "image",
     Text = "text",
@@ -74,6 +79,7 @@ export type CanvasGenerationMetadata = {
     videoGenerationMode?: VideoGenerationMode;
     videoTask?: { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
     videoTaskStartedAt?: number;
+    generationJobId?: string;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

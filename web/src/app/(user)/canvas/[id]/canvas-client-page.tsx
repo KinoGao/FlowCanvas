@@ -4,7 +4,6 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Bot, Box, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, Menu, Music2, Plus, Search, Share2, Trash2, Upload, Video, Workflow, X } from "lucide-react";
-import * as THREE from "three";
 
 import { saveAs } from "file-saver";
 
@@ -60,6 +59,7 @@ import type { DirectorDeskCapture } from "../director/storyai/DirectorDesk";
 import type { CanvasAgentMode } from "../components/canvas-agent-chat-ui";
 import {
     CanvasNodeType,
+    type CanvasAlignmentGuides,
     type CanvasAssistantImage,
     type CanvasAssistantReference,
     type CanvasAssistantSession,
@@ -161,6 +161,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
+    snapToGrid: boolean;
     showImageInfo: boolean;
 };
 
@@ -169,6 +170,12 @@ type CanvasGenerationRequest = {
     originNodeId: string;
     runningNodeId: string;
     controller: AbortController;
+};
+
+type MultiNodeDragState = {
+    anchorId: string;
+    anchorPosition: Position;
+    nodePositions: Map<string, Position>;
 };
 
 function defaultGenerationMode(type?: CanvasNodeType): CanvasNodeGenerationMode {
@@ -276,6 +283,8 @@ const MATERIAL_LIBRARY_PRESETS = {
 };
 const EMPTY_NODE_INPUTS: NodeGenerationInput[] = [];
 const EMPTY_MENTION_REFERENCES: ReturnType<typeof buildNodeMentionReferences> = [];
+const CANVAS_GRID_SIZE = 56;
+const ALIGNMENT_GUIDE_SCREEN_THRESHOLD = 8;
 const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
 
 要求：
@@ -300,6 +309,87 @@ function createCanvasNodeBase(type: CanvasNodeType, position: Position, metadata
         height,
         metadata: { ...spec.metadata, ...metadata },
     };
+}
+
+function snapCanvasPosition(position: Position): Position {
+    return {
+        x: Math.round(position.x / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE,
+        y: Math.round(position.y / CANVAS_GRID_SIZE) * CANVAS_GRID_SIZE,
+    };
+}
+
+function sameAlignmentGuides(left: CanvasAlignmentGuides | null, right: CanvasAlignmentGuides | null) {
+    return left?.vertical === right?.vertical && left?.horizontal === right?.horizontal;
+}
+
+function resolveNodeAlignment(
+    nodeId: string,
+    position: Position,
+    nodes: CanvasNodeData[],
+    dragState: MultiNodeDragState | null,
+    scale: number,
+): { position: Position; guides: CanvasAlignmentGuides | null } {
+    const anchor = nodes.find((node) => node.id === nodeId);
+    if (!anchor) return { position, guides: null };
+
+    const movingIds = new Set(dragState?.nodePositions.keys() || [nodeId]);
+    const deltaX = dragState ? position.x - dragState.anchorPosition.x : position.x - anchor.position.x;
+    const deltaY = dragState ? position.y - dragState.anchorPosition.y : position.y - anchor.position.y;
+    const movingNodes = nodes.filter((node) => movingIds.has(node.id));
+    if (!movingNodes.length) return { position, guides: null };
+
+    const bounds = movingNodes.reduce(
+        (result, node) => {
+            const start = dragState?.nodePositions.get(node.id) || node.position;
+            const left = start.x + deltaX;
+            const top = start.y + deltaY;
+            return {
+                left: Math.min(result.left, left),
+                right: Math.max(result.right, left + node.width),
+                top: Math.min(result.top, top),
+                bottom: Math.max(result.bottom, top + node.height),
+            };
+        },
+        { left: Number.POSITIVE_INFINITY, right: Number.NEGATIVE_INFINITY, top: Number.POSITIVE_INFINITY, bottom: Number.NEGATIVE_INFINITY },
+    );
+    const movingX = [bounds.left, (bounds.left + bounds.right) / 2, bounds.right];
+    const movingY = [bounds.top, (bounds.top + bounds.bottom) / 2, bounds.bottom];
+    const threshold = ALIGNMENT_GUIDE_SCREEN_THRESHOLD / Math.max(scale, 0.05);
+    let vertical: number | undefined;
+    let horizontal: number | undefined;
+    let xAdjustment = 0;
+    let yAdjustment = 0;
+    let xDistance = Number.POSITIVE_INFINITY;
+    let yDistance = Number.POSITIVE_INFINITY;
+
+    for (const target of nodes) {
+        if (movingIds.has(target.id)) continue;
+        const targetX = [target.position.x, target.position.x + target.width / 2, target.position.x + target.width];
+        const targetY = [target.position.y, target.position.y + target.height / 2, target.position.y + target.height];
+        for (const source of movingX) {
+            for (const candidate of targetX) {
+                const distance = Math.abs(candidate - source);
+                if (distance <= threshold && distance < xDistance) {
+                    xDistance = distance;
+                    xAdjustment = candidate - source;
+                    vertical = candidate;
+                }
+            }
+        }
+        for (const source of movingY) {
+            for (const candidate of targetY) {
+                const distance = Math.abs(candidate - source);
+                if (distance <= threshold && distance < yDistance) {
+                    yDistance = distance;
+                    yAdjustment = candidate - source;
+                    horizontal = candidate;
+                }
+            }
+        }
+    }
+
+    const guides = vertical === undefined && horizontal === undefined ? null : { vertical, horizontal };
+    return { position: { x: position.x + xAdjustment, y: position.y + yAdjustment }, guides };
 }
 
 function resolveComposerOverlayPosition({
@@ -588,6 +678,8 @@ function ReactFlowCanvasPage() {
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
+    const [snapToGrid, setSnapToGrid] = useState(false);
+    const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -633,6 +725,8 @@ function ReactFlowCanvasPage() {
     const nodeByIdRef = useRef<Map<string, CanvasNodeData>>(new Map());
     const hiddenBatchChildIdsRef = useRef<Set<string>>(new Set());
     const viewportRef = useRef(viewport);
+    const snapToGridRef = useRef(snapToGrid);
+    snapToGridRef.current = snapToGrid;
     const lastCanvasPositionRef = useRef<Position | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
@@ -640,7 +734,9 @@ function ReactFlowCanvasPage() {
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
-    const multiNodeDragStartRef = useRef<{ anchorId: string; anchorPosition: Position; nodePositions: Map<string, Position> } | null>(null);
+    const recoveredVideoTaskIdsRef = useRef(new Set<string>());
+    const resumedGenerationProjectKeyRef = useRef<string | null>(null);
+    const multiNodeDragStartRef = useRef<MultiNodeDragState | null>(null);
     const retainedMediaNodeIdsRef = useRef(new Set<string>());
     const [retainedMediaVersion, setRetainedMediaVersion] = useState(0);
 
@@ -655,12 +751,14 @@ function ReactFlowCanvasPage() {
         nodeSequenceCountersRef.current = identity.nodeSequenceCounters;
         setNodeSequenceCounters(identity.nodeSequenceCounters);
 
+        const node = createCanvasNodeBase(type, position, {
+            ...metadata,
+            typeSequence: identity.typeSequence,
+            ...(type === CanvasNodeType.ComfyUI ? { generationMode: "comfyui" } : null),
+        });
         return {
-            ...createCanvasNodeBase(type, position, {
-                ...metadata,
-                typeSequence: identity.typeSequence,
-                ...(type === CanvasNodeType.ComfyUI ? { generationMode: "comfyui" } : null),
-            }),
+            ...node,
+            position: snapToGridRef.current ? snapCanvasPosition(node.position) : node.position,
             title: identity.title,
         };
     }, []);
@@ -687,9 +785,10 @@ function ReactFlowCanvasPage() {
             chatSessions,
             activeChatId,
             backgroundMode,
+            snapToGrid,
             showImageInfo,
         }),
-        [activeChatId, backgroundMode, chatSessions, showImageInfo],
+        [activeChatId, backgroundMode, chatSessions, showImageInfo, snapToGrid],
     );
 
     const cleanupCanvasFiles = useCallback(
@@ -713,14 +812,15 @@ function ReactFlowCanvasPage() {
 
     const finishCanvasVideoTask = useCallback(
         async (nodeId: string, generationConfig: AiConfig, task: VideoGenerationTask, startedAt: number, controller: AbortController) => {
+            let providerTaskCompleted = false;
             try {
-                const video = await storeGeneratedVideo(
-                    await waitForVideoGenerationTask(generationConfig, task, {
-                        signal: controller.signal,
-                        generationMode: nodesRef.current.find((node) => node.id === nodeId)?.metadata?.videoGenerationMode,
-                        startedAt,
-                    }),
-                );
+                const result = await waitForVideoGenerationTask(generationConfig, task, {
+                    signal: controller.signal,
+                    generationMode: nodesRef.current.find((node) => node.id === nodeId)?.metadata?.videoGenerationMode,
+                    startedAt,
+                });
+                providerTaskCompleted = true;
+                const video = await storeGeneratedVideo(result);
                 setNodes((prev) =>
                     prev.map((node) => {
                         if (node.id !== nodeId) return node;
@@ -730,14 +830,27 @@ function ReactFlowCanvasPage() {
                             width: videoSize.width,
                             height: videoSize.height,
                             position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
-                            metadata: { ...node.metadata, ...videoMetadata(video), videoTask: undefined, videoTaskStartedAt: undefined, errorDetails: undefined },
+                            metadata: { ...node.metadata, ...videoMetadata(video), generationJobId: undefined, videoTask: undefined, videoTaskStartedAt: undefined, errorDetails: undefined },
                         };
                     }),
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "视频生成失败";
-                setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, videoTask: undefined, videoTaskStartedAt: undefined } } : node)));
+                if (providerTaskCompleted) recoveredVideoTaskIdsRef.current.add(nodeId);
+                setNodes((prev) => prev.map((node) => (
+                    node.id === nodeId
+                        ? {
+                              ...node,
+                              metadata: {
+                                  ...node.metadata,
+                                  status: NODE_STATUS_ERROR,
+                                  errorDetails: providerTaskCompleted ? `视频已生成，但保存到素材库失败：${errorDetails}。重新打开画布会自动恢复。` : errorDetails,
+                                  ...(providerTaskCompleted ? null : { videoTask: undefined, videoTaskStartedAt: undefined }),
+                              },
+                          }
+                        : node
+                )));
                 message.error(errorDetails);
             } finally {
                 finishGenerationRequest(nodeId, controller);
@@ -762,6 +875,34 @@ function ReactFlowCanvasPage() {
                     await pushBackendProjects(token, latest.projects, latest.projectTombstones);
                 } catch (error) {
                     console.warn("[canvas-video] pending task save will retry through workspace sync", error);
+                }
+            }
+        },
+        [projectId, saveMode, token, updateProject],
+    );
+
+    const saveCanvasGenerationJobs = useCallback(
+        async (jobs: ReadonlyMap<string, string>) => {
+            if (!jobs.size) return;
+            await new Promise<void>((resolve) => {
+                setNodes((prev) => {
+                    const next = prev.map((node) => {
+                        const generationJobId = jobs.get(node.id);
+                        return generationJobId
+                            ? { ...node, metadata: { ...node.metadata, generationJobId, status: NODE_STATUS_LOADING, errorDetails: undefined } }
+                            : node;
+                    });
+                    updateProject(projectId, { nodes: next });
+                    resolve();
+                    return next;
+                });
+            });
+            if (saveMode === "backend" && token) {
+                try {
+                    const latest = useCanvasStore.getState();
+                    await pushBackendProjects(token, latest.projects, latest.projectTombstones);
+                } catch (error) {
+                    console.warn("[canvas-generation] pending job save will retry through workspace sync", error);
                 }
             }
         },
@@ -803,17 +944,6 @@ function ReactFlowCanvasPage() {
     );
 
     useEffect(() => {
-        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (!generationRequestsRef.current.size) return;
-            event.preventDefault();
-            event.returnValue = "";
-        };
-
-        window.addEventListener("beforeunload", handleBeforeUnload);
-        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-    }, []);
-
-    useEffect(() => {
         if (!backendWorkspaceReady || canvasSessionExpired) return;
         const restoreKey = `${saveMode}:${user?.id || "anonymous"}:${projectId}`;
         if (restoredProjectKeyRef.current === restoreKey) return;
@@ -849,6 +979,7 @@ function ReactFlowCanvasPage() {
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
+            setSnapToGrid(project.snapToGrid || false);
             setShowImageInfo(project.showImageInfo || false);
             setViewport(project.viewport);
             historyRef.current = { past: [], future: [] };
@@ -862,6 +993,7 @@ function ReactFlowCanvasPage() {
                 chatSessions: restoredSessions,
                 activeChatId: project.activeChatId || null,
                 backgroundMode: project.backgroundMode,
+                snapToGrid: project.snapToGrid || false,
                 showImageInfo: project.showImageInfo || false,
             };
             restoredProjectKeyRef.current = restoreKey;
@@ -885,6 +1017,7 @@ function ReactFlowCanvasPage() {
             previous.chatSessions === next.chatSessions &&
             previous.activeChatId === next.activeChatId &&
             previous.backgroundMode === next.backgroundMode &&
+            previous.snapToGrid === next.snapToGrid &&
             previous.showImageInfo === next.showImageInfo
         )
             return;
@@ -907,17 +1040,19 @@ function ReactFlowCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo, snapToGrid]);
 
     useEffect(() => {
         if (!projectLoaded) return;
         nodes.forEach((node) => {
-            const task = node.type === CanvasNodeType.Video && node.metadata?.status === NODE_STATUS_LOADING ? node.metadata.videoTask : undefined;
+            const task = node.type === CanvasNodeType.Video ? node.metadata?.videoTask : undefined;
             const startedAt = node.metadata?.videoTaskStartedAt;
-            if (!task || !startedAt || generationRequestsRef.current.has(node.id)) return;
+            if (!task || !startedAt || generationRequestsRef.current.has(node.id) || recoveredVideoTaskIdsRef.current.has(node.id)) return;
+            recoveredVideoTaskIdsRef.current.add(node.id);
             const controller = startGenerationRequest(node.id, node.id, node.id);
             setRunningNodeId(node.id);
-            void finishCanvasVideoTask(node.id, buildGenerationConfig(effectiveConfig, node, "video"), task, startedAt, controller).finally(() => setRunningNodeId((current) => (current === node.id ? null : current)));
+            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+            void finishCanvasVideoTask(node.id, { ...buildGenerationConfig(effectiveConfig, node, "video"), model: task.model }, task, startedAt, controller).finally(() => setRunningNodeId((current) => (current === node.id ? null : current)));
         });
     }, [effectiveConfig, finishCanvasVideoTask, nodes, projectLoaded, startGenerationRequest]);
 
@@ -933,7 +1068,7 @@ function ReactFlowCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, showImageInfo });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, showImageInfo });
         }, 300);
         return () => {
             if (projectSaveTimerRef.current) {
@@ -941,7 +1076,29 @@ function ReactFlowCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, updateProject]);
+    }, [activeChatId, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, snapToGrid, updateProject]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        const flushCanvasNodes = () => {
+            updateProject(projectId, {
+                nodes: nodesRef.current,
+                connections: connectionsRef.current,
+                nodeSequenceCounters: nodeSequenceCountersRef.current,
+                referenceOrderCounter: referenceOrderCounterRef.current,
+            });
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "hidden") flushCanvasNodes();
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange, true);
+        window.addEventListener("pagehide", flushCanvasNodes, true);
+        return () => {
+            document.removeEventListener("visibilitychange", handleVisibilityChange, true);
+            window.removeEventListener("pagehide", flushCanvasNodes, true);
+            flushCanvasNodes();
+        };
+    }, [projectId, projectLoaded, updateProject]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
@@ -1129,6 +1286,7 @@ function ReactFlowCanvasPage() {
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
         setIsNodeDragging(true);
+        setAlignmentGuides(null);
         const anchor = nodeByIdRef.current.get(nodeId);
         if (!anchor) return;
         const movingIds = selectedNodeIdsRef.current.has(nodeId)
@@ -1149,6 +1307,18 @@ function ReactFlowCanvasPage() {
 
     const nodeDragRafRef = useRef<number>(0);
     const pendingDragPosRef = useRef<{ nodeId: string; position: { x: number; y: number } } | null>(null);
+    const resolveDraggedPosition = useCallback((nodeId: string, position: Position) => {
+        const alignment = resolveNodeAlignment(nodeId, position, nodesRef.current, multiNodeDragStartRef.current, viewportRef.current.k);
+        const next = { ...alignment.position };
+        if (snapToGridRef.current) {
+            const gridPosition = snapCanvasPosition(next);
+            if (alignment.guides?.vertical === undefined) next.x = gridPosition.x;
+            if (alignment.guides?.horizontal === undefined) next.y = gridPosition.y;
+        }
+        setAlignmentGuides((current) => (sameAlignmentGuides(current, alignment.guides) ? current : alignment.guides));
+        return next;
+    }, []);
+
     const handleLeaferNodeDrag = useCallback((nodeId: string, position: { x: number; y: number }) => {
         // RAF 节流：拖拽时每帧最多更新一次 nodes state，避免高频 setNodes 触发级联 useMemo 重算
         pendingDragPosRef.current = { nodeId, position };
@@ -1158,10 +1328,11 @@ function ReactFlowCanvasPage() {
             const pending = pendingDragPosRef.current;
             if (!pending) return;
             pendingDragPosRef.current = null;
+            const nextPosition = resolveDraggedPosition(pending.nodeId, pending.position);
             const multiNodeDrag = multiNodeDragStartRef.current;
             if (multiNodeDrag?.anchorId === pending.nodeId) {
-                const dx = pending.position.x - multiNodeDrag.anchorPosition.x;
-                const dy = pending.position.y - multiNodeDrag.anchorPosition.y;
+                const dx = nextPosition.x - multiNodeDrag.anchorPosition.x;
+                const dy = nextPosition.y - multiNodeDrag.anchorPosition.y;
                 setNodes((prev) => {
                     let changed = false;
                     const next = prev.map((node) => {
@@ -1179,20 +1350,21 @@ function ReactFlowCanvasPage() {
             setNodes((prev) => {
                 let changed = false;
                 const next = prev.map((node) => {
-                    if (node.id !== pending.nodeId || (node.position.x === pending.position.x && node.position.y === pending.position.y)) return node;
+                    if (node.id !== pending.nodeId || (node.position.x === nextPosition.x && node.position.y === nextPosition.y)) return node;
                     changed = true;
-                    return { ...node, position: pending.position };
+                    return { ...node, position: nextPosition };
                 });
                 return changed ? next : prev;
             });
         });
-    }, []);
+    }, [resolveDraggedPosition]);
 
     const handleLeaferNodeDragStop = useCallback((nodeId: string, position: { x: number; y: number }) => {
+        const nextPosition = resolveDraggedPosition(nodeId, position);
         const multiNodeDrag = multiNodeDragStartRef.current;
         if (multiNodeDrag?.anchorId === nodeId) {
-            const dx = position.x - multiNodeDrag.anchorPosition.x;
-            const dy = position.y - multiNodeDrag.anchorPosition.y;
+            const dx = nextPosition.x - multiNodeDrag.anchorPosition.x;
+            const dy = nextPosition.y - multiNodeDrag.anchorPosition.y;
             setNodes((prev) => {
                 let changed = false;
                 const next = prev.map((node) => {
@@ -1209,9 +1381,9 @@ function ReactFlowCanvasPage() {
             setNodes((prev) => {
                 let changed = false;
                 const next = prev.map((node) => {
-                    if (node.id !== nodeId || (node.position.x === position.x && node.position.y === position.y)) return node;
+                    if (node.id !== nodeId || (node.position.x === nextPosition.x && node.position.y === nextPosition.y)) return node;
                     changed = true;
-                    return { ...node, position };
+                    return { ...node, position: nextPosition };
                 });
                 return reconcileGroupMembership(changed ? next : prev);
             });
@@ -1223,10 +1395,11 @@ function ReactFlowCanvasPage() {
             nodeDragRafRef.current = 0;
         }
         pendingDragPosRef.current = null;
+        setAlignmentGuides(null);
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
-    }, []);
+    }, [resolveDraggedPosition]);
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
@@ -1264,6 +1437,9 @@ function ReactFlowCanvasPage() {
         return querySpatialIndex(nodeSpatialIndex, viewRect).map((entry) => entry.item);
     }, [isNodeDragging, nodeSpatialIndex, size.height, size.width, viewport]);
 
+    // 已进入视口的媒体节点保持挂载，但设上限（60个），防止大型画布下 DOM 无限堆积。
+    // 超出上限时按 LRU 顺序移除最早进入的节点，控制常驻 DOM 数量。
+    const RETAINED_MEDIA_MAX = 60;
     useEffect(() => {
         const retainedIds = retainedMediaNodeIdsRef.current;
         let changed = false;
@@ -1273,6 +1449,20 @@ function ReactFlowCanvasPage() {
             retainedIds.add(node.id);
             changed = true;
         });
+
+        // 超出上限时移除最早加入的（Set 保持插入顺序）
+        if (retainedIds.size > RETAINED_MEDIA_MAX) {
+            const toRemove = retainedIds.size - RETAINED_MEDIA_MAX;
+            let count = 0;
+            for (const id of retainedIds) {
+                // 当前视口内的节点不移除
+                if (visibleNodes.some((n) => n.id === id)) continue;
+                retainedIds.delete(id);
+                count++;
+                if (count >= toRemove) break;
+            }
+            changed = true;
+        }
 
         if (changed) setRetainedMediaVersion((version) => version + 1);
     }, [visibleNodes]);
@@ -1323,11 +1513,13 @@ function ReactFlowCanvasPage() {
         : activeNodeId
           ? nodeById.get(activeNodeId) || null
           : null;
-    const { batchChildCountById, batchMotionById, configInputsById, configInputSummaryById } = useMemo(() => {
+    // 拆成两个独立 useMemo：
+    // batchChildCountById/batchMotionById 依赖 nodes（含位置），每次拖拽都会重算，但计算量很小。
+    // configInputsById/configInputSummaryById 依赖 canvasGraph（含连接关系），
+    // 只有连接变化时才会重算，避免拖拽时触发昂贵的 graph 遍历。
+    const { batchChildCountById, batchMotionById } = useMemo(() => {
         const batchChildCountById = new Map<string, number>();
         const batchMotionById = new Map<string, { x: number; y: number; index: number }>();
-        const configInputsById = new Map<string, NodeGenerationInput[]>();
-        const configInputSummaryById = new Map<string, ReturnType<typeof getInputSummary>>();
         for (const node of nodes) {
             if (node.metadata?.isBatchRoot) batchChildCountById.set(node.id, node.metadata.batchChildIds?.length || 0);
             const rootId = node.metadata?.batchRootId;
@@ -1338,14 +1530,22 @@ function ReactFlowCanvasPage() {
                 const stackY = root ? root.position.y + 14 + index * 8 : node.position.y;
                 batchMotionById.set(node.id, { x: stackX - node.position.x, y: stackY - node.position.y, index: Math.max(index, 0) });
             }
+        }
+        return { batchChildCountById, batchMotionById };
+    }, [nodeById, nodes]);
+
+    const { configInputsById, configInputSummaryById } = useMemo(() => {
+        const configInputsById = new Map<string, NodeGenerationInput[]>();
+        const configInputSummaryById = new Map<string, ReturnType<typeof getInputSummary>>();
+        for (const node of nodes) {
             if (isGenerationConfigNode(node.type)) {
                 const inputs = buildNodeGenerationInputs(node.id, canvasGraph);
                 configInputsById.set(node.id, inputs);
                 configInputSummaryById.set(node.id, getInputSummary(inputs));
             }
         }
-        return { batchChildCountById, batchMotionById, configInputsById, configInputSummaryById };
-    }, [canvasGraph, nodeById, nodes]);
+        return { configInputsById, configInputSummaryById };
+    }, [canvasGraph, nodes]);
     const mentionReferencesByNodeId = useMemo(() => {
         const targetNodeIds = new Set<string>();
         visibleNodes.forEach((node) => {
@@ -1657,6 +1857,10 @@ function ReactFlowCanvasPage() {
         [chatSessions, cleanupCanvasFiles, projectId],
     );
 
+    const deleteSelectedNodes = useCallback(() => {
+        deleteNodes(new Set(selectedNodeIdsRef.current));
+    }, [deleteNodes]);
+
     const deleteConnection = useCallback((connectionId: string) => {
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
@@ -1837,7 +2041,7 @@ function ReactFlowCanvasPage() {
         const padding = 96;
         const contentWidth = Math.max(1, bounds.right - bounds.left);
         const contentHeight = Math.max(1, bounds.bottom - bounds.top);
-        const scale = Math.max(0.05, Math.min(1, (width - padding * 2) / contentWidth, (height - padding * 2) / contentHeight));
+        const scale = Math.max(0.2, Math.min(1, (width - padding * 2) / contentWidth, (height - padding * 2) / contentHeight));
         const centerX = (bounds.left + bounds.right) / 2;
         const centerY = (bounds.top + bounds.bottom) / 2;
         const next = { x: width / 2 - centerX * scale, y: height / 2 - centerY * scale, k: scale };
@@ -1848,7 +2052,7 @@ function ReactFlowCanvasPage() {
 
     const setZoomScale = useCallback(
         (scale: number) => {
-            const nextScale = Math.min(Math.max(scale, 0.05), 5);
+            const nextScale = Math.min(Math.max(scale, 0.2), 5);
             const rect = containerRef.current?.getBoundingClientRect();
             const width = rect?.width && rect.width > 0 ? rect.width : size.width;
             const height = rect?.height && rect.height > 0 ? rect.height : size.height;
@@ -1877,6 +2081,7 @@ function ReactFlowCanvasPage() {
         setChatSessions(entry.chatSessions);
         setActiveChatId(entry.activeChatId);
         setBackgroundMode(entry.backgroundMode);
+        setSnapToGrid(entry.snapToGrid);
         setShowImageInfo(entry.showImageInfo);
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
@@ -2143,7 +2348,7 @@ function ReactFlowCanvasPage() {
                 event.preventDefault();
                 event.stopPropagation();
                 if (selectedIds.size) {
-                    deleteNodes(new Set(selectedIds));
+                    deleteSelectedNodes();
                 } else if (selectedConnection) {
                     deleteConnection(selectedConnection);
                 }
@@ -2170,7 +2375,7 @@ function ReactFlowCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown, { capture: true });
         return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-    }, [copySelectedNodes, createGroupFromSelection, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
+    }, [copySelectedNodes, createGroupFromSelection, deleteConnection, deleteSelectedNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
 
     const handleConnectStart = useCallback(
         (nodeId: string, handleType: "source" | "target") => {
@@ -2574,14 +2779,22 @@ function ReactFlowCanvasPage() {
         async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1", size: node.metadata?.size || "auto" };
-            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+            const comfyWorkflow = payload.executor === "comfyui" && payload.comfyWorkflowId ? await getComfyWorkflow(payload.comfyWorkflowId) : null;
+            if (payload.executor === "comfyui" && !comfyWorkflow) {
+                message.error("所选 ComfyUI 工作流不存在或尚未发布");
+                return;
+            }
+            if (payload.executor === "ai" && !isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
             const userPrompt = payload.prompt.trim();
-            const prompt = `只修改蒙版透明区域，其他区域保持不变。${userPrompt}`;
+            const prompt = payload.executor === "ai" ? `只修改蒙版透明区域，其他区域保持不变。${userPrompt}` : userPrompt;
             const source = { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
-            const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
+            const generationMetadata =
+                payload.executor === "comfyui"
+                    ? { generationType: "edit" as const, model: "ComfyUI", comfyWorkflowId: comfyWorkflow!.id, references: [referenceUrl(source)].filter((url): url is string => Boolean(url)) }
+                    : buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
             const child = createCanvasNode(
                 CanvasNodeType.Image,
                 { x: node.position.x + node.width + 96 + node.width / 2, y: node.position.y + node.height / 2 },
@@ -2600,12 +2813,27 @@ function ReactFlowCanvasPage() {
             setSelectedNodeIds(new Set([child.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(child.id);
+            const generationJobId = nanoid();
             const controller = startGenerationRequest(child.id, node.id, child.id);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
+                const image =
+                    payload.executor === "comfyui"
+                        ? await runComfyMaskEdit(
+                              comfyWorkflow!,
+                              source,
+                              payload.maskDataUrl,
+                              userPrompt,
+                              comfyui,
+                              controller.signal,
+                              generationJobId,
+                              () => saveCanvasGenerationJobs(new Map([[child.id, generationJobId]])),
+                          )
+                        : await saveCanvasGenerationJobs(new Map([[child.id, generationJobId]])).then(() =>
+                              requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal, jobId: generationJobId }).then((items) => items[0]),
+                          );
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
-                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), generationJobId: undefined, prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "局部修改失败";
@@ -2616,7 +2844,7 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest],
+        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasGenerationJobs, startGenerationRequest],
     );
 
     const upscaleImageNode = useCallback(async (node: CanvasNodeData, params: CanvasImageUpscaleParams) => {
@@ -2675,6 +2903,8 @@ function ReactFlowCanvasPage() {
             setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
             setSelectedNodeIds(new Set([child.id]));
             setDialogNodeId(child.id);
+            const generationJobId = nanoid();
+            await saveCanvasGenerationJobs(new Map([[child.id, generationJobId]]));
             const controller = startGenerationRequest(child.id, node.id, child.id);
             try {
                 const image = await requestEdit(
@@ -2682,11 +2912,11 @@ function ReactFlowCanvasPage() {
                     prompt,
                     [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
                     undefined,
-                    { signal: controller.signal },
+                    { signal: controller.signal, jobId: generationJobId },
                 ).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === child.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), generationJobId: undefined, prompt, ...generationMetadata } } : item)));
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
@@ -2696,7 +2926,7 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, openConfigDialog, startGenerationRequest],
+        [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, openConfigDialog, saveCanvasGenerationJobs, startGenerationRequest],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2939,6 +3169,11 @@ function ReactFlowCanvasPage() {
 
             try {
                 if (mode === "comfyui") {
+                    const generationJobId =
+                        sourceNode?.metadata?.status === NODE_STATUS_LOADING && sourceNode.metadata.generationJobId
+                            ? sourceNode.metadata.generationJobId
+                            : nanoid();
+                    await saveCanvasGenerationJobs(new Map([[nodeId, generationJobId]]));
                     const workflowId = sourceNode?.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId;
                     const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
                     if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
@@ -2946,13 +3181,14 @@ function ReactFlowCanvasPage() {
                     resolveComfyTextFields(comfyWorkflow, values, generationContext);
                     await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
                     const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
-                    const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal);
-                    if (!result.images.length && !result.videos.length && !result.audios.length) throw new Error("ComfyUI 没有返回任何输出");
+                    const result = await runComfyWorkflow(comfyui, requestWorkflow, runController.signal, generationJobId);
+                    if (!result.images.length && !result.videos.length && !result.audios.length && !result.texts.length) throw new Error("ComfyUI 没有返回任何输出");
 
                     const parentConfig = NODE_DEFAULT_SIZE[CanvasNodeType.ComfyUI];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const videoConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
                     const audioConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+                    const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const uploadedImages = await Promise.all(result.images.map((url) => uploadImage(url)));
                     const uploadedVideos = await Promise.all(result.videos.map((url) => uploadMediaFile(url, "video")));
@@ -3035,8 +3271,34 @@ function ReactFlowCanvasPage() {
                             height: audioConfig.height,
                         });
                     });
+                    const mediaCount = imageCount + videoCount + uploadedAudios.length;
+                    result.texts.forEach((output, index) => {
+                        const itemIndex = mediaCount + index;
+                        const position = {
+                            x: parentPosition.x + parentConfig.width + 96 + (itemIndex % 2) * (textConfig.width + 36),
+                            y: parentPosition.y + Math.floor(itemIndex / 2) * (textConfig.height + 36),
+                        };
+                        allNodes.push({
+                            ...createCanvasNode(
+                                CanvasNodeType.Text,
+                                { x: position.x + textConfig.width / 2, y: position.y + textConfig.height / 2 },
+                                {
+                                    content: output.text,
+                                    prompt: rawPrompt,
+                                    requestPrompt: effectivePrompt,
+                                    status: NODE_STATUS_SUCCESS,
+                                    fontSize: 14,
+                                    model: "ComfyUI",
+                                    comfyWorkflowId: comfyWorkflow.id,
+                                },
+                            ),
+                            position,
+                            width: textConfig.width,
+                            height: textConfig.height,
+                        });
+                    });
                     pendingChildIds = allNodes.map((node) => node.id);
-                    setNodes((prev) => [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)), ...allNodes]);
+                    setNodes((prev) => [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: rawPrompt, status: NODE_STATUS_SUCCESS, generationJobId: undefined, errorDetails: undefined } } : node)), ...allNodes]);
                     setConnections((prev) => [...prev, ...allNodes.map((node) => createCanvasConnection(nodeId, node.id))]);
                     return;
                 }
@@ -3130,6 +3392,7 @@ function ReactFlowCanvasPage() {
                     const childIds = childNodes.map((node) => node.id);
                     const rootId = rootNode.id;
                     const targetIds = childIds.length ? childIds : [rootId];
+                    const imageJobs = new Map(targetIds.map((targetId) => [targetId, nanoid()]));
                     pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
                     rootNode.metadata = { ...rootNode.metadata, batchChildIds: childIds.length ? childIds : undefined };
                     const batchConnections = [
@@ -3175,6 +3438,7 @@ function ReactFlowCanvasPage() {
                     setSelectedConnectionId(null);
                     setDialogNodeId(nodeId);
 
+                    await saveCanvasGenerationJobs(imageJobs);
                     const controller = runController;
                     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
@@ -3182,8 +3446,8 @@ function ReactFlowCanvasPage() {
                         targetIds.map(async (targetId) => {
                             try {
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal, jobId: imageJobs.get(targetId) }).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal, jobId: imageJobs.get(targetId) }).then((items) => items[0]);
                                 if (!image?.dataUrl) throw new Error("接口没有返回图片 URL");
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
@@ -3198,7 +3462,7 @@ function ReactFlowCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), primaryImageId: targetId },
+                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), generationJobId: undefined, primaryImageId: targetId },
                                             };
                                         if (node.id === targetId)
                                             return {
@@ -3206,7 +3470,7 @@ function ReactFlowCanvasPage() {
                                                 position: { x: center.x - imageSize.width / 2, y: center.y - imageSize.height / 2 },
                                                 width: imageSize.width,
                                                 height: imageSize.height,
-                                                metadata: { ...node.metadata, ...imageMetadata(uploaded) },
+                                                metadata: { ...node.metadata, ...imageMetadata(uploaded), generationJobId: undefined },
                                             };
                                         return node;
                                     });
@@ -3286,9 +3550,12 @@ function ReactFlowCanvasPage() {
                             : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), videoNode],
                     );
                     if (!isEmptyVideoNode) setConnections((prev) => [...prev, createCanvasConnection(nodeId, videoId)]);
+                    const generationJobId = nanoid();
+                    await saveCanvasGenerationJobs(new Map([[videoId, generationJobId]]));
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
                     const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
                         signal: controller.signal,
+                        jobId: generationJobId,
                         generationMode: sourceNode?.metadata?.videoGenerationMode,
                     });
                     const startedAt = Date.now();
@@ -3322,11 +3589,13 @@ function ReactFlowCanvasPage() {
                             : [...prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } } : node)), audioNode],
                     );
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, createCanvasConnection(nodeId, audioId)]);
+                    const generationJobId = nanoid();
+                    await saveCanvasGenerationJobs(new Map([[audioId, generationJobId]]));
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
-                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
+                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal, jobId: generationJobId }), generationConfig.audioFormat);
                         setNodes((prev) =>
-                            prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: rawPrompt, requestPrompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)),
+                            prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), generationJobId: undefined, prompt: rawPrompt, requestPrompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)),
                         );
                     } finally {
                         finishGenerationRequest(audioId, controller);
@@ -3368,6 +3637,8 @@ function ReactFlowCanvasPage() {
 
                 const controller = runController;
                 const textTargetIds = childIds.length ? childIds : [nodeId];
+                const textJobs = new Map(textTargetIds.map((targetNodeId) => [targetNodeId, nanoid()]));
+                await saveCanvasGenerationJobs(textJobs);
                 textTargetIds.forEach((targetNodeId) => startGenerationRequest(targetNodeId, nodeId, nodeId, controller));
                 const answers = await Promise.all(
                     textTargetIds.map((targetNodeId) => {
@@ -3381,7 +3652,7 @@ function ReactFlowCanvasPage() {
                                 if (isConfigNode) return;
                                 setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: text, status: NODE_STATUS_LOADING } } : node)));
                             },
-                            { signal: controller.signal },
+                            { signal: controller.signal, jobId: textJobs.get(targetNodeId) },
                         )
                             .then((answer) => ({ nodeId: targetNodeId, content: answer || localStreamed }))
                             .finally(() => finishGenerationRequest(targetNodeId, controller));
@@ -3392,11 +3663,11 @@ function ReactFlowCanvasPage() {
                 setNodes((prev) =>
                     prev.map((node) =>
                         childIds.includes(node.id)
-                            ? { ...node, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
+                            ? { ...node, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS, generationJobId: undefined } }
                             : node.id === nodeId && isConfigNode
                               ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_SUCCESS } }
                             : node.id === nodeId && !editingTextNode
-                                ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS } }
+                                ? { ...node, type: CanvasNodeType.Text, metadata: { ...node.metadata, content: answerByNodeId.get(node.id) || streamed, status: NODE_STATUS_SUCCESS, generationJobId: undefined } }
                                 : node,
                     ),
                 );
@@ -3412,14 +3683,47 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasVideoTask, startGenerationRequest],
+        [comfyui, createCanvasConnection, createCanvasNode, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasGenerationJobs, saveCanvasVideoTask, startGenerationRequest],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
 
     const handleRetryNode = useCallback(
-        async (node: CanvasNodeData) => {
+        async (node: CanvasNodeData, resume = false) => {
+            if (node.type === CanvasNodeType.ComfyUI) {
+                await generateNodeRef.current?.(node.id, "comfyui", node.metadata?.prompt || "");
+                return;
+            }
+            if (resume && node.type === CanvasNodeType.Image && node.metadata?.model === "ComfyUI" && node.metadata.comfyWorkflowId && node.metadata.generationJobId) {
+                const workflow = await getComfyWorkflow(node.metadata.comfyWorkflowId);
+                if (!workflow) {
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "ComfyUI 工作流已不存在，无法恢复任务。" } } : item)));
+                    return;
+                }
+                const controller = startGenerationRequest(node.id, node.id, node.id);
+                setRunningNodeId(node.id);
+                try {
+                    const result = await runComfyWorkflow(comfyui, workflow.workflow, controller.signal, node.metadata.generationJobId);
+                    if (!result.images.length) throw new Error("ComfyUI 任务没有返回图片");
+                    const uploaded = await uploadImage(result.images[0]);
+                    const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
+                    setNodes((prev) => prev.map((item) => (
+                        item.id === node.id
+                            ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), generationJobId: undefined, errorDetails: undefined } }
+                            : item
+                    )));
+                } catch (error) {
+                    if (!isGenerationCanceled(error)) {
+                        const errorDetails = error instanceof Error ? error.message : "ComfyUI 任务恢复失败";
+                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                    }
+                } finally {
+                    finishGenerationRequest(node.id, controller);
+                    setRunningNodeId(null);
+                }
+                return;
+            }
             const sourceNode = findRetrySourceNode(node.id, nodeByIdRef.current, connectionAdjacency.incomingByNodeId) || node;
             const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? { ...batchRoot?.metadata, ...node.metadata } : undefined;
@@ -3457,9 +3761,11 @@ function ReactFlowCanvasPage() {
                 return;
             }
             const retryImages = retryReferenceImages || [];
+            const generationJobId = resume && node.metadata?.generationJobId ? node.metadata.generationJobId : nanoid();
 
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+            await saveCanvasGenerationJobs(new Map([[node.id, generationJobId]]));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
 
             try {
@@ -3473,28 +3779,28 @@ function ReactFlowCanvasPage() {
                             streamed = text;
                             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
                         },
-                        { signal: controller.signal },
+                        { signal: controller.signal, jobId: generationJobId },
                     );
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS, generationJobId: undefined } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
                     const videoGenerationMode = node.metadata?.videoGenerationMode ?? sourceNode.metadata?.videoGenerationMode;
-                    const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal, generationMode: videoGenerationMode });
+                    const task = await createVideoGenerationTask(generationConfig, prompt, retryImages, context?.referenceVideos || [], context?.referenceAudios || [], { signal: controller.signal, jobId: generationJobId, generationMode: videoGenerationMode });
                     const startedAt = Date.now();
                     await saveCanvasVideoTask(node.id, task, startedAt);
                     await finishCanvasVideoTask(node.id, generationConfig, task, startedAt, controller);
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal }), generationConfig.audioFormat);
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
+                    const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal, jobId: generationJobId }), generationConfig.audioFormat);
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), generationJobId: undefined, prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     return;
                 }
 
                 const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal, jobId: generationJobId }).then((items) => items[0])
+                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal, jobId: generationJobId }).then((items) => items[0]);
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
@@ -3509,7 +3815,7 @@ function ReactFlowCanvasPage() {
                                   type: CanvasNodeType.Image,
                                   width: imageSize.width,
                                   height: imageSize.height,
-                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), prompt, ...generationMetadata },
+                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), generationJobId: undefined, prompt, ...generationMetadata },
                               }
                             : item,
                     ),
@@ -3524,8 +3830,25 @@ function ReactFlowCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [connectionAdjacency, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasVideoTask, startGenerationRequest],
+        [comfyui, connectionAdjacency, effectiveConfig, finishCanvasVideoTask, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, saveCanvasGenerationJobs, saveCanvasVideoTask, startGenerationRequest],
     );
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        const resumeKey = `${saveMode}:${user?.id || "anonymous"}:${projectId}`;
+        if (resumedGenerationProjectKeyRef.current === resumeKey) return;
+        resumedGenerationProjectKeyRef.current = resumeKey;
+
+        nodesRef.current.forEach((node) => {
+            if (
+                node.metadata?.status !== NODE_STATUS_LOADING
+                || !node.metadata.generationJobId
+                || node.metadata.videoTask
+                || generationRequestsRef.current.has(node.id)
+            ) return;
+            void handleRetryNode(node, true);
+        });
+    }, [handleRetryNode, projectId, projectLoaded, saveMode, user?.id]);
 
     const generateImageFromTextNode = useCallback(
         (node: CanvasNodeData) => {
@@ -4178,15 +4501,24 @@ function ReactFlowCanvasPage() {
         () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
         [batchVisibilityIndex.hiddenConnectionEndpointIds, connections],
     );
-    const connectionPaths = useMemo(
-        () =>
-            reactFlowConnections.flatMap((connection) => {
-                const points = getConnectionPoints(connection, nodeById);
-                if (!points) return [];
-                return [{ connection, path: buildConnectionPathFromPoints(points.from, points.to) }];
-            }),
-        [nodeById, reactFlowConnections],
-    );
+    // 拖拽期间冻结连接线路径 —— nodeById 每帧都会变化（节点位置更新），
+    // 但连接线端点位置的微小偏移在拖拽时不可见，重算反而占用大量帧时间。
+    // 拖拽结束后（isNodeDragging 变为 false）再一次性重算所有路径。
+    const frozenConnectionPathsRef = useRef<Array<{ connection: CanvasConnection; path: string }> | null>(null);
+    const connectionPaths = useMemo(() => {
+        if (isNodeDragging) {
+            // 拖拽中：返回上次缓存的路径，如果还没有则正常计算一次作为初始帧
+            if (frozenConnectionPathsRef.current) return frozenConnectionPathsRef.current;
+        }
+        const paths = reactFlowConnections.flatMap((connection) => {
+            const points = getConnectionPoints(connection, nodeById);
+            if (!points) return [];
+            return [{ connection, path: buildConnectionPathFromPoints(points.from, points.to) }];
+        });
+        frozenConnectionPathsRef.current = paths;
+        return paths;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isNodeDragging, nodeById, reactFlowConnections]);
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const dialogNode = useMemo(() => {
         const node = dialogNodeId ? visibleNodeItems.find((item) => item.id === dialogNodeId) || null : null;
@@ -4307,6 +4639,7 @@ function ReactFlowCanvasPage() {
                     nodes={visibleNodeItems}
                     connections={reactFlowConnections}
                     backgroundMode={backgroundMode}
+                    alignmentGuides={alignmentGuides}
                     selectedNodeIds={selectedNodeIds}
                     selectedConnectionId={selectedConnectionId}
                     onViewportChange={handleReactFlowViewportChange}
@@ -4595,6 +4928,7 @@ function ReactFlowCanvasPage() {
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
+                    snapToGrid={snapToGrid}
                     showImageInfo={showImageInfo}
                     onAddImage={() => createNode(CanvasNodeType.Image)}
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
@@ -4606,10 +4940,11 @@ function ReactFlowCanvasPage() {
                     onUpload={() => handleUploadRequest()}
                     onGroup={() => createGroupFromSelection('normal')}
                     onStoryboardGroup={() => createGroupFromSelection('storyboard')}
-                    onDelete={() => deleteNodes(new Set(selectedNodeIds))}
+                    onDelete={deleteSelectedNodes}
                     onClear={() => setClearConfirmOpen(true)}
                     onDeselect={deselectCanvas}
                     onBackgroundModeChange={setBackgroundMode}
+                    onSnapToGridChange={setSnapToGrid}
                     onShowImageInfoChange={setShowImageInfo}
                     assetPanelOpen={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
@@ -5435,6 +5770,93 @@ async function resolveComfyMediaFields(workflow: ComfyWorkflow, values: Record<s
     }
 }
 
+async function runComfyMaskEdit(
+    workflow: ComfyWorkflow,
+    source: ReferenceImage,
+    maskDataUrl: string,
+    prompt: string,
+    config: ComfyUiConfig,
+    signal?: AbortSignal,
+    jobId?: string,
+    beforeQueue?: () => Promise<void>,
+) {
+    const imageFields = workflow.fields.filter((field) => field.type === "image");
+    if (!imageFields.length) throw new Error("该 ComfyUI 工作流没有暴露图片输入");
+
+    const maskFields = imageFields.filter((field) => isComfyMaskField(workflow, field));
+    const sourceFields = imageFields.filter((field) => !maskFields.includes(field));
+    if (maskFields.length && !sourceFields.length) throw new Error("工作流只暴露了蒙版输入，还需要暴露原图图片输入");
+
+    const values = buildComfyCanvasFieldValues(workflow, {}, prompt);
+    if (maskFields.length) {
+        const [sourceUpload, maskUpload] = await Promise.all([
+            uploadComfyImageSource(config, source.dataUrl || source.storageKey || source.url || "", source.name, signal),
+            uploadComfyImageSource(config, maskDataUrl, "flowcanvas-mask.png", signal),
+        ]);
+        sourceFields.forEach((field) => {
+            values[field.id] = comfyUploadPath(sourceUpload);
+        });
+        maskFields.forEach((field) => {
+            values[field.id] = comfyUploadPath(maskUpload);
+        });
+    } else {
+        const maskedSource = await buildComfyMaskedSource(source.dataUrl || source.storageKey || source.url || "", maskDataUrl);
+        const upload = await uploadComfyImageSource(config, maskedSource, "flowcanvas-inpaint.png", signal);
+        imageFields.forEach((field) => {
+            values[field.id] = comfyUploadPath(upload);
+        });
+    }
+
+    const requestWorkflow = applyComfyWorkflowFields(workflow.workflow, workflow.fields, values);
+    await beforeQueue?.();
+    const result = await runComfyWorkflow(config, requestWorkflow, signal, jobId);
+    if (!result.images.length) throw new Error("ComfyUI 消除工作流没有返回图片");
+    return { dataUrl: result.images[0] };
+}
+
+function isComfyMaskField(workflow: ComfyWorkflow, field: ComfyWorkflowField) {
+    const node = workflow.workflow[field.node];
+    return /mask|蒙版|遮罩/i.test(`${field.input} ${field.name} ${node?._meta?.title || ""} ${node?.class_type || ""}`);
+}
+
+async function uploadComfyImageSource(config: ComfyUiConfig, source: string, filename: string, signal?: AbortSignal) {
+    if (!source) throw new Error("无法读取局部编辑图片");
+    const response = await fetch(source, { signal });
+    if (!response.ok) throw new Error(`读取局部编辑图片失败：HTTP ${response.status}`);
+    return uploadComfyFile(config, await response.blob(), filename, signal);
+}
+
+function comfyUploadPath(upload: { name: string; subfolder?: string }) {
+    return upload.subfolder ? `${upload.subfolder}/${upload.name}` : upload.name;
+}
+
+async function buildComfyMaskedSource(sourceUrl: string, maskDataUrl: string) {
+    const [sourceResponse, maskResponse] = await Promise.all([fetch(sourceUrl), fetch(maskDataUrl)]);
+    if (!sourceResponse.ok) throw new Error(`读取原图失败：HTTP ${sourceResponse.status}`);
+    if (!maskResponse.ok) throw new Error(`读取蒙版失败：HTTP ${maskResponse.status}`);
+    const [sourceBitmap, maskBitmap] = await Promise.all([createImageBitmap(await sourceResponse.blob()), createImageBitmap(await maskResponse.blob())]);
+    try {
+        const canvas = document.createElement("canvas");
+        canvas.width = sourceBitmap.width;
+        canvas.height = sourceBitmap.height;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("浏览器无法创建蒙版画布");
+        context.drawImage(sourceBitmap, 0, 0);
+        const sourcePixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(maskBitmap, 0, 0, canvas.width, canvas.height);
+        const maskPixels = context.getImageData(0, 0, canvas.width, canvas.height);
+        for (let index = 3; index < sourcePixels.data.length; index += 4) {
+            sourcePixels.data[index] = maskPixels.data[index];
+        }
+        context.putImageData(sourcePixels, 0, 0);
+        return canvas.toDataURL("image/png");
+    } finally {
+        sourceBitmap.close();
+        maskBitmap.close();
+    }
+}
+
 function replaceComfyReferences(value: string, context: NodeGenerationContext, type: "text" | "image" | "video" | "audio") {
     let next = value.replace(NODE_REF_PATTERN_GLOBAL, (_, nodeId: string) => {
         const text = findTextByNodeId(nodeId, context);
@@ -5665,10 +6087,19 @@ function mergeActiveGenerationNodes(restoredNodes: CanvasNodeData[], liveNodes: 
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
-        node.metadata?.status === "loading" && !(node.type === CanvasNodeType.Video && node.metadata.videoTask && node.metadata.videoTaskStartedAt)
-            ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } }
+        node.metadata?.status === "loading"
+        && !node.metadata.generationJobId
+        && !(node.type === CanvasNodeType.Video && node.metadata.videoTask && node.metadata.videoTaskStartedAt)
+            ? hasPersistedMediaOutput(node)
+                ? { ...node, metadata: { ...node.metadata, status: "success" as const, errorDetails: undefined } }
+                : { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } }
             : node,
     );
+}
+
+function hasPersistedMediaOutput(node: CanvasNodeData) {
+    if (node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) return false;
+    return Boolean(node.metadata?.storageKey || node.metadata?.content);
 }
 
 function isGenerationCanceled(error: unknown) {
@@ -5794,7 +6225,8 @@ function PreviewPanoramaContent({ node, onCapture }: { node: CanvasNodeData; onC
 
 function PanoramaImmersivePreview({ src, title, onCapture }: { src: string; title: string; onCapture: (dataUrl: string) => void | Promise<void> }) {
     const hostRef = useRef<HTMLDivElement | null>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rendererRef = useRef<any>(null);
     const renderRef = useRef<() => void>(() => {});
     const [textureSrc, setTextureSrc] = useState(src);
     const [error, setError] = useState("");
@@ -5827,134 +6259,147 @@ function PanoramaImmersivePreview({ src, title, onCapture }: { src: string; titl
         const host = hostRef.current;
         if (!host) return;
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
-        rendererRef.current = renderer;
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        renderer.setClearColor(0x000000, 1);
-        host.appendChild(renderer.domElement);
-
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1100);
-        camera.position.set(0, 0, 0);
         let disposed = false;
-        let dragging = false;
-        let yaw = 0;
-        let pitch = 0;
-        let pointerX = 0;
-        let pointerY = 0;
+        let cleanupFn = () => {};
 
-        const geometry = new THREE.SphereGeometry(500, 96, 48);
-        geometry.scale(-1, 1, 1);
-        const loader = new THREE.TextureLoader();
-        loader.setCrossOrigin("anonymous");
-        const texture = loader.load(
-            textureSrc,
-            () => {
-                if (disposed) return;
-                setTextureReady(true);
-                render();
-            },
-            undefined,
-            () => {
-                if (!disposed) {
-                    setTextureReady(false);
-                    setError("全景贴图加载失败");
-                }
-            },
-        );
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        scene.add(new THREE.Mesh(geometry, material));
-
-        const updateCameraDirection = () => {
-            const direction = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
-            camera.lookAt(direction);
-        };
-        updateCameraDirection();
-
-        const resize = () => {
+        // Three.js 仅在 360 预览组件首次渲染时按需加载，不污染主 bundle
+        import("three").then((THREE) => {
             if (disposed) return;
-            const width = Math.max(1, host.clientWidth);
-            const height = Math.max(1, host.clientHeight);
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-            renderer.setSize(width, height, false);
-            render();
-        };
-        function render() {
-            if (disposed) return;
-            renderer.render(scene, camera);
-        }
-        renderRef.current = render;
-        const handleWheel = (event: WheelEvent) => {
-            event.preventDefault();
-            event.stopPropagation();
-            camera.fov = Math.max(35, Math.min(95, camera.fov + event.deltaY * 0.035));
-            camera.updateProjectionMatrix();
-            render();
-        };
-        const stopCanvasInteraction = (event: Event) => event.stopPropagation();
-        const handlePointerDown = (event: PointerEvent) => {
-            event.preventDefault();
-            event.stopPropagation();
-            dragging = true;
-            pointerX = event.clientX;
-            pointerY = event.clientY;
-            renderer.domElement.setPointerCapture(event.pointerId);
-            renderer.domElement.style.cursor = "grabbing";
-        };
-        const handlePointerMove = (event: PointerEvent) => {
-            if (!dragging) return;
-            event.preventDefault();
-            event.stopPropagation();
-            const deltaX = event.clientX - pointerX;
-            const deltaY = event.clientY - pointerY;
-            pointerX = event.clientX;
-            pointerY = event.clientY;
-            yaw -= deltaX * 0.004;
-            pitch += deltaY * 0.004;
-            pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, pitch));
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+            rendererRef.current = renderer;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            renderer.setClearColor(0x000000, 1);
+            host.appendChild(renderer.domElement);
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1100);
+            camera.position.set(0, 0, 0);
+            let dragging = false;
+            let yaw = 0;
+            let pitch = 0;
+            let pointerX = 0;
+            let pointerY = 0;
+
+            const geometry = new THREE.SphereGeometry(500, 96, 48);
+            geometry.scale(-1, 1, 1);
+            const loader = new THREE.TextureLoader();
+            loader.setCrossOrigin("anonymous");
+            const texture = loader.load(
+                textureSrc,
+                () => {
+                    if (disposed) return;
+                    setTextureReady(true);
+                    render();
+                },
+                undefined,
+                () => {
+                    if (!disposed) {
+                        setTextureReady(false);
+                        setError("全景贴图加载失败");
+                    }
+                },
+            );
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            scene.add(new THREE.Mesh(geometry, material));
+
+            const updateCameraDirection = () => {
+                const direction = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+                camera.lookAt(direction);
+            };
             updateCameraDirection();
-            render();
-        };
-        const handlePointerUp = (event: PointerEvent) => {
-            if (!dragging) return;
-            event.preventDefault();
-            event.stopPropagation();
-            dragging = false;
-            renderer.domElement.releasePointerCapture(event.pointerId);
+
+            const resize = () => {
+                if (disposed) return;
+                const width = Math.max(1, host.clientWidth);
+                const height = Math.max(1, host.clientHeight);
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height, false);
+                render();
+            };
+            function render() {
+                if (disposed) return;
+                renderer.render(scene, camera);
+            }
+            renderRef.current = render;
+
+            const handleWheel = (event: WheelEvent) => {
+                event.preventDefault();
+                event.stopPropagation();
+                camera.fov = Math.max(35, Math.min(95, camera.fov + event.deltaY * 0.035));
+                camera.updateProjectionMatrix();
+                render();
+            };
+            const stopCanvasInteraction = (event: Event) => event.stopPropagation();
+            const handlePointerDown = (event: PointerEvent) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dragging = true;
+                pointerX = event.clientX;
+                pointerY = event.clientY;
+                renderer.domElement.setPointerCapture(event.pointerId);
+                renderer.domElement.style.cursor = "grabbing";
+            };
+            const handlePointerMove = (event: PointerEvent) => {
+                if (!dragging) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const deltaX = event.clientX - pointerX;
+                const deltaY = event.clientY - pointerY;
+                pointerX = event.clientX;
+                pointerY = event.clientY;
+                yaw -= deltaX * 0.004;
+                pitch += deltaY * 0.004;
+                pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, pitch));
+                updateCameraDirection();
+                render();
+            };
+            const handlePointerUp = (event: PointerEvent) => {
+                if (!dragging) return;
+                event.preventDefault();
+                event.stopPropagation();
+                dragging = false;
+                renderer.domElement.releasePointerCapture(event.pointerId);
+                renderer.domElement.style.cursor = "grab";
+            };
+
+            const observer = new ResizeObserver(resize);
+            observer.observe(host);
+            renderer.domElement.className = "nodrag nopan block h-full w-full";
             renderer.domElement.style.cursor = "grab";
-        };
-        const observer = new ResizeObserver(resize);
-        observer.observe(host);
-        renderer.domElement.className = "nodrag nopan block h-full w-full";
-        renderer.domElement.style.cursor = "grab";
-        host.addEventListener("wheel", handleWheel, { passive: false });
-        renderer.domElement.addEventListener("pointerdown", handlePointerDown);
-        renderer.domElement.addEventListener("pointermove", handlePointerMove);
-        renderer.domElement.addEventListener("pointerup", handlePointerUp);
-        renderer.domElement.addEventListener("pointercancel", handlePointerUp);
-        host.addEventListener("mousedown", stopCanvasInteraction);
-        resize();
+            host.addEventListener("wheel", handleWheel, { passive: false });
+            renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+            renderer.domElement.addEventListener("pointermove", handlePointerMove);
+            renderer.domElement.addEventListener("pointerup", handlePointerUp);
+            renderer.domElement.addEventListener("pointercancel", handlePointerUp);
+            host.addEventListener("mousedown", stopCanvasInteraction);
+            resize();
+
+            cleanupFn = () => {
+                observer.disconnect();
+                host.removeEventListener("wheel", handleWheel);
+                renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+                renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+                renderer.domElement.removeEventListener("pointerup", handlePointerUp);
+                renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
+                host.removeEventListener("mousedown", stopCanvasInteraction);
+                texture.dispose();
+                geometry.dispose();
+                material.dispose();
+                renderer.dispose();
+                renderer.domElement.remove();
+                rendererRef.current = null;
+                renderRef.current = () => {};
+            };
+        });
 
         return () => {
             disposed = true;
-            rendererRef.current = null;
-            renderRef.current = () => {};
-            observer.disconnect();
-            host.removeEventListener("wheel", handleWheel);
-            renderer.domElement.removeEventListener("pointerdown", handlePointerDown);
-            renderer.domElement.removeEventListener("pointermove", handlePointerMove);
-            renderer.domElement.removeEventListener("pointerup", handlePointerUp);
-            renderer.domElement.removeEventListener("pointercancel", handlePointerUp);
-            host.removeEventListener("mousedown", stopCanvasInteraction);
-            texture.dispose();
-            geometry.dispose();
-            material.dispose();
-            renderer.dispose();
-            renderer.domElement.remove();
+            cleanupFn();
         };
     }, [textureSrc]);
 

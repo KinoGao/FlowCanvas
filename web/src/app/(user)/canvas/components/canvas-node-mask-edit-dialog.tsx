@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Input, Modal, Slider } from "antd";
-import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
+import { Button, Input, Modal, Select, Slider } from "antd";
+import { Brush, Eraser, RotateCcw, WandSparkles, Workflow, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
+import { listComfyWorkflows, type ComfyWorkflow } from "@/services/comfyui-workflows";
+import { useConfigStore } from "@/stores/use-config-store";
 
 export type CanvasImageMaskEditPayload = {
+    executor: "ai" | "comfyui";
     prompt: string;
     maskDataUrl: string;
+    comfyWorkflowId?: string;
 };
 
 type DrawMode = "paint" | "erase";
@@ -18,6 +22,7 @@ const maskFillColor = "rgba(37, 99, 235, .38)";
 const maskBorderColor = "rgba(255, 255, 255, .72)";
 
 export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (payload: CanvasImageMaskEditPayload) => void }) {
+    const defaultWorkflowId = useConfigStore((state) => state.comfyui.defaultWorkflowId);
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
@@ -26,6 +31,9 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    const [workflows, setWorkflows] = useState<ComfyWorkflow[]>([]);
+    const [workflowId, setWorkflowId] = useState<string>();
+    const [workflowLoading, setWorkflowLoading] = useState(false);
 
     useEffect(() => {
         if (!open) return;
@@ -35,6 +43,35 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         setError("");
         void readImageMeta(dataUrl).then(setImage);
     }, [dataUrl, open]);
+
+    useEffect(() => {
+        if (!open) return;
+        let active = true;
+        setWorkflowLoading(true);
+        void listComfyWorkflows()
+            .then((items) => {
+                if (!active) return;
+                const candidates = items.filter(hasComfyImageInput);
+                setWorkflows(candidates);
+                setWorkflowId((current) => {
+                    if (current && candidates.some((item) => item.id === current)) return current;
+                    if (defaultWorkflowId && candidates.some((item) => item.id === defaultWorkflowId)) return defaultWorkflowId;
+                    return candidates[0]?.id;
+                });
+            })
+            .catch(() => {
+                if (!active) return;
+                setWorkflows([]);
+                setWorkflowId(undefined);
+                setError("ComfyUI 工作流加载失败，请检查后端连接");
+            })
+            .finally(() => {
+                if (active) setWorkflowLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [defaultWorkflowId, open]);
 
     useEffect(() => {
         clearCanvas(maskCanvasRef.current);
@@ -92,13 +129,14 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         setError("");
     };
 
-    const submit = () => {
+    const submit = (executor: CanvasImageMaskEditPayload["executor"]) => {
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
-        if (!nextPrompt) return setError("请输入修改要求");
+        if (executor === "ai" && !nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
         if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas) });
+        if (executor === "comfyui" && !workflowId) return setError("请选择包含图片输入的 ComfyUI 工作流");
+        onConfirm({ executor, prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), comfyWorkflowId: executor === "comfyui" ? workflowId : undefined });
     };
 
     return (
@@ -163,15 +201,36 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                         {error ? <div className="text-xs font-medium text-[#ef4444]">{error}</div> : null}
                     </div>
 
-                    <div className="mt-auto flex items-center justify-between gap-2">
-                        <Button icon={<RotateCcw className="size-4" />} onClick={resetMask}>
-                            重置
-                        </Button>
-                        <div className="flex items-center gap-2">
+                    <div className="space-y-2">
+                        <div className="text-sm font-medium opacity-75">ComfyUI 消除工作流</div>
+                        <Select
+                            className="w-full"
+                            loading={workflowLoading}
+                            value={workflowId}
+                            placeholder="选择含原图/蒙版输入的工作流"
+                            options={workflows.map((workflow) => ({ label: workflow.title, value: workflow.id }))}
+                            onChange={(value) => {
+                                setWorkflowId(value);
+                                setError("");
+                            }}
+                        />
+                        <div className="text-xs opacity-50">工作流需暴露普通图片输入；独立蒙版输入请命名为 mask 或蒙版。</div>
+                    </div>
+
+                    <div className="mt-auto space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <Button icon={<RotateCcw className="size-4" />} onClick={resetMask}>
+                                重置
+                            </Button>
                             <Button icon={<X className="size-4" />} onClick={onClose}>
                                 取消
                             </Button>
-                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={submit}>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button icon={<Workflow className="size-4" />} disabled={!workflows.length} onClick={() => submit("comfyui")}>
+                                ComfyUI 消除
+                            </Button>
+                            <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={() => submit("ai")}>
                                 AI 修改
                             </Button>
                         </div>
@@ -180,6 +239,10 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
             </div>
         </Modal>
     );
+}
+
+function hasComfyImageInput(workflow: ComfyWorkflow) {
+    return workflow.fields.some((field) => field.type === "image");
 }
 
 function readCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {

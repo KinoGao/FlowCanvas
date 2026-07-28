@@ -19,7 +19,7 @@ export function canvasToScreen(canvasX: number, canvasY: number, viewport: Leafe
 }
 
 export function clampViewport(viewport: LeaferViewport, _containerWidth: number, _containerHeight: number): LeaferViewport {
-    const minZoom = 0.05;
+    const minZoom = 0.2;
     const maxZoom = 5;
     const k = Math.max(minZoom, Math.min(maxZoom, viewport.k));
     return {

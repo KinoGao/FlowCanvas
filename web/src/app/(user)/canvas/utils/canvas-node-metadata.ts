@@ -24,6 +24,7 @@ export function createGenerationMetadata(metadata: CanvasNodeMetadata): CanvasNo
         vquality: metadata.vquality,
         generateAudio: metadata.generateAudio,
         watermark: metadata.watermark,
+        generationJobId: metadata.generationJobId,
         audioVoice: metadata.audioVoice,
         audioFormat: metadata.audioFormat,
         audioSpeed: metadata.audioSpeed,

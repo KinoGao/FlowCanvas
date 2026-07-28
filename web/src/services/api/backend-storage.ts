@@ -130,8 +130,9 @@ async function blobToDataUrl(blob: Blob): Promise<string | null> {
 }
 
 export async function uploadBackendFile(token: string, blob: Blob, fileName = "file"): Promise<BackendUploadedFile> {
-    // Prefer JSON/dataURL through tunnels (cpolar) that often break multipart boundaries.
-    const dataUrl = await blobToDataUrl(blob);
+    // Keep images tunnel-friendly, but send large media directly. Encoding video/audio
+    // as a data URL adds ~33% payload overhead and exceeds the JSON body limit quickly.
+    const dataUrl = blob.type.startsWith("image/") ? await blobToDataUrl(blob) : null;
     if (dataUrl) {
         try {
             const uploaded = await readApi<BackendUploadedFile>(

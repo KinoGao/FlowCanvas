@@ -23,7 +23,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     const zoomPercent = Math.round(scale * 100);
 
     const setPercent = (percent: number) => {
-        onScaleChange(Math.min(5, Math.max(0.05, percent / 100)));
+        onScaleChange(Math.min(5, Math.max(0.2, percent / 100)));
         setZoomOpen(false);
     };
 
@@ -38,13 +38,13 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                             value={zoomPercent}
                             onChange={(event) => {
                                 const next = Number(event.target.value.replace(/\D/g, ""));
-                                if (Number.isFinite(next)) onScaleChange(Math.min(5, Math.max(0.05, next / 100)));
+                                if (Number.isFinite(next)) onScaleChange(Math.min(5, Math.max(0.2, next / 100)));
                             }}
                         />
                         <span className="text-xs opacity-50">%</span>
                     </div>
                     <ZoomMenuButton theme={theme} label="放大" shortcut="⌘ +" onClick={() => onScaleChange(Math.min(5, scale + 0.1))} />
-                    <ZoomMenuButton theme={theme} label="缩小" shortcut="⌘ -" onClick={() => onScaleChange(Math.max(0.05, scale - 0.1))} />
+                    <ZoomMenuButton theme={theme} label="缩小" shortcut="⌘ -" onClick={() => onScaleChange(Math.max(0.2, scale - 0.1))} />
                     <ZoomMenuButton theme={theme} label="适合屏幕" shortcut="⌘ 0" onClick={onReset} />
                     <div className="my-1 h-px" style={{ background: theme.toolbar.border }} />
                     <ZoomMenuButton theme={theme} label="缩放至50%" onClick={() => setPercent(50)} />

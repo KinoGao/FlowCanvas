@@ -17,11 +17,12 @@ export type CanvasProject = {
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
+    snapToGrid: boolean;
     showImageInfo: boolean;
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "showImageInfo" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -47,6 +48,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         chatSessions: [],
         activeChatId: null,
         backgroundMode: "lines",
+        snapToGrid: false,
         showImageInfo: false,
         viewport: initialViewport,
     };
@@ -69,6 +71,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",
+        snapToGrid: Boolean(source.snapToGrid),
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || initialViewport,
     };

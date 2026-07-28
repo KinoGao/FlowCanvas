@@ -48,6 +48,10 @@ public class AuthFilter implements Filter {
 
         String path = req.getRequestURI();
         if (isPublicApi(path, req.getMethod()) || "OPTIONS".equalsIgnoreCase(req.getMethod())) {
+            String sessionToken = req.getHeader("X-FlowCanvas-Session");
+            if (sessionToken != null && !sessionToken.isBlank()) {
+                authService.authenticate(sessionToken).ifPresent(user -> req.setAttribute(UserRequestContext.USER_ATTR, user));
+            }
             chain.doFilter(request, response);
             return;
         }
