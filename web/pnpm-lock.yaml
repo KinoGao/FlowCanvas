@@ -14,6 +14,15 @@ importers:
       '@codemirror/lang-json':
         specifier: ^6.0.2
         version: 6.0.2
+      '@leafer-in/editor':
+        specifier: 2.1.11
+        version: 2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-in/resize@2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11))(@leafer-ui/core@2.1.11)(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11)
+      '@leafer-in/resize':
+        specifier: 2.1.11
+        version: 2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11)
+      '@leafer-in/viewport':
+        specifier: 2.1.11
+        version: 2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/core@2.1.11)(@leafer-ui/interface@2.1.11)
       '@leafer-ui/core':
         specifier: ^2.1.11
         version: 2.1.11
@@ -575,11 +584,34 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@leafer-in/editor@2.1.11':
+    resolution: {integrity: sha512-56D0WxAXPOzYvLvrUBY6rEhyugK3MnKrH9NKsamdpjTu885BTK8NqWcbtowrO90dBpRzC3p5pbHFCFViDFzOcw==}
+    peerDependencies:
+      '@leafer-in/interface': ^2.1.11
+      '@leafer-in/resize': ^2.1.11
+      '@leafer-ui/core': ^2.1.11
+      '@leafer-ui/draw': ^2.1.11
+      '@leafer-ui/interface': ^2.1.11
+
   '@leafer-in/interface@2.1.11':
     resolution: {integrity: sha512-eUMTM625wMFp7oGd3OIZkFMVpuaFOa/VLz6FmJqgcJsYPF/J671E8Wgjm84MU4nW89yUc2omisvdJGm10g50zQ==}
     peerDependencies:
       '@leafer-ui/interface': ^2.1.11
       '@leafer/interface': ^2.1.11
+
+  '@leafer-in/resize@2.1.11':
+    resolution: {integrity: sha512-CKlp6u3IVpJFVeFcflYcdOAYbF8qWa55Q7nZetPN8Uj2eDOH8ry58qpzACKGowLMvegP6XPiQYwh1SqHSfxrfA==}
+    peerDependencies:
+      '@leafer-in/interface': ^2.1.11
+      '@leafer-ui/draw': ^2.1.11
+      '@leafer-ui/interface': ^2.1.11
+
+  '@leafer-in/viewport@2.1.11':
+    resolution: {integrity: sha512-BcQ0zPETX4lUZIiidmuiT5T+yb1TtGMaabxieY7ys0hjMHnSJRzik3pCHituDsOw09j/Kkhm+pON8VPBbpWZ2g==}
+    peerDependencies:
+      '@leafer-in/interface': ^2.1.11
+      '@leafer-ui/core': ^2.1.11
+      '@leafer-ui/interface': ^2.1.11
 
   '@leafer-ui/app@2.1.11':
     resolution: {integrity: sha512-dnRe0uQ9WtBI9miS/G50Kes9RAWs93ISs9xfE3zBuezCw9Sd/4tDKr/CWXo+a44OHOlZJjIVtG3JNsnD6uW9iQ==}
@@ -4330,10 +4362,30 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.4.14
 
+  '@leafer-in/editor@2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-in/resize@2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11))(@leafer-ui/core@2.1.11)(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11)':
+    dependencies:
+      '@leafer-in/interface': 2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11)
+      '@leafer-in/resize': 2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11)
+      '@leafer-ui/core': 2.1.11
+      '@leafer-ui/draw': 2.1.11
+      '@leafer-ui/interface': 2.1.11
+
   '@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11)':
     dependencies:
       '@leafer-ui/interface': 2.1.11
       '@leafer/interface': 2.1.11
+
+  '@leafer-in/resize@2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/draw@2.1.11)(@leafer-ui/interface@2.1.11)':
+    dependencies:
+      '@leafer-in/interface': 2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11)
+      '@leafer-ui/draw': 2.1.11
+      '@leafer-ui/interface': 2.1.11
+
+  '@leafer-in/viewport@2.1.11(@leafer-in/interface@2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11))(@leafer-ui/core@2.1.11)(@leafer-ui/interface@2.1.11)':
+    dependencies:
+      '@leafer-in/interface': 2.1.11(@leafer-ui/interface@2.1.11)(@leafer/interface@2.1.11)
+      '@leafer-ui/core': 2.1.11
+      '@leafer-ui/interface': 2.1.11
 
   '@leafer-ui/app@2.1.11':
     dependencies:

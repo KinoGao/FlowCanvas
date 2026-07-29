@@ -99,6 +99,7 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",
         snapToGrid: Boolean(source.snapToGrid),
+        alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || { x: 0, y: 0, k: 1 },
     };

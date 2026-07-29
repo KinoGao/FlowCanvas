@@ -596,6 +596,49 @@
         filter: brightness(1.015);
     }
 
+    .node-element.is-leafer-managed,
+    .node-element.is-leafer-managed * {
+        pointer-events: none;
+    }
+
+    .node-element.is-leafer-managed :is(
+        button,
+        input,
+        textarea,
+        select,
+        video,
+        audio,
+        a,
+        [role="button"],
+        [contenteditable="true"],
+        [data-canvas-no-zoom],
+        [data-canvas-composer]
+    ) {
+        pointer-events: auto;
+    }
+
+    .node-element.is-leafer-managed [data-handle] > span {
+        pointer-events: auto;
+    }
+
+    .node-element.is-leafer-managed .creative-os-node {
+        border-color: transparent !important;
+        box-shadow: none !important;
+        filter: none;
+    }
+
+    .node-element.is-leafer-managed[data-leafer-overview="true"][data-leafer-image-ready="true"]:not([data-node-selected="true"]) .canvas-node-render-surface {
+        visibility: hidden;
+    }
+
+    .node-element.is-leafer-managed[data-leafer-static-image="true"][data-leafer-image-ready="true"] .canvas-node-render-surface {
+        visibility: hidden;
+    }
+
+    .node-element.is-leafer-managed[data-leafer-overview="true"][data-node-kind="audio"]:not([data-node-selected="true"]) .canvas-node-render-surface {
+        visibility: hidden;
+    }
+
     .creative-os-composer {
         border-radius: 8px;
         transform-origin: top center;
@@ -774,34 +817,6 @@
         }
     }
 
-    .canvas-flow-edge {
-        animation: canvas-flow-edge 900ms linear infinite;
-    }
-
-    .canvas-flow-edge-hover {
-        animation-duration: 700ms;
-        animation-iteration-count: 2;
-    }
-
-    .canvas-connection-line {
-        transition: stroke 140ms ease, stroke-width 140ms ease, opacity 140ms ease;
-    }
-
-    .canvas-connection-flow {
-        opacity: 1;
-    }
-
-    .canvas-connection-group.is-hovered .canvas-connection-line {
-        stroke: #e0e4e8;
-        stroke-width: 3;
-        opacity: 1;
-    }
-
-    @keyframes canvas-flow-edge {
-        to {
-            stroke-dashoffset: -28;
-        }
-    }
 }
 
 @keyframes shimmer-sweep {

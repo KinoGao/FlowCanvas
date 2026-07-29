@@ -14,6 +14,9 @@
     "dependencies": {
         "@ant-design/icons": "^6.1.1",
         "@codemirror/lang-json": "^6.0.2",
+        "@leafer-in/editor": "2.1.11",
+        "@leafer-in/resize": "2.1.11",
+        "@leafer-in/viewport": "2.1.11",
         "@leafer-ui/core": "^2.1.11",
         "@leafer-ui/draw": "^2.1.11",
         "@react-three/drei": "^10.7.7",

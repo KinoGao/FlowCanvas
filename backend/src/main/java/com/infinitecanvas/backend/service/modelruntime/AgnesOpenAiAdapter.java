@@ -42,6 +42,8 @@ public class AgnesOpenAiAdapter implements ModelRequestAdapter {
     private static final Set<Integer> TRANSIENT_CREATE_STATUSES = Set.of(429, 502, 503, 504);
     private static final Pattern TASK_PATH = Pattern.compile("^/videos/([^/]+)(/content)?$");
     private static final Set<String> TRANSIENT_POLL_STATUSES = Set.of("queued", "pending", "processing", "running", "in_progress");
+    private static final int REFERENCE_IMAGE_MAX_EDGE = 2048;
+    private static final int REFERENCE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
     private final ObjectMapper objectMapper;
     private final PublicImageService publicImageService;
     private final String publicBaseUrl;
@@ -338,7 +340,8 @@ public class AgnesOpenAiAdapter implements ModelRequestAdapter {
         }
         List<String> urls = new ArrayList<>();
         for (MultipartFile file : files) {
-            String filename = publicImageService.saveImage(file);
+            String filename = publicImageService.saveModelReferenceImage(
+                    file, REFERENCE_IMAGE_MAX_EDGE, REFERENCE_IMAGE_MAX_BYTES);
             urls.add(publicBaseUrl + "/api/public-image/" + filename);
         }
         addReferenceValues(urls, request.getParameterValues("input_reference"));

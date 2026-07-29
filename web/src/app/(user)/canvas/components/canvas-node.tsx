@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,7 @@ export type CanvasNodeProps = {
     showImageInfo: boolean;
     isOverview?: boolean;
     positioned?: boolean;
+    editorManaged?: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
     renderPanel?: (node: CanvasNodeData) => ReactNode;
@@ -147,6 +149,7 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.showImageInfo !== next.showImageInfo) return false;
     if (prev.isOverview !== next.isOverview) return false;
     if (prev.positioned !== next.positioned) return false;
+    if (prev.editorManaged !== next.editorManaged) return false;
     if (prev.editRequestNonce !== next.editRequestNonce) return false;
     if (prev.batchCount !== next.batchCount) return false;
     if (prev.batchExpanded !== next.batchExpanded) return false;
@@ -172,6 +175,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     showImageInfo,
     isOverview = false,
     positioned = true,
+    editorManaged = false,
     resourceLabel,
     mentionReferences = [],
     renderPanel,
@@ -420,6 +424,17 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, []);
 
     const shouldUseOverview = isOverview && !showPanel && !isEditingContent;
+    const useLeaferOverviewContent =
+        editorManaged
+        && shouldUseOverview
+        && !isSelected
+        && (
+            (data.type === CanvasNodeType.Text && Boolean(data.metadata?.content?.trim()))
+            || data.type === CanvasNodeType.Config
+            || data.type === CanvasNodeType.ComfyUI
+        )
+        && data.metadata?.status !== "loading"
+        && data.metadata?.status !== "error";
     const panelWidthClass =
         data.metadata?.canvasTool === "director"
             ? "w-[920px] max-w-[calc(100vw-48px)]"
@@ -431,12 +446,25 @@ export const CanvasNode = React.memo(function CanvasNode({
         <div
             ref={nodeRef}
             data-node-id={data.id}
-            className={`node-element ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-150 ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
+            data-node-kind={data.type}
+            data-leafer-overview={editorManaged && shouldUseOverview ? "true" : undefined}
+            data-leafer-static-image={
+                editorManaged
+                && hasImageContent
+                && !isBatchRoot
+                && !isBatchChild
+                && data.metadata?.canvasTool !== "panorama360"
+                    ? "true"
+                    : undefined
+            }
+            data-node-editing={isEditingContent ? "true" : undefined}
+            data-node-selected={isSelected ? "true" : undefined}
+            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-150 ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
                 height: data.height,
-                transition: "box-shadow 160ms ease, opacity 160ms ease",
+                transition: editorManaged ? "opacity 160ms ease" : "box-shadow 160ms ease, opacity 160ms ease",
                 contain: "layout style",
             }}
             onPointerEnter={() => {
@@ -452,8 +480,8 @@ export const CanvasNode = React.memo(function CanvasNode({
             <Card
                 className="creative-os-node relative h-full w-full overflow-visible rounded-[8px] border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
-                    background: isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
-                    borderColor: isGroup
+                    background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
+                    borderColor: editorManaged ? "transparent" : isGroup
                         ? isSelected
                             ? theme.ui.accent
                             : theme.ui.hairline
@@ -464,7 +492,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                               : isRelated
                                 ? theme.ui.accent
                                 : theme.ui.hairline,
-                    boxShadow: isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
+                    boxShadow: editorManaged ? undefined : isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
                 onDoubleClick={(event) => {
                     if (data.type === CanvasNodeType.Image && hasImageContent) return;
@@ -479,10 +507,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
             >
                 <div
-                    className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
+                    className={`canvas-node-render-surface relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
-                            background: !hasImageContent && !hasVideoContent ? theme.node.panel : "transparent",
+                            background: editorManaged ? "transparent" : !hasImageContent && !hasVideoContent ? theme.node.panel : "transparent",
                             "--batch-from-x": `${batchMotion?.x || 0}px`,
                             "--batch-from-y": `${batchMotion?.y || 0}px`,
                             "--batch-from-rotate": `${6 + (batchMotion?.index || 0) * 4}deg`,
@@ -491,7 +519,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         } as React.CSSProperties
                     }
                 >
-                    <NodeContent
+                    {useLeaferOverviewContent ? null : <NodeContent
                     node={data}
                     theme={theme}
                     isSelected={isSelected}
@@ -516,14 +544,14 @@ export const CanvasNode = React.memo(function CanvasNode({
                     onToggleBatch={() => onToggleBatch?.(data.id)}
                     onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
                     onGroupAction={onGroupAction}
-                    />
+                    />}
                 </div>
 
                 {!isGroup ? <NodeTitleBadge node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
-                {!shouldUseOverview ? (
+                {!shouldUseOverview && !editorManaged ? (
                     <>
                         <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
                         <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
@@ -1012,7 +1040,7 @@ const nodeStarterVisuals: Record<NodeStarterKind, { label: string; description: 
 
 function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; kind?: NodeStarterKind; actions: Array<{ label: string; onClick?: () => void }> }) {
     const visual = nodeStarterVisuals[kind];
-    const NodeIcon = visual.icon;
+    const NodeIcon = visual.icon as LucideIcon;
     const actionIcons = kind === "text" ? [FileText, Video, Music2, Clapperboard] : kind === "image" ? [ImageIcon, Sparkles] : kind === "video" ? [Video, ImageIcon] : kind === "comfyui" ? [Workflow, Sparkles] : [Music2, Sparkles];
 
     return (
@@ -1301,15 +1329,15 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
                 className="pointer-events-none h-full w-full select-none object-contain"
             />
             <div
-                data-canvas-no-zoom
                 className={cn(
-                    "absolute inset-x-0 bottom-0 z-20 flex flex-col gap-1.5 bg-gradient-to-t from-black/90 via-black/65 to-transparent px-2.5 pb-2 pt-8 text-white transition-opacity duration-200",
+                    "pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-1.5 bg-gradient-to-t from-black/90 via-black/65 to-transparent px-2.5 pb-2 pt-8 text-white transition-opacity duration-200",
                     isSelected ? "opacity-100" : "opacity-0 group-hover/video:opacity-100",
                 )}
                 onPointerDown={stopControlEvent}
                 onMouseDown={stopControlEvent}
                 onClick={stopControlEvent}
                 onDoubleClick={stopControlEvent}
+                onWheel={stopControlEvent}
             >
                 <input
                     aria-label="视频进度"
@@ -1560,10 +1588,10 @@ function ConnectionHandleDot({ side, visible, active }: { side: "left" | "right"
         <div
             data-handle
             data-handle-type={isSource ? "source" : "target"}
-            className="group/connection-handle !pointer-events-auto !z-40 absolute top-0 h-full cursor-crosshair"
+            className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
             style={{ [side]: "-22px", width: "44px" }}
         >
-            <span className={`absolute top-1/2 flex size-9 -translate-y-1/2 items-center justify-center ${visualClass}`}>
+            <span className={`pointer-events-auto absolute top-1/2 flex size-9 -translate-y-1/2 cursor-crosshair items-center justify-center ${visualClass}`}>
                 <span
                     className={`pointer-events-none relative grid size-5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                     style={{

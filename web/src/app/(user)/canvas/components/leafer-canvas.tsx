@@ -2,13 +2,17 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as LUI from "leafer-ui";
+import { Editor, EditorEvent, EditorMoveEvent, EditorScaleEvent } from "@leafer-in/editor";
+import "@leafer-in/resize";
+import "@leafer-in/viewport";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
+import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
-import { buildConnectionPathFromPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
-import { canvasToScreen, clampViewport, screenToCanvas, viewportToCssTransform, sameViewport } from "./leafer-viewport";
+import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
+import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM, canvasToScreen, clampViewport, screenToCanvas, stepCanvasZoom, viewportToCssTransform, sameViewport } from "./leafer-viewport";
 
 type LeaferCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
@@ -19,13 +23,18 @@ type LeaferCanvasProps = {
     alignmentGuides?: CanvasAlignmentGuides | null;
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
+    relatedNodeIds?: Set<string>;
+    relatedConnectionIds?: Set<string>;
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportPresentation?: (viewport: ViewportTransform) => void;
     onNodePointerDown?: (nodeId: string, modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => boolean;
     onNodeTap?: (nodeId: string) => void;
     onNodeDragStart?: (nodeId: string) => void;
-    onNodeDrag?: (nodeId: string, position: { x: number; y: number }) => void;
-    onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
+    resolveNodeMove?: (nodeId: string, position: { x: number; y: number }) => { x: number; y: number };
+    onNodesTransform?: (updates: Array<{ id: string; position: { x: number; y: number }; width: number; height: number }>) => void;
+    onNodesTransformEnd?: () => void;
+    onNodeHoverChange?: (nodeId: string | null) => void;
+    onNodeContextMenu?: (nodeId: string, clientX: number, clientY: number) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>, canvasPos: { x: number; y: number }) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent, canvasPos: { x: number; y: number }) => void;
@@ -33,6 +42,7 @@ type LeaferCanvasProps = {
     onConnectEnd?: (canvasPos?: { x: number; y: number }) => void;
     onConnect?: (fromNodeId: string, toNodeId: string) => void;
     onEdgeClick?: (connectionId: string) => void;
+    onEdgeContextMenu?: (connectionId: string, clientX: number, clientY: number) => void;
     onDrop?: (files: FileList, canvasPos: { x: number; y: number }) => void;
     onSelectionBox?: (nodeIds: string[], mode: 'replace' | 'add' | 'toggle') => void;
     connectingParams?: { nodeId: string; handleType: "source" | "target" } | null;
@@ -48,8 +58,18 @@ type LeaferCanvasProps = {
 
 const EMPTY_NODES: CanvasNodeData[] = [];
 const EMPTY_CONNECTIONS: CanvasConnection[] = [];
+const EMPTY_ID_SET = new Set<string>();
 const CONNECTION_SNAP_RADIUS = 48;
 const CONNECTION_SNAP_RELEASE_RADIUS = 64;
+
+type LeaferConnectionVisual = {
+    hit: LUI.Path;
+    line: LUI.Path;
+    flow: LUI.Path[];
+    hovered: boolean;
+    path: string;
+    styleSignature: string;
+};
 
 export function LeaferCanvas({
     containerRef,
@@ -60,13 +80,18 @@ export function LeaferCanvas({
     alignmentGuides,
     selectedNodeIds,
     selectedConnectionId,
+    relatedNodeIds,
+    relatedConnectionIds,
     onViewportChange,
     onViewportPresentation,
     onNodePointerDown,
     onNodeTap,
     onNodeDragStart,
-    onNodeDrag,
-    onNodeDragStop,
+    resolveNodeMove,
+    onNodesTransform,
+    onNodesTransformEnd,
+    onNodeHoverChange,
+    onNodeContextMenu,
     onCanvasMouseDown,
     onCanvasDeselect,
     onContextMenu,
@@ -74,6 +99,7 @@ export function LeaferCanvas({
     onConnectEnd,
     onConnect,
     onEdgeClick,
+    onEdgeContextMenu,
     onDrop,
     onSelectionBox,
     connectingParams,
@@ -84,75 +110,364 @@ export function LeaferCanvas({
     children,
 }: LeaferCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const themeRef = useRef(theme);
+    themeRef.current = theme;
+    const backgroundModeRef = useRef(backgroundMode);
+    backgroundModeRef.current = backgroundMode;
+    const alignmentGuidesRef = useRef(alignmentGuides);
+    alignmentGuidesRef.current = alignmentGuides;
     const scaleRef = useRef(viewport.k);
     const viewportRef = useRef(viewport);
     const committedViewportRef = useRef(viewport);
     const leaferContainerRef = useRef<HTMLDivElement>(null);
     const viewportElementRef = useRef<HTMLDivElement>(null);
-    const leaferRef = useRef<LUI.Leafer | null>(null);
+    const leaferRef = useRef<LUI.App | null>(null);
+    const editorRef = useRef<Editor | null>(null);
+    const editorNodeMapRef = useRef(new Map<string, LUI.Rect>());
+    const editorNodeIdRef = useRef(new WeakMap<LUI.Rect, string>());
+    const nodeTextMapRef = useRef(new Map<string, LUI.Text>());
+    const nodeLayoutSignatureRef = useRef(new Map<string, string>());
+    const nodeTextSignatureRef = useRef(new Map<string, string>());
+    const nodePaintSignatureRef = useRef(new Map<string, string>());
+    const nodeMediaUrlRef = useRef(new Map<string, string>());
+    const connectionVisualMapRef = useRef(new Map<string, LeaferConnectionVisual>());
+    const backgroundCanvasRef = useRef<LUI.Canvas | null>(null);
+    const backgroundSizeRef = useRef({ width: 0, height: 0 });
+    const verticalGuideRef = useRef<LUI.Line | null>(null);
+    const horizontalGuideRef = useRef<LUI.Line | null>(null);
+    const tempEdgePathRef = useRef<LUI.Path | null>(null);
+    const connectionFlowFrameRef = useRef<number | null>(null);
+    const viewportPresentationFrameRef = useRef<number | null>(null);
+    const pendingViewportPresentationRef = useRef<{ viewport: ViewportTransform; syncLeafer: boolean } | null>(null);
+    const editorTransformActiveRef = useRef(false);
+    const editorTransformTypeRef = useRef<"move" | "scale" | null>(null);
+    const editorStateCommitAtRef = useRef(0);
+    const syncingEditorSelectionRef = useRef(false);
     const wheelCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const selectionModifiersRef = useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
 
     // Refs for all mutable props/state — prevents recreating event handlers (which causes infinite loops)
     const nodesRef = useRef(nodes); nodesRef.current = nodes;
+    const connectionsRef = useRef(connections); connectionsRef.current = connections;
+    const connectionsByNodeId = useMemo(() => {
+        const index = new Map<string, CanvasConnection[]>();
+        connections.forEach((connection) => {
+            index.set(connection.fromNodeId, [...(index.get(connection.fromNodeId) || []), connection]);
+            index.set(connection.toNodeId, [...(index.get(connection.toNodeId) || []), connection]);
+        });
+        return index;
+    }, [connections]);
+    const connectionsByNodeIdRef = useRef(connectionsByNodeId); connectionsByNodeIdRef.current = connectionsByNodeId;
+    const selectedNodeIdsRef = useRef(selectedNodeIds); selectedNodeIdsRef.current = selectedNodeIds;
+    const selectedConnectionIdRef = useRef(selectedConnectionId); selectedConnectionIdRef.current = selectedConnectionId;
+    const relatedNodeIdsRef = useRef(relatedNodeIds ?? EMPTY_ID_SET); relatedNodeIdsRef.current = relatedNodeIds ?? EMPTY_ID_SET;
+    const relatedConnectionIdsRef = useRef(relatedConnectionIds ?? EMPTY_ID_SET); relatedConnectionIdsRef.current = relatedConnectionIds ?? EMPTY_ID_SET;
     const connectingParamsRef = useRef(connectingParams); connectingParamsRef.current = connectingParams;
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
-    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
-    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, onNodeDrag, onNodeDragStop, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
+    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
+    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
 
     // Drag state
     const dragRef = useRef<{
-        type: "pan" | "node" | "select" | null;
-        nodeId: string;
+        type: "pan" | "select" | null;
         startScreenX: number;
         startScreenY: number;
-        startNodeX: number;
-        startNodeY: number;
         startViewportX: number;
         startViewportY: number;
         selectStartCanvas: { x: number; y: number };
         selectRect: { x: number; y: number; w: number; h: number } | null;
         selectionMode: 'replace' | 'add' | 'toggle';
     }>({
-        type: null, nodeId: "", startScreenX: 0, startScreenY: 0,
-        startNodeX: 0, startNodeY: 0, startViewportX: 0, startViewportY: 0,
+        type: null, startScreenX: 0, startScreenY: 0,
+        startViewportX: 0, startViewportY: 0,
         selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
     });
 
-    const tempEdgePathRef = useRef<SVGPathElement>(null);
     const frozenTempEdgeRef = useRef<NonNullable<LeaferCanvasProps["pendingConnection"]>>(null);
     const previousPendingConnectionRef = useRef(pendingConnection ?? null);
 
-    const applyViewportPresentation = useCallback((next: ViewportTransform) => {
-        viewportRef.current = next;
-        scaleRef.current = next.k;
+    const syncEditorViewport = useCallback((next: ViewportTransform) => {
+        const app = leaferRef.current;
+        if (!app) return;
+        app.tree.zoomLayer.set({ x: next.x, y: next.y, scaleX: next.k, scaleY: next.k });
+    }, []);
 
-        const viewportElement = viewportElementRef.current;
-        if (viewportElement) {
-            viewportElement.style.transform = viewportToCssTransform(next);
+    const drawBackground = useCallback((next: ViewportTransform) => {
+        const background = backgroundCanvasRef.current;
+        const container = containerRef.current;
+        if (!background || !container) return;
+        const width = Math.max(1, container.clientWidth);
+        const height = Math.max(1, container.clientHeight);
+        if (backgroundSizeRef.current.width !== width || backgroundSizeRef.current.height !== height) {
+            backgroundSizeRef.current = { width, height };
+            background.set({ width, height });
         }
-        callbacksRef.current.onViewportPresentation?.(next);
 
-        const root = containerRef.current;
-        if (!root) return;
-        root.style.backgroundColor = theme.canvas.background;
-        if (backgroundMode === "blank") {
-            root.style.backgroundImage = "none";
-            root.style.backgroundSize = "";
-            root.style.backgroundPosition = "";
+        const context = background.context;
+        context.clearRect(0, 0, width, height);
+        context.fillStyle = themeRef.current.canvas.background;
+        context.fillRect(0, 0, width, height);
+        if (backgroundModeRef.current === "blank") {
+            background.paint();
             return;
         }
 
         const gap = Math.max(8, 56 * next.k);
-        root.style.backgroundSize = `${gap}px ${gap}px`;
-        root.style.backgroundPosition = `${next.x % gap}px ${next.y % gap}px`;
-        root.style.backgroundImage = backgroundMode === "dots"
-            ? `radial-gradient(circle, ${theme.canvas.dot} 1px, transparent 1.5px)`
-            : `linear-gradient(${theme.canvas.line} 1px, transparent 1px), linear-gradient(90deg, ${theme.canvas.line} 1px, transparent 1px)`;
-    }, [backgroundMode, containerRef, theme]);
+        const offsetX = ((next.x % gap) + gap) % gap;
+        const offsetY = ((next.y % gap) + gap) % gap;
+        if (backgroundModeRef.current === "dots") {
+            context.fillStyle = themeRef.current.canvas.dot;
+            context.beginPath();
+            for (let x = offsetX; x <= width; x += gap) {
+                for (let y = offsetY; y <= height; y += gap) {
+                    context.moveTo(x + 1.25, y);
+                    context.arc(x, y, 1.25, 0, Math.PI * 2);
+                }
+            }
+            context.fill();
+        } else {
+            context.strokeStyle = themeRef.current.canvas.line;
+            context.lineWidth = 1;
+            context.beginPath();
+            for (let x = offsetX; x <= width; x += gap) {
+                context.moveTo(x + 0.5, 0);
+                context.lineTo(x + 0.5, height);
+            }
+            for (let y = offsetY; y <= height; y += gap) {
+                context.moveTo(0, y + 0.5);
+                context.lineTo(width, y + 0.5);
+            }
+            context.stroke();
+        }
+        background.paint();
+    }, [containerRef]);
+
+    const syncSkyOverlays = useCallback((next: ViewportTransform) => {
+        const container = containerRef.current;
+        if (!container) return;
+        const width = Math.max(1, container.clientWidth);
+        const height = Math.max(1, container.clientHeight);
+        const accent = themeRef.current.ui.accent;
+        const vertical = verticalGuideRef.current;
+        const horizontal = horizontalGuideRef.current;
+        const verticalX = alignmentGuidesRef.current?.vertical;
+        const horizontalY = alignmentGuidesRef.current?.horizontal;
+        vertical?.set({
+            points: verticalX === undefined ? [0, 0, 0, 0] : [next.x + verticalX * next.k, 0, next.x + verticalX * next.k, height],
+            visible: verticalX !== undefined,
+            stroke: accent,
+        });
+        horizontal?.set({
+            points: horizontalY === undefined ? [0, 0, 0, 0] : [0, next.y + horizontalY * next.k, width, next.y + horizontalY * next.k],
+            visible: horizontalY !== undefined,
+            stroke: accent,
+        });
+    }, [containerRef]);
+
+    const ensureConnectionFlowAnimation = useCallback(() => {
+        if (connectionFlowFrameRef.current !== null) return;
+        const animate = (time: number) => {
+            let hasVisibleFlow = false;
+            connectionVisualMapRef.current.forEach((visual) => {
+                visual.flow.forEach((path, index) => {
+                    if (!path.visible) return;
+                    hasVisibleFlow = true;
+                    path.dashOffset = -((time * 0.055 + index * 14) % 44);
+                });
+            });
+            connectionFlowFrameRef.current = hasVisibleFlow ? requestAnimationFrame(animate) : null;
+        };
+        connectionFlowFrameRef.current = requestAnimationFrame(animate);
+    }, []);
+
+    const updateConnectionVisualStyle = useCallback((connectionId: string) => {
+        const visual = connectionVisualMapRef.current.get(connectionId);
+        if (!visual) return;
+        const selected = selectedConnectionIdRef.current === connectionId;
+        const related = relatedConnectionIdsRef.current.has(connectionId);
+        const styleSignature = `${selected}|${related}|${visual.hovered}`;
+        if (visual.styleSignature === styleSignature) return;
+        visual.styleSignature = styleSignature;
+        visual.line.set({
+            stroke: selected ? "#e0e4e8" : related ? "#67e8f9" : visual.hovered ? "#a5f3fc" : "#86909c",
+            strokeWidth: selected ? 3 : visual.hovered ? 3.2 : 2.4,
+            opacity: selected ? 1 : related ? 0.88 : visual.hovered ? 0.96 : 0.78,
+            dashPattern: undefined,
+        });
+        const flowCount = selected || related ? 3 : visual.hovered ? 1 : 0;
+        const app = leaferRef.current;
+        while (app && visual.flow.length < flowCount) {
+            const flow = new LUI.Path({
+                path: visual.path,
+                fill: "",
+                stroke: "#e0f2fe",
+                strokeWidth: 3.6,
+                strokeCap: "round",
+                dashPattern: [10, 34],
+                hittable: false,
+                zIndex: 11,
+            });
+            visual.flow.push(flow);
+            app.tree.add(flow);
+        }
+        visual.flow.forEach((flow, index) => {
+            flow.set({
+                path: visual.path,
+                visible: index < flowCount,
+                stroke: selected ? "#e0f2fe" : related ? "#67e8f9" : "#a5f3fc",
+                strokeWidth: selected || related ? 3.6 : 3.2,
+                dashPattern: selected || related ? [10, 34] : [8, 42],
+                opacity: selected ? 1 : related ? 0.9 : 0.96,
+            });
+        });
+        if (flowCount) ensureConnectionFlowAnimation();
+    }, [ensureConnectionFlowAnimation]);
+
+    const flushViewportPresentation = useCallback(() => {
+        viewportPresentationFrameRef.current = null;
+        const pending = pendingViewportPresentationRef.current;
+        pendingViewportPresentationRef.current = null;
+        if (!pending) return;
+        const next = pending.viewport;
+        const viewportElement = viewportElementRef.current;
+        if (viewportElement) {
+            viewportElement.style.transform = viewportToCssTransform(next);
+        }
+        if (pending.syncLeafer) syncEditorViewport(next);
+        callbacksRef.current.onViewportPresentation?.(next);
+        const showLeaferText = next.k < 0.5;
+        nodeTextMapRef.current.forEach((text, nodeId) => {
+            const visible = showLeaferText && !selectedNodeIdsRef.current.has(nodeId);
+            if (text.visible !== visible) text.visible = visible;
+        });
+        drawBackground(next);
+        syncSkyOverlays(next);
+    }, [drawBackground, syncEditorViewport, syncSkyOverlays]);
+
+    const applyViewportPresentation = useCallback((next: ViewportTransform, syncLeafer = true) => {
+        viewportRef.current = next;
+        scaleRef.current = next.k;
+        const pending = pendingViewportPresentationRef.current;
+        pendingViewportPresentationRef.current = {
+            viewport: next,
+            syncLeafer: syncLeafer || Boolean(pending?.syncLeafer),
+        };
+        if (viewportPresentationFrameRef.current !== null) return;
+        viewportPresentationFrameRef.current = requestAnimationFrame(flushViewportPresentation);
+    }, [flushViewportPresentation]);
+
+    const flushEditorTransform = useCallback((forceStateCommit = false) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const nodeMap = new Map(nodesRef.current.map((node) => [node.id, node]));
+        const selectedIds = new Set<string>();
+        const updates = editor.list.flatMap((rect) => {
+            const id = editorNodeIdRef.current.get(rect as LUI.Rect);
+            if (!id) return [];
+            selectedIds.add(id);
+            const nodeRect = rect as LUI.Rect;
+            const update = {
+                id,
+                position: { x: nodeRect.x ?? 0, y: nodeRect.y ?? 0 },
+                width: nodeRect.width ?? 0,
+                height: nodeRect.height ?? 0,
+            };
+            const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+            if (element) {
+                element.style.transform = `translate(${update.position.x}px, ${update.position.y}px)`;
+                element.style.width = `${update.width}px`;
+                element.style.height = `${update.height}px`;
+            }
+            nodeTextMapRef.current.get(id)?.set({
+                x: update.position.x + 18,
+                y: update.position.y + 28,
+                width: Math.max(1, update.width - 36),
+                height: Math.max(1, update.height - 48),
+            });
+            return [update];
+        });
+        if (editorTransformTypeRef.current === "move") {
+            const updateById = new Map(updates.map((update) => [update.id, update]));
+            for (const update of [...updates]) {
+                const group = nodeMap.get(update.id);
+                if (group?.type !== CanvasNodeType.Group) continue;
+                const dx = update.position.x - group.position.x;
+                const dy = update.position.y - group.position.y;
+                for (const childId of group.metadata?.groupChildIds || []) {
+                    if (selectedIds.has(childId) || updateById.has(childId)) continue;
+                    const child = nodeMap.get(childId);
+                    const childRect = editorNodeMapRef.current.get(childId);
+                    if (!child || !childRect) continue;
+                    childRect.set({ x: child.position.x + dx, y: child.position.y + dy });
+                    const childUpdate = {
+                        id: childId,
+                        position: { x: childRect.x ?? 0, y: childRect.y ?? 0 },
+                        width: childRect.width ?? 0,
+                        height: childRect.height ?? 0,
+                    };
+                    const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(childId)}"]`);
+                    if (element) element.style.transform = `translate(${childUpdate.position.x}px, ${childUpdate.position.y}px)`;
+                    nodeTextMapRef.current.get(childId)?.set({
+                        x: childUpdate.position.x + 18,
+                        y: childUpdate.position.y + 28,
+                        width: Math.max(1, childUpdate.width - 36),
+                        height: Math.max(1, childUpdate.height - 48),
+                    });
+                    updates.push(childUpdate);
+                    updateById.set(childId, childUpdate);
+                }
+            }
+        }
+        if (updates.length) {
+            const liveNodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
+            const movedNodeIds = new Set<string>();
+            updates.forEach((update) => {
+                const node = liveNodeById.get(update.id);
+                if (!node) return;
+                movedNodeIds.add(update.id);
+                liveNodeById.set(update.id, {
+                    ...node,
+                    position: update.position,
+                    width: update.width,
+                    height: update.height,
+                });
+            });
+            const affectedConnections = new Map<string, CanvasConnection>();
+            movedNodeIds.forEach((nodeId) => {
+                connectionsByNodeIdRef.current.get(nodeId)?.forEach((connection) => affectedConnections.set(connection.id, connection));
+            });
+            affectedConnections.forEach((connection) => {
+                const points = getConnectionPoints(connection, liveNodeById);
+                if (!points) return;
+                const path = buildConnectionPathFromPoints(points.from, points.to);
+                const visual = connectionVisualMapRef.current.get(connection.id);
+                if (!visual) return;
+                visual.path = path;
+                visual.hit.path = path;
+                visual.line.path = path;
+                visual.flow.forEach((flow) => (flow.path = path));
+            });
+        }
+        const now = performance.now();
+        if (updates.length && (forceStateCommit || now - editorStateCommitAtRef.current >= 32)) {
+            editorStateCommitAtRef.current = now;
+            callbacksRef.current.onNodesTransform?.(updates);
+        }
+    }, [containerRef]);
+
+    const beginEditorTransform = useCallback((type: "move" | "scale") => {
+        if (editorTransformActiveRef.current) return;
+        const editor = editorRef.current;
+        const anchor = editor?.list[0] as LUI.Rect | undefined;
+        const anchorId = anchor ? editorNodeIdRef.current.get(anchor) : null;
+        if (!anchorId) return;
+        editorTransformActiveRef.current = true;
+        editorTransformTypeRef.current = type;
+        callbacksRef.current.onNodeDragStart?.(anchorId);
+    }, []);
 
     const commitViewportChange = useCallback(() => {
         wheelCommitTimerRef.current = null;
@@ -167,66 +482,506 @@ export function LeaferCanvas({
         wheelCommitTimerRef.current = setTimeout(commitViewportChange, 100);
     }, [commitViewportChange]);
 
+    const presentLeaferViewport = useCallback(() => {
+        const zoomLayer = leaferRef.current?.tree.zoomLayer;
+        if (!zoomLayer) return;
+        const next = { x: zoomLayer.x ?? 0, y: zoomLayer.y ?? 0, k: zoomLayer.scaleX ?? 1 };
+        if (sameViewport(viewportRef.current, next)) return;
+        applyViewportPresentation(next, false);
+        scheduleViewportCommit();
+    }, [applyViewportPresentation, scheduleViewportCommit]);
+
     // Init LeaferJS
     useEffect(() => {
         const container = leaferContainerRef.current;
         if (!container) return;
-        container.style.position = "absolute";
-        container.style.inset = "0";
-        container.style.pointerEvents = "none";
-
-        const app = new LUI.Leafer({ view: container, start: true });
-        app.config = { ...app.config, hittable: false };
+        const app = new LUI.App({
+            view: container,
+            start: true,
+            ground: { type: "draw", usePartRender: false, hittable: false },
+            tree: { type: "design", usePartRender: true, usePartLayout: true },
+            sky: { type: "draw", usePartRender: false },
+            editor: {
+                selector: true,
+                boxSelect: true,
+                hover: true,
+                select: "press",
+                moveable: true,
+                resizeable: true,
+                rotateable: false,
+                skewable: false,
+                flipable: false,
+                lockRatio: "corner",
+                stroke: themeRef.current.ui.accent,
+                strokeWidth: 1.5,
+                pointFill: themeRef.current.node.panel,
+                pointSize: 9,
+                pointRadius: 14,
+                middlePoint: { width: 12, height: 4, cornerRadius: 2 },
+                hideRotatePoints: true,
+                hideResizeLines: false,
+                keyEvent: true,
+                multipleSelectKey: (event) => Boolean(event.shiftKey || event.ctrlKey || event.metaKey),
+                beforeMove: ({ x, y }) => {
+                    beginEditorTransform("move");
+                    const editor = editorRef.current;
+                    const anchor = editor?.list[0] as LUI.Rect | undefined;
+                    const anchorId = anchor ? editorNodeIdRef.current.get(anchor) : null;
+                    if (!anchor || !anchorId) return;
+                    const anchorX = anchor.x ?? 0;
+                    const anchorY = anchor.y ?? 0;
+                    const resolved = callbacksRef.current.resolveNodeMove?.(anchorId, {
+                        x: anchorX + x,
+                        y: anchorY + y,
+                    });
+                    return resolved ? { x: resolved.x - anchorX, y: resolved.y - anchorY } : undefined;
+                },
+                beforeScale: () => {
+                    beginEditorTransform("scale");
+                },
+            },
+            wheel: {
+                zoomMode: true,
+                preventDefault: true,
+                getScale: (event) => {
+                    const delta = event.deltaY || event.deltaX;
+                    if (!delta) return 1;
+                    const current = viewportRef.current.k;
+                    const next = stepCanvasZoom(current, delta < 0 ? "in" : "out");
+                    return next / current;
+                },
+            },
+            zoom: { min: MIN_CANVAS_ZOOM, max: MAX_CANVAS_ZOOM },
+            move: {
+                holdSpaceKey: true,
+                holdMiddleKey: true,
+                dragOut: 32,
+                autoDistance: 3,
+            },
+        });
+        const editor = app.editor as Editor;
         leaferRef.current = app;
+        editorRef.current = editor;
+        syncEditorViewport(viewportRef.current);
+
+        const background = new LUI.Canvas({
+            width: Math.max(1, container.clientWidth),
+            height: Math.max(1, container.clientHeight),
+            hittable: false,
+        });
+        backgroundCanvasRef.current = background;
+        app.ground.add(background);
+
+        const verticalGuide = new LUI.Line({
+            points: [0, 0, 0, 0],
+            visible: false,
+            stroke: themeRef.current.ui.accent,
+            strokeWidth: 1,
+            dashPattern: [5, 5],
+            hittable: false,
+        });
+        const horizontalGuide = new LUI.Line({
+            points: [0, 0, 0, 0],
+            visible: false,
+            stroke: themeRef.current.ui.accent,
+            strokeWidth: 1,
+            dashPattern: [5, 5],
+            hittable: false,
+        });
+        const tempEdge = new LUI.Path({
+            path: "",
+            visible: false,
+            fill: "",
+            stroke: "#a5f3fc",
+            strokeWidth: 3.5,
+            strokeCap: "round",
+            dashPattern: [10, 18],
+            hittable: false,
+        });
+        verticalGuideRef.current = verticalGuide;
+        horizontalGuideRef.current = horizontalGuide;
+        tempEdgePathRef.current = tempEdge;
+        app.sky.addAt(tempEdge, 0);
+        app.sky.addAt(horizontalGuide, 0);
+        app.sky.addAt(verticalGuide, 0);
+        drawBackground(viewportRef.current);
+        syncSkyOverlays(viewportRef.current);
+
+        const resizeObserver = new ResizeObserver(() => {
+            drawBackground(viewportRef.current);
+            syncSkyOverlays(viewportRef.current);
+        });
+        resizeObserver.observe(container);
+
+        const handleEditorSelect = (event: EditorEvent) => {
+            if (syncingEditorSelectionRef.current) return;
+            const ids = event.list
+                .map((item) => editorNodeIdRef.current.get(item as LUI.Rect))
+                .filter((id): id is string => Boolean(id));
+            callbacksRef.current.onSelectionBox?.(ids, "replace");
+        };
+        const handleEditorTransform = () => flushEditorTransform();
+        editor.on(EditorEvent.SELECT, handleEditorSelect);
+        editor.on(EditorMoveEvent.MOVE, handleEditorTransform);
+        editor.on(EditorScaleEvent.SCALE, handleEditorTransform);
+        app.tree.on(LUI.MoveEvent.MOVE, presentLeaferViewport);
+        app.tree.on(LUI.ZoomEvent.ZOOM, presentLeaferViewport);
+        const finishTransform = () => {
+            if (!editorTransformActiveRef.current) return;
+            editorTransformActiveRef.current = false;
+            flushEditorTransform(true);
+            editorTransformTypeRef.current = null;
+            callbacksRef.current.onNodesTransformEnd?.();
+        };
+        window.addEventListener("pointerup", finishTransform);
+        window.addEventListener("pointercancel", finishTransform);
+        window.addEventListener("blur", finishTransform);
 
         return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener("pointerup", finishTransform);
+            window.removeEventListener("pointercancel", finishTransform);
+            window.removeEventListener("blur", finishTransform);
+            if (connectionFlowFrameRef.current !== null) cancelAnimationFrame(connectionFlowFrameRef.current);
+            connectionFlowFrameRef.current = null;
+            if (viewportPresentationFrameRef.current !== null) cancelAnimationFrame(viewportPresentationFrameRef.current);
+            viewportPresentationFrameRef.current = null;
+            pendingViewportPresentationRef.current = null;
+            editorTransformTypeRef.current = null;
+            editorNodeMapRef.current.clear();
+            nodeTextMapRef.current.clear();
+            nodeLayoutSignatureRef.current.clear();
+            nodeTextSignatureRef.current.clear();
+            nodePaintSignatureRef.current.clear();
+            nodeMediaUrlRef.current.clear();
+            connectionVisualMapRef.current.clear();
+            backgroundCanvasRef.current = null;
+            verticalGuideRef.current = null;
+            horizontalGuideRef.current = null;
+            tempEdgePathRef.current = null;
             app.destroy();
             leaferRef.current = null;
+            editorRef.current = null;
         };
-    }, []);
+    }, [beginEditorTransform, drawBackground, flushEditorTransform, presentLeaferViewport, syncEditorViewport, syncSkyOverlays]);
 
-    // Native wheel listener with { passive: false } to allow preventDefault
     useEffect(() => {
-        const el = containerRef.current;
-        if (!el) return;
-        const onWheel = (e: WheelEvent) => {
-            const target = e.target instanceof Element ? e.target : null;
-            if (target?.closest("[data-canvas-no-zoom],.canvas-no-zoom-popup,[data-connection-create-menu]")) {
-                if (e.ctrlKey || e.metaKey) e.preventDefault();
+        const app = leaferRef.current;
+        const editor = editorRef.current;
+        if (!app || !editor) return;
+        const currentIds = new Set(nodes.map((node) => node.id));
+        editorNodeMapRef.current.forEach((rect, id) => {
+            if (currentIds.has(id)) return;
+            if (editor.hasItem(rect)) editor.removeItem(rect);
+            rect.remove();
+            editorNodeMapRef.current.delete(id);
+            nodeTextMapRef.current.get(id)?.remove();
+            nodeTextMapRef.current.delete(id);
+            nodeLayoutSignatureRef.current.delete(id);
+            nodeTextSignatureRef.current.delete(id);
+            nodePaintSignatureRef.current.delete(id);
+            nodeMediaUrlRef.current.delete(id);
+            const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+            element?.removeAttribute("data-leafer-image-ready");
+        });
+
+        nodes.forEach((node) => {
+            let rect = editorNodeMapRef.current.get(node.id);
+            if (!rect) {
+                rect = new LUI.Rect({
+                    x: node.position.x,
+                    y: node.position.y,
+                    width: node.width,
+                    height: node.height,
+                    fill: theme.node.panel,
+                    hitFill: "all",
+                    editable: true,
+                    cursor: "move",
+                    cornerRadius: 8,
+                });
+                editorNodeMapRef.current.set(node.id, rect);
+                editorNodeIdRef.current.set(rect, node.id);
+                rect.on(LUI.PointerEvent.DOWN, (event: LUI.PointerEvent) => {
+                    callbacksRef.current.onNodePointerDown?.(node.id, {
+                        shiftKey: Boolean(event.shiftKey),
+                        ctrlKey: Boolean(event.ctrlKey),
+                        metaKey: Boolean(event.metaKey),
+                    });
+                });
+                rect.on(LUI.PointerEvent.TAP, () => callbacksRef.current.onNodeTap?.(node.id));
+                rect.on(LUI.PointerEvent.DOUBLE_TAP, () => {
+                    const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"] .creative-os-node`);
+                    element?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+                });
+                rect.on(LUI.PointerEvent.ENTER, () => callbacksRef.current.onNodeHoverChange?.(node.id));
+                rect.on(LUI.PointerEvent.LEAVE, () => callbacksRef.current.onNodeHoverChange?.(null));
+                rect.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
+                    const pagePoint = event.getPagePoint();
+                    const bounds = containerRef.current?.getBoundingClientRect();
+                    if (!bounds) return;
+                    callbacksRef.current.onNodeContextMenu?.(node.id, bounds.left + pagePoint.x, bounds.top + pagePoint.y);
+                });
+                rect.on(LUI.ImageEvent.LOAD, () => markLeaferImageReady(containerRef.current, node.id, false));
+                rect.on(LUI.ImageEvent.LOADED, () => markLeaferImageReady(containerRef.current, node.id, true));
+                rect.on(LUI.ImageEvent.ERROR, () => markLeaferImageReady(containerRef.current, node.id, false));
+                app.tree.add(rect);
+            }
+            const bounds = editorBounds(node);
+            const selected = selectedNodeIdsRef.current.has(node.id);
+            const related = relatedNodeIdsRef.current.has(node.id);
+            const connectionTarget = connectionTargetNodeIdRef.current === node.id;
+            const active = selected || connectionTarget;
+            const mediaUrl = nodeMediaUrlRef.current.get(node.id);
+            const paintSignature = [
+                node.type,
+                node.metadata?.status,
+                mediaUrl,
+                active,
+                related,
+                theme.node.panel,
+                theme.ui.controlFill,
+                theme.ui.accent,
+                theme.ui.hairline,
+            ].join("|");
+            const paintChanged = nodePaintSignatureRef.current.get(node.id) !== paintSignature;
+            if (paintChanged) nodePaintSignatureRef.current.set(node.id, paintSignature);
+            const layoutSignature = [
+                node.position.x,
+                node.position.y,
+                node.width,
+                node.height,
+                node.type,
+                bounds.minWidth,
+                bounds.maxWidth,
+                bounds.minHeight,
+                bounds.maxHeight,
+                bounds.lockRatio,
+            ].join("|");
+            const layoutChanged = nodeLayoutSignatureRef.current.get(node.id) !== layoutSignature;
+            if (layoutChanged) nodeLayoutSignatureRef.current.set(node.id, layoutSignature);
+            if (paintChanged || layoutChanged) {
+                rect.set({
+                    x: node.position.x,
+                    y: node.position.y,
+                    width: node.width,
+                    height: node.height,
+                    visible: node.type !== CanvasNodeType.Group || node.width > 0,
+                    zIndex: node.type === CanvasNodeType.Group ? 0 : 20,
+                    cornerRadius: 8,
+                    stroke: active || related ? theme.ui.accent : theme.ui.hairline,
+                    strokeWidth: active ? 2 : 1,
+                    fill: paintChanged ? getNodeLeaferFill(node, theme, mediaUrl) : rect.fill,
+                    widthRange: { min: bounds.minWidth, max: bounds.maxWidth },
+                    heightRange: { min: bounds.minHeight, max: bounds.maxHeight },
+                    editConfig: {
+                        lockRatio: bounds.lockRatio,
+                        rotateable: false,
+                        skewable: false,
+                        flipable: false,
+                    },
+                });
+            }
+
+            const text = getNodeLeaferText(node);
+            let textVisual = nodeTextMapRef.current.get(node.id);
+            if (text) {
+                if (!textVisual) {
+                    textVisual = new LUI.Text({ hittable: false, zIndex: 21 });
+                    nodeTextMapRef.current.set(node.id, textVisual);
+                    app.tree.add(textVisual);
+                }
+                const fontSize = Math.max(10, node.metadata?.fontSize || 14);
+                const textSignature = [
+                    node.position.x,
+                    node.position.y,
+                    node.width,
+                    node.height,
+                    text,
+                    theme.node.text,
+                    fontSize,
+                    viewportRef.current.k < 0.5 && !selected,
+                ].join("|");
+                if (nodeTextSignatureRef.current.get(node.id) !== textSignature) {
+                    nodeTextSignatureRef.current.set(node.id, textSignature);
+                    textVisual.set({
+                        x: node.position.x + 18,
+                        y: node.position.y + 28,
+                        width: Math.max(1, node.width - 36),
+                        height: Math.max(1, node.height - 48),
+                        text,
+                        fill: theme.node.text,
+                        fontSize,
+                        lineHeight: Math.round(fontSize * 1.72),
+                        textWrap: "break",
+                        textOverflow: "hide",
+                        visible: viewportRef.current.k < 0.5 && !selected,
+                        zIndex: 21,
+                    });
+                }
+            } else if (textVisual) {
+                textVisual.remove();
+                nodeTextMapRef.current.delete(node.id);
+                nodeTextSignatureRef.current.delete(node.id);
+            }
+        });
+        editor.update();
+    }, [connectionTargetNodeId, containerRef, nodes, relatedNodeIds, selectedNodeIds, theme]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const imageNodes = nodes.filter((node) => node.type === CanvasNodeType.Image);
+        const activeIds = new Set(imageNodes.map((node) => node.id));
+        nodeMediaUrlRef.current.forEach((_url, id) => {
+            if (!activeIds.has(id)) nodeMediaUrlRef.current.delete(id);
+        });
+
+        imageNodes.forEach((node) => {
+            if (node.metadata?.status === "loading" || node.metadata?.status === "error") {
+                markLeaferImageReady(containerRef.current, node.id, false);
                 return;
             }
-            if (dragRef.current.type) {
-                e.preventDefault();
+            const storageKey = node.metadata?.storageKey;
+            const content = node.metadata?.content;
+            const cached = storageKey ? peekCachedImageUrl(storageKey) : content;
+            if (cached) {
+                applyResolvedNodeImage(node, cached);
                 return;
             }
-            e.preventDefault();
-            const rect = el.getBoundingClientRect();
-            const vp = viewportRef.current;
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            const deltaScale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
-                ? 16
-                : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
-                    ? Math.max(rect.height, 1)
-                    : 1;
-            const wheelDelta = Math.max(-120, Math.min(120, e.deltaY * deltaScale));
-            const zoomFactor = Math.exp(-wheelDelta * 0.0025);
-            const newK = Math.max(0.2, Math.min(5, vp.k * zoomFactor));
-            const newX = mouseX - (mouseX - vp.x) * (newK / vp.k);
-            const newY = mouseY - (mouseY - vp.y) * (newK / vp.k);
-            const next = clampViewport({ x: newX, y: newY, k: newK }, rect.width, rect.height);
-            if (sameViewport(vp, next)) return;
-            applyViewportPresentation(next);
-            scheduleViewportCommit();
+            if (!storageKey) {
+                markLeaferImageReady(containerRef.current, node.id, false);
+                return;
+            }
+            resolveImageUrl(storageKey, content?.startsWith("blob:") ? "" : (content || ""))
+                .then((url) => {
+                    if (!cancelled && url) applyResolvedNodeImage(node, url);
+                })
+                .catch(() => {
+                    if (!cancelled) markLeaferImageReady(containerRef.current, node.id, false);
+                });
+        });
+
+        function applyResolvedNodeImage(node: CanvasNodeData, url: string) {
+            const rect = editorNodeMapRef.current.get(node.id);
+            if (!rect) return;
+            const previousUrl = nodeMediaUrlRef.current.get(node.id);
+            if (previousUrl !== url) {
+                nodeMediaUrlRef.current.set(node.id, url);
+                nodePaintSignatureRef.current.delete(node.id);
+                markLeaferImageReady(containerRef.current, node.id, false);
+                rect.set({ fill: getNodeLeaferFill(node, themeRef.current, url) });
+            }
+        }
+
+        return () => {
+            cancelled = true;
         };
-        el.addEventListener("wheel", onWheel, { passive: false });
-        return () => el.removeEventListener("wheel", onWheel);
-    }, [applyViewportPresentation, containerRef, scheduleViewportCommit]);
+    }, [containerRef, nodes]);
+
+    useEffect(() => {
+        const app = leaferRef.current;
+        if (!app) return;
+        const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+        const currentIds = new Set(connections.map((connection) => connection.id));
+
+        connectionVisualMapRef.current.forEach((visual, id) => {
+            if (currentIds.has(id)) return;
+            visual.hit.remove();
+            visual.line.remove();
+            visual.flow.forEach((flow) => flow.remove());
+            connectionVisualMapRef.current.delete(id);
+        });
+
+        connections.forEach((connection) => {
+            const points = getConnectionPoints(connection, nodeMap);
+            if (!points) return;
+            const path = buildConnectionPathFromPoints(points.from, points.to);
+            let visual = connectionVisualMapRef.current.get(connection.id);
+            if (!visual) {
+                const hit = new LUI.Path({
+                    path,
+                    fill: "",
+                    stroke: "#000",
+                    strokeWidth: 20,
+                    opacity: 0.001,
+                    hitStroke: "all",
+                    cursor: "pointer",
+                    zIndex: 9,
+                });
+                const line = new LUI.Path({
+                    path,
+                    fill: "",
+                    stroke: "#86909c",
+                    strokeWidth: 2.4,
+                    strokeCap: "round",
+                    opacity: 0.78,
+                    hittable: false,
+                    zIndex: 10,
+                });
+                visual = { hit, line, flow: [], hovered: false, path, styleSignature: "" };
+                connectionVisualMapRef.current.set(connection.id, visual);
+                hit.on(LUI.PointerEvent.TAP, () => callbacksRef.current.onEdgeClick?.(connection.id));
+                hit.on(LUI.PointerEvent.ENTER, () => {
+                    const current = connectionVisualMapRef.current.get(connection.id);
+                    if (!current) return;
+                    current.hovered = true;
+                    updateConnectionVisualStyle(connection.id);
+                });
+                hit.on(LUI.PointerEvent.LEAVE, () => {
+                    const current = connectionVisualMapRef.current.get(connection.id);
+                    if (!current) return;
+                    current.hovered = false;
+                    updateConnectionVisualStyle(connection.id);
+                });
+                hit.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
+                    const pagePoint = event.getPagePoint();
+                    const bounds = containerRef.current?.getBoundingClientRect();
+                    if (!bounds) return;
+                    callbacksRef.current.onEdgeContextMenu?.(connection.id, bounds.left + pagePoint.x, bounds.top + pagePoint.y);
+                });
+                app.tree.add(hit);
+                app.tree.add(line);
+            } else if (visual.path !== path) {
+                visual.path = path;
+                visual.hit.path = path;
+                visual.line.path = path;
+                visual.flow.forEach((flow) => (flow.path = path));
+            }
+            updateConnectionVisualStyle(connection.id);
+        });
+    }, [connections, containerRef, nodes, relatedConnectionIds, selectedConnectionId, updateConnectionVisualStyle]);
+
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const targets = Array.from(selectedNodeIds)
+            .map((id) => editorNodeMapRef.current.get(id))
+            .filter((rect): rect is LUI.Rect => Boolean(rect));
+        syncingEditorSelectionRef.current = true;
+        if (!targets.length) editor.cancel();
+        else editor.select(targets.length === 1 ? targets[0] : targets);
+        syncingEditorSelectionRef.current = false;
+    }, [selectedNodeIds]);
+
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.config.stroke = theme.ui.accent;
+        editor.config.pointFill = theme.node.panel;
+        editor.update();
+    }, [theme]);
+
+    useEffect(() => {
+        drawBackground(viewportRef.current);
+        syncSkyOverlays(viewportRef.current);
+    }, [alignmentGuides, backgroundMode, drawBackground, syncSkyOverlays, theme]);
 
     // Viewport sync
     useEffect(() => {
-        committedViewportRef.current = viewport;
-        applyViewportPresentation(viewport);
+        const container = containerRef.current;
+        const next = clampViewport(viewport, container?.clientWidth || 0, container?.clientHeight || 0);
+        committedViewportRef.current = next;
+        applyViewportPresentation(next);
+        if (!sameViewport(viewport, next)) callbacksRef.current.onViewportChange(next);
     }, [applyViewportPresentation, viewport]);
 
     useEffect(() => () => {
@@ -290,8 +1045,10 @@ export function LeaferCanvas({
         const sourcePoint = connection.handleType === "source" ? fixedScreenPoint : pointerScreenPoint;
         const targetPoint = connection.handleType === "source" ? pointerScreenPoint : fixedScreenPoint;
 
-        path.setAttribute("d", buildConnectionPathFromPoints(sourcePoint, targetPoint));
-        path.style.opacity = "1";
+        path.set({
+            path: buildConnectionPathFromPoints(sourcePoint, targetPoint),
+            visible: true,
+        });
     }, []);
 
     const renderTempEdge = useCallback((connection: { nodeId: string; handleType: "source" | "target" }, clientX: number, clientY: number) => {
@@ -322,8 +1079,7 @@ export function LeaferCanvas({
     const clearTempEdge = useCallback(() => {
         const path = tempEdgePathRef.current;
         if (!path) return;
-        path.style.opacity = "0";
-        path.removeAttribute("d");
+        path.set({ visible: false, path: "" });
     }, []);
 
     useEffect(() => {
@@ -362,12 +1118,14 @@ export function LeaferCanvas({
         const isTextEditableContent = !!target.closest("[data-node-text-editable]");
         const cb = callbacksRef.current;
 
+        // Leafer owns hit testing, selection, box selection, node transforms and viewport gestures.
+        if (target.closest("[data-leafer-editor-layer]")) return;
+
         const shouldPanFromPointer = event.button === 1 || (event.button === 0 && isSpacePressedRef.current);
         if (shouldPanFromPointer && !isHandle) {
             dragRef.current = {
-                type: "pan", nodeId: "",
+                type: "pan",
                 startScreenX: event.clientX, startScreenY: event.clientY,
-                startNodeX: 0, startNodeY: 0,
                 startViewportX: viewportRef.current.x, startViewportY: viewportRef.current.y,
                 selectStartCanvas: getCanvasPos(event.clientX, event.clientY),
                 selectRect: null,
@@ -401,31 +1159,15 @@ export function LeaferCanvas({
             const nodeEl = target.closest("[data-node-id]") as HTMLElement;
             const nodeId = nodeEl?.dataset.nodeId;
             if (nodeId) {
-                const node = nodesRef.current.find((n) => n.id === nodeId);
-                if (node) {
-                    const trackedModifiers = selectionModifiersRef.current;
-                    const shouldStartDrag = cb.onNodePointerDown?.(nodeId, {
-                        shiftKey: event.shiftKey || trackedModifiers.shiftKey,
-                        ctrlKey: event.ctrlKey || trackedModifiers.ctrlKey,
-                        metaKey: event.metaKey || trackedModifiers.metaKey,
-                    }) ?? true;
-                    if (!shouldStartDrag) return;
-                    // Preserve native click/double-click behavior for text content.
-                    // The node remains draggable from its title or frame.
-                    if (isTextEditableContent) return;
-                    dragRef.current = {
-                        type: "node", nodeId,
-                        startScreenX: event.clientX, startScreenY: event.clientY,
-                        startNodeX: node.position.x, startNodeY: node.position.y,
-                        startViewportX: 0, startViewportY: 0,
-                        selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
-                    };
-                    cb.onNodeDragStart?.(nodeId);
-                    event.preventDefault();
-                    document.body.style.userSelect = "none";
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    return;
-                }
+                const trackedModifiers = selectionModifiersRef.current;
+                cb.onNodePointerDown?.(nodeId, {
+                    shiftKey: event.shiftKey || trackedModifiers.shiftKey,
+                    ctrlKey: event.ctrlKey || trackedModifiers.ctrlKey,
+                    metaKey: event.metaKey || trackedModifiers.metaKey,
+                });
+                // Interactive DOM content remains in React; geometry always stays in Leafer.
+                if (isTextEditableContent) return;
+                return;
             }
         }
 
@@ -442,9 +1184,8 @@ export function LeaferCanvas({
                 const addSelection = event.shiftKey || trackedModifiers.shiftKey;
                 const selectionMode = toggleSelection ? 'toggle' : addSelection ? 'add' : 'replace';
                 dragRef.current = {
-                    type: 'select', nodeId: '',
+                    type: 'select',
                     startScreenX: event.clientX, startScreenY: event.clientY,
-                    startNodeX: 0, startNodeY: 0,
                     startViewportX: viewportRef.current.x, startViewportY: viewportRef.current.y,
                     selectStartCanvas: getCanvasPos(event.clientX, event.clientY),
                     selectRect: null,
@@ -461,14 +1202,6 @@ export function LeaferCanvas({
     const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const drag = dragRef.current;
         const cb = callbacksRef.current;
-        if (drag.type === "node") {
-            const vp = viewportRef.current;
-            const dx = (event.clientX - drag.startScreenX) / vp.k;
-            const dy = (event.clientY - drag.startScreenY) / vp.k;
-            cb.onNodeDrag?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
-            return;
-        }
-
         if (drag.type === "select" || drag.type === "pan") {
             const vp = viewportRef.current;
             if ((isSpacePressedRef.current || event.buttons === 4) && drag.type === "select") {
@@ -520,15 +1253,7 @@ export function LeaferCanvas({
     const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
         const drag = dragRef.current;
         const cb = callbacksRef.current;
-        const vp = viewportRef.current;
 
-        if (drag.type === "node") {
-            const moved = Math.hypot(event.clientX - drag.startScreenX, event.clientY - drag.startScreenY);
-            const dx = (event.clientX - drag.startScreenX) / vp.k;
-            const dy = (event.clientY - drag.startScreenY) / vp.k;
-            cb.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
-            if (moved <= 5) cb.onNodeTap?.(drag.nodeId);
-        }
         if (drag.type === "pan") commitViewportChange();
 
         if (drag.type === "select" && drag.selectRect && drag.selectRect.w > 5 && drag.selectRect.h > 5) {
@@ -572,26 +1297,20 @@ export function LeaferCanvas({
         connectStartScreenRef.current = null;
 
         dragRef.current = {
-            type: null, nodeId: "", startScreenX: 0, startScreenY: 0,
-            startNodeX: 0, startNodeY: 0, startViewportX: 0, startViewportY: 0,
+            type: null, startScreenX: 0, startScreenY: 0,
+            startViewportX: 0, startViewportY: 0,
             selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
         };
         document.body.style.userSelect = "";
     }, [clearTempEdge, commitViewportChange, findConnectionSnapTarget, getCanvasPos, renderTempEdgeAtCanvasPoint]);
 
-    const handlePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const handlePointerCancel = useCallback(() => {
         const drag = dragRef.current;
-        if (drag.type === "node") {
-            const vp = viewportRef.current;
-            const dx = (event.clientX - drag.startScreenX) / vp.k;
-            const dy = (event.clientY - drag.startScreenY) / vp.k;
-            callbacksRef.current.onNodeDragStop?.(drag.nodeId, { x: drag.startNodeX + dx, y: drag.startNodeY + dy });
-        }
         if (drag.type === "pan") commitViewportChange();
         if (drag.type === "select") clearSelectionBox(leaferRef.current);
         dragRef.current = {
-            type: null, nodeId: "", startScreenX: 0, startScreenY: 0,
-            startNodeX: 0, startNodeY: 0, startViewportX: 0, startViewportY: 0,
+            type: null, startScreenX: 0, startScreenY: 0,
+            startViewportX: 0, startViewportY: 0,
             selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: "replace",
         };
         if (!frozenTempEdgeRef.current) clearTempEdge();
@@ -619,33 +1338,13 @@ export function LeaferCanvas({
         willChange: "transform",
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
-    const backgroundStyle = useMemo<React.CSSProperties>(() => {
-        if (backgroundMode === "blank") return { backgroundColor: theme.canvas.background };
-        const gap = Math.max(8, 56 * viewport.k);
-        const position = `${viewport.x % gap}px ${viewport.y % gap}px`;
-        if (backgroundMode === "dots") {
-            return {
-                backgroundColor: theme.canvas.background,
-                backgroundImage: `radial-gradient(circle, ${theme.canvas.dot} 1px, transparent 1.5px)`,
-                backgroundSize: `${gap}px ${gap}px`,
-                backgroundPosition: position,
-            };
-        }
-        return {
-            backgroundColor: theme.canvas.background,
-            backgroundImage: `linear-gradient(${theme.canvas.line} 1px, transparent 1px), linear-gradient(90deg, ${theme.canvas.line} 1px, transparent 1px)`,
-            backgroundSize: `${gap}px ${gap}px`,
-            backgroundPosition: position,
-        };
-    }, [backgroundMode, theme, viewport.k, viewport.x, viewport.y]);
-
     const cursor = isSpacePressed ? "grab" : "default";
 
     return (
         <div
             ref={containerRef}
             className="relative h-full w-full select-none overflow-hidden"
-            style={{ ...backgroundStyle, cursor, touchAction: "none" }}
+            style={{ backgroundColor: theme.canvas.background, cursor, touchAction: "none" }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -660,48 +1359,10 @@ export function LeaferCanvas({
                 }
             }}
         >
-            <svg
-                className="pointer-events-none absolute inset-0 z-[60] h-full w-full overflow-visible"
-                aria-hidden
-            >
-                {alignmentGuides?.vertical !== undefined ? (
-                    <line
-                        x1={viewport.x + alignmentGuides.vertical * viewport.k}
-                        x2={viewport.x + alignmentGuides.vertical * viewport.k}
-                        y1="0"
-                        y2="100%"
-                        stroke={theme.ui.accent}
-                        strokeWidth="1"
-                        strokeDasharray="5 5"
-                        vectorEffect="non-scaling-stroke"
-                    />
-                ) : null}
-                {alignmentGuides?.horizontal !== undefined ? (
-                    <line
-                        x1="0"
-                        x2="100%"
-                        y1={viewport.y + alignmentGuides.horizontal * viewport.k}
-                        y2={viewport.y + alignmentGuides.horizontal * viewport.k}
-                        stroke={theme.ui.accent}
-                        strokeWidth="1"
-                        strokeDasharray="5 5"
-                        vectorEffect="non-scaling-stroke"
-                    />
-                ) : null}
-                <path
-                    ref={tempEdgePathRef}
-                    className="canvas-flow-edge"
-                    fill="none"
-                    stroke="#a5f3fc"
-                    strokeWidth={3.5}
-                    strokeLinecap="round"
-                    strokeDasharray="10 18"
-                    vectorEffect="non-scaling-stroke"
-                    style={{ opacity: 0, filter: "drop-shadow(0 0 5px rgba(103,232,249,.8))" }}
-                />
-            </svg>
+            <div data-leafer-editor-layer className="absolute inset-0">
+                <div ref={leaferContainerRef} className="h-full w-full" />
+            </div>
             <div ref={viewportElementRef} style={viewportStyle}>
-                <div ref={leaferContainerRef} className="absolute inset-0" />
                 <CanvasScaleCtx.Provider value={scaleRef}>
                     {children}
                 </CanvasScaleCtx.Provider>
@@ -712,16 +1373,61 @@ export function LeaferCanvas({
 
 let _selectionRect: LUI.Rect | null = null;
 
-function renderSelectionBox(app: LUI.Leafer | null, rect: { x: number; y: number; w: number; h: number } | null) {
+function renderSelectionBox(app: LUI.App | null, rect: { x: number; y: number; w: number; h: number } | null) {
     if (!app) return;
     if (_selectionRect) { _selectionRect.remove(); _selectionRect = null; }
     if (!rect || rect.w < 2 || rect.h < 2) return;
     const box = new LUI.Rect({ x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: "rgba(125, 211, 252, 0.1)", stroke: "#7dd3fc", strokeWidth: 1 });
     box.hittable = false;
-    app.add(box);
+    app.tree.add(box);
     _selectionRect = box;
 }
 
-function clearSelectionBox(app: LUI.Leafer | null) {
+function clearSelectionBox(app: LUI.App | null) {
     if (_selectionRect && app) { _selectionRect.remove(); _selectionRect = null; }
+}
+
+function editorBounds(node: CanvasNodeData) {
+    const isMediaNode = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video;
+    const isGroup = node.type === CanvasNodeType.Group;
+    return {
+        minWidth: node.type === CanvasNodeType.Image ? 120 : node.type === CanvasNodeType.Video ? 160 : isGroup ? 180 : 220,
+        minHeight: node.type === CanvasNodeType.Image ? 96 : node.type === CanvasNodeType.Video ? 96 : isGroup ? 120 : 160,
+        maxWidth: isGroup ? 4000 : isMediaNode ? 640 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 720 : 520,
+        maxHeight: isGroup ? 3000 : node.type === CanvasNodeType.Image ? 640 : node.type === CanvasNodeType.Video ? 480 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 640 : 480,
+        lockRatio: (node.type === CanvasNodeType.Image && !node.metadata?.freeResize) || node.type === CanvasNodeType.Video,
+    };
+}
+
+function getNodeLeaferFill(
+    node: CanvasNodeData,
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
+    mediaUrl?: string,
+) {
+    if (node.type === CanvasNodeType.Image && mediaUrl && node.metadata?.status !== "loading" && node.metadata?.status !== "error") {
+        return {
+            type: "image" as const,
+            url: mediaUrl,
+            mode: node.metadata?.freeResize ? "stretch" as const : "fit" as const,
+        };
+    }
+    if (node.type === CanvasNodeType.Group) return theme.ui.controlFill;
+    if (node.type === CanvasNodeType.Video) return "rgba(14,14,14,.72)";
+    return theme.node.panel;
+}
+
+function getNodeLeaferText(node: CanvasNodeData) {
+    if (node.metadata?.status === "loading" || node.metadata?.status === "error") return "";
+    if (node.type === CanvasNodeType.Text) return node.metadata?.content?.trim() || "";
+    if (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI) {
+        return node.metadata?.prompt?.trim() || node.title.trim();
+    }
+    return "";
+}
+
+function markLeaferImageReady(container: HTMLDivElement | null, nodeId: string, ready: boolean) {
+    const element = container?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+    if (!element) return;
+    if (ready) element.dataset.leaferImageReady = "true";
+    else element.removeAttribute("data-leafer-image-ready");
 }

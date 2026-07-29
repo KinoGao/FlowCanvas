@@ -42,11 +42,10 @@ import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
+import { clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
-import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
-import { buildSpatialIndex, querySpatialIndex, type CanvasSpatialRect } from "../utils/canvas-spatial-index";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import {
     allocateCanvasNodeIdentity,
@@ -162,6 +161,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
     snapToGrid: boolean;
+    alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
 };
 
@@ -184,13 +184,6 @@ function defaultGenerationMode(type?: CanvasNodeType): CanvasNodeGenerationMode 
 
 function isGenerationConfigNode(type?: CanvasNodeType) {
     return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
-}
-
-function hasRetainableMedia(node: CanvasNodeData) {
-    return (
-        (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) &&
-        Boolean(node.metadata?.storageKey || node.metadata?.content)
-    );
 }
 
 function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
@@ -242,7 +235,7 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
 const VIDEO_NODE_MAX_WIDTH = VIDEO_NODE_SIZE_RANGE.maxWidth;
 const VIDEO_NODE_MAX_HEIGHT = VIDEO_NODE_SIZE_RANGE.maxHeight;
 const CANVAS_AGENT_PANEL_MOTION_MS = 500;
-const CANVAS_OVERVIEW_SCALE = 0.24;
+const CANVAS_OVERVIEW_SCALE = 0.5;
 const NODE_TOOLBAR_HIDE_DELAY_MS = 320;
 
 const CanvasConfigNodePanel = lazy(() => import("../components/canvas-config-node-panel").then((mod) => ({ default: mod.CanvasConfigNodePanel })));
@@ -421,7 +414,7 @@ export default function CanvasPage() {
     return (
         <ErrorBoundary>
             <Suspense fallback={LazyCanvasFallback}>
-                <ReactFlowCanvasPage />
+                <LeaferCanvasPage />
             </Suspense>
         </ErrorBoundary>
     );
@@ -586,7 +579,7 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
     );
 }
 
-function ReactFlowCanvasPage() {
+function LeaferCanvasPage() {
     const { message, modal } = App.useApp();
     const params = useParams<{ id: string }>();
     const navigate = useNavigate();
@@ -668,7 +661,6 @@ function ReactFlowCanvasPage() {
     const [size, setSize] = useState({ width: 1200, height: 720 });
     const [selectedNodeIds, setSelectedNodeIdsState] = useState<Set<string>>(new Set());
     const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-    const [hoveredConnectionId, setHoveredConnectionId] = useState<string | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
@@ -679,6 +671,7 @@ function ReactFlowCanvasPage() {
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [snapToGrid, setSnapToGrid] = useState(false);
+    const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
     const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -727,6 +720,8 @@ function ReactFlowCanvasPage() {
     const viewportRef = useRef(viewport);
     const snapToGridRef = useRef(snapToGrid);
     snapToGridRef.current = snapToGrid;
+    const alignmentGuidesEnabledRef = useRef(alignmentGuidesEnabled);
+    alignmentGuidesEnabledRef.current = alignmentGuidesEnabled;
     const lastCanvasPositionRef = useRef<Position | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
@@ -737,9 +732,6 @@ function ReactFlowCanvasPage() {
     const recoveredVideoTaskIdsRef = useRef(new Set<string>());
     const resumedGenerationProjectKeyRef = useRef<string | null>(null);
     const multiNodeDragStartRef = useRef<MultiNodeDragState | null>(null);
-    const retainedMediaNodeIdsRef = useRef(new Set<string>());
-    const [retainedMediaVersion, setRetainedMediaVersion] = useState(0);
-
     const setSelectedNodeIds = useCallback((nextValue: Set<string> | ((current: Set<string>) => Set<string>)) => {
         const next = typeof nextValue === "function" ? nextValue(selectedNodeIdsRef.current) : nextValue;
         selectedNodeIdsRef.current = next;
@@ -786,9 +778,10 @@ function ReactFlowCanvasPage() {
             activeChatId,
             backgroundMode,
             snapToGrid,
+            alignmentGuidesEnabled,
             showImageInfo,
         }),
-        [activeChatId, backgroundMode, chatSessions, showImageInfo, snapToGrid],
+        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, showImageInfo, snapToGrid],
     );
 
     const cleanupCanvasFiles = useCallback(
@@ -980,8 +973,9 @@ function ReactFlowCanvasPage() {
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
             setSnapToGrid(project.snapToGrid || false);
+            setAlignmentGuidesEnabled(project.alignmentGuidesEnabled !== false);
             setShowImageInfo(project.showImageInfo || false);
-            setViewport(project.viewport);
+            setViewport({ ...project.viewport, k: clampCanvasZoom(project.viewport.k) });
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
@@ -994,6 +988,7 @@ function ReactFlowCanvasPage() {
                 activeChatId: project.activeChatId || null,
                 backgroundMode: project.backgroundMode,
                 snapToGrid: project.snapToGrid || false,
+                alignmentGuidesEnabled: project.alignmentGuidesEnabled !== false,
                 showImageInfo: project.showImageInfo || false,
             };
             restoredProjectKeyRef.current = restoreKey;
@@ -1018,6 +1013,7 @@ function ReactFlowCanvasPage() {
             previous.activeChatId === next.activeChatId &&
             previous.backgroundMode === next.backgroundMode &&
             previous.snapToGrid === next.snapToGrid &&
+            previous.alignmentGuidesEnabled === next.alignmentGuidesEnabled &&
             previous.showImageInfo === next.showImageInfo
         )
             return;
@@ -1040,7 +1036,7 @@ function ReactFlowCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo, snapToGrid]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo, snapToGrid]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1068,7 +1064,7 @@ function ReactFlowCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, showImageInfo });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo });
         }, 300);
         return () => {
             if (projectSaveTimerRef.current) {
@@ -1076,7 +1072,7 @@ function ReactFlowCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, snapToGrid, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, snapToGrid, updateProject]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1213,11 +1209,10 @@ function ReactFlowCanvasPage() {
     const nodeById = useMemo(() => buildNodeById(nodes), [nodes]);
     const batchVisibilityIndex = useMemo(() => buildBatchVisibilityIndex(nodes, nodeById, collapsingBatchIds), [collapsingBatchIds, nodeById, nodes]);
     const connectionAdjacency = useMemo(() => buildConnectionAdjacency(connections), [connections]);
-    const visibleNodeItems = useMemo(
+    const mountedNodeItems = useMemo(
         () => nodes.filter((node) => !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
         [batchVisibilityIndex, nodes],
     );
-    const nodeSpatialIndex = useMemo(() => buildSpatialIndex(visibleNodeItems, nodeSpatialRect), [visibleNodeItems]);
     const canvasGraph = useMemo(() => createCanvasResourceGraph(nodes, connections, nodeById), [connections, nodeById, nodes]);
 
     useLayoutEffect(() => {
@@ -1305,10 +1300,10 @@ function ReactFlowCanvasPage() {
         };
     }, []);
 
-    const nodeDragRafRef = useRef<number>(0);
-    const pendingDragPosRef = useRef<{ nodeId: string; position: { x: number; y: number } } | null>(null);
     const resolveDraggedPosition = useCallback((nodeId: string, position: Position) => {
-        const alignment = resolveNodeAlignment(nodeId, position, nodesRef.current, multiNodeDragStartRef.current, viewportRef.current.k);
+        const alignment = alignmentGuidesEnabledRef.current
+            ? resolveNodeAlignment(nodeId, position, nodesRef.current, multiNodeDragStartRef.current, viewportRef.current.k)
+            : { position, guides: null };
         const next = { ...alignment.position };
         if (snapToGridRef.current) {
             const gridPosition = snapCanvasPosition(next);
@@ -1319,87 +1314,10 @@ function ReactFlowCanvasPage() {
         return next;
     }, []);
 
-    const handleLeaferNodeDrag = useCallback((nodeId: string, position: { x: number; y: number }) => {
-        // RAF 节流：拖拽时每帧最多更新一次 nodes state，避免高频 setNodes 触发级联 useMemo 重算
-        pendingDragPosRef.current = { nodeId, position };
-        if (nodeDragRafRef.current) return;
-        nodeDragRafRef.current = requestAnimationFrame(() => {
-            nodeDragRafRef.current = 0;
-            const pending = pendingDragPosRef.current;
-            if (!pending) return;
-            pendingDragPosRef.current = null;
-            const nextPosition = resolveDraggedPosition(pending.nodeId, pending.position);
-            const multiNodeDrag = multiNodeDragStartRef.current;
-            if (multiNodeDrag?.anchorId === pending.nodeId) {
-                const dx = nextPosition.x - multiNodeDrag.anchorPosition.x;
-                const dy = nextPosition.y - multiNodeDrag.anchorPosition.y;
-                setNodes((prev) => {
-                    let changed = false;
-                    const next = prev.map((node) => {
-                        const startPosition = multiNodeDrag.nodePositions.get(node.id);
-                        if (!startPosition) return node;
-                        const nextPosition = { x: startPosition.x + dx, y: startPosition.y + dy };
-                        if (node.position.x === nextPosition.x && node.position.y === nextPosition.y) return node;
-                        changed = true;
-                        return { ...node, position: nextPosition };
-                    });
-                    return changed ? next : prev;
-                });
-                return;
-            }
-            setNodes((prev) => {
-                let changed = false;
-                const next = prev.map((node) => {
-                    if (node.id !== pending.nodeId || (node.position.x === nextPosition.x && node.position.y === nextPosition.y)) return node;
-                    changed = true;
-                    return { ...node, position: nextPosition };
-                });
-                return changed ? next : prev;
-            });
-        });
-    }, [resolveDraggedPosition]);
-
-    const handleLeaferNodeDragStop = useCallback((nodeId: string, position: { x: number; y: number }) => {
-        const nextPosition = resolveDraggedPosition(nodeId, position);
-        const multiNodeDrag = multiNodeDragStartRef.current;
-        if (multiNodeDrag?.anchorId === nodeId) {
-            const dx = nextPosition.x - multiNodeDrag.anchorPosition.x;
-            const dy = nextPosition.y - multiNodeDrag.anchorPosition.y;
-            setNodes((prev) => {
-                let changed = false;
-                const next = prev.map((node) => {
-                    const startPosition = multiNodeDrag.nodePositions.get(node.id);
-                    if (!startPosition) return node;
-                    const nextPosition = { x: startPosition.x + dx, y: startPosition.y + dy };
-                    if (node.position.x === nextPosition.x && node.position.y === nextPosition.y) return node;
-                    changed = true;
-                    return { ...node, position: nextPosition };
-                });
-                return reconcileGroupMembership(changed ? next : prev);
-            });
-        } else {
-            setNodes((prev) => {
-                let changed = false;
-                const next = prev.map((node) => {
-                    if (node.id !== nodeId || (node.position.x === nextPosition.x && node.position.y === nextPosition.y)) return node;
-                    changed = true;
-                    return { ...node, position: nextPosition };
-                });
-                return reconcileGroupMembership(changed ? next : prev);
-            });
-        }
-        multiNodeDragStartRef.current = null;
-        // 取消可能 pending 的拖拽 RAF，避免 dragStop 后多一次无效 setNodes
-        if (nodeDragRafRef.current) {
-            cancelAnimationFrame(nodeDragRafRef.current);
-            nodeDragRafRef.current = 0;
-        }
-        pendingDragPosRef.current = null;
-        setAlignmentGuides(null);
-        historyPausedRef.current = false;
-        nodeDraggingRef.current = false;
-        setIsNodeDragging(false);
-    }, [resolveDraggedPosition]);
+    const handleAlignmentGuidesEnabledChange = useCallback((enabled: boolean) => {
+        setAlignmentGuidesEnabled(enabled);
+        if (!enabled) setAlignmentGuides(null);
+    }, []);
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
@@ -1426,79 +1344,6 @@ function ReactFlowCanvasPage() {
         connectingParamsRef.current = null;
         setConnecting(null);
     }, [setConnecting]);
-
-    const visibleNodes = useMemo(() => {
-        const padding = isNodeDragging ? 2000 : 280;
-        const rect = containerRef.current?.getBoundingClientRect();
-        const width = rect?.width || size.width;
-        const height = rect?.height || size.height;
-        const viewRect = viewportSpatialRect(viewport, width, height, padding);
-
-        return querySpatialIndex(nodeSpatialIndex, viewRect).map((entry) => entry.item);
-    }, [isNodeDragging, nodeSpatialIndex, size.height, size.width, viewport]);
-
-    // 已进入视口的媒体节点保持挂载，但设上限（60个），防止大型画布下 DOM 无限堆积。
-    // 超出上限时按 LRU 顺序移除最早进入的节点，控制常驻 DOM 数量。
-    const RETAINED_MEDIA_MAX = 60;
-    useEffect(() => {
-        const retainedIds = retainedMediaNodeIdsRef.current;
-        let changed = false;
-
-        visibleNodes.forEach((node) => {
-            if (!hasRetainableMedia(node) || retainedIds.has(node.id)) return;
-            retainedIds.add(node.id);
-            changed = true;
-        });
-
-        // 超出上限时移除最早加入的（Set 保持插入顺序）
-        if (retainedIds.size > RETAINED_MEDIA_MAX) {
-            const toRemove = retainedIds.size - RETAINED_MEDIA_MAX;
-            let count = 0;
-            for (const id of retainedIds) {
-                // 当前视口内的节点不移除
-                if (visibleNodes.some((n) => n.id === id)) continue;
-                retainedIds.delete(id);
-                count++;
-                if (count >= toRemove) break;
-            }
-            changed = true;
-        }
-
-        if (changed) setRetainedMediaVersion((version) => version + 1);
-    }, [visibleNodes]);
-
-    useEffect(() => {
-        const retainedIds = retainedMediaNodeIdsRef.current;
-        const existingIds = new Set(nodes.map((node) => node.id));
-        let changed = false;
-
-        retainedIds.forEach((id) => {
-            if (existingIds.has(id)) return;
-            retainedIds.delete(id);
-            changed = true;
-        });
-
-        if (changed) setRetainedMediaVersion((version) => version + 1);
-    }, [nodes]);
-
-    // 实际渲染的节点列表：视口内可见节点 + 必须保持挂载的特殊节点（正在编辑/有对话框/有工具栏等）
-    const renderedNodes = useMemo(() => {
-        const visibleIds = new Set(visibleNodes.map((n) => n.id));
-        const mustRenderIds = new Set<string>();
-        // 正在编辑、有对话框、有工具栏、有裁剪/蒙版等操作中的节点即使不在视口内也需保持挂载
-        for (const id of [editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId]) {
-            if (id) mustRenderIds.add(id);
-        }
-        // 选中节点也需保持挂载（可能被拖拽出视口）
-        selectedNodeIdsRef.current.forEach((id) => mustRenderIds.add(id));
-        // 已经进入过视口的媒体节点保持 DOM 挂载，避免平移回来时重新创建媒体元素和重复读取元数据
-        retainedMediaNodeIdsRef.current.forEach((id) => mustRenderIds.add(id));
-        // 合并：视口内 + 必须挂载的，保持 Group 优先排序
-        const extra = mustRenderIds.size
-            ? visibleNodeItems.filter((n) => !visibleIds.has(n.id) && mustRenderIds.has(n.id))
-            : [];
-        return extra.length ? [...visibleNodes, ...extra] : visibleNodes;
-    }, [visibleNodes, visibleNodeItems, editingNodeId, dialogNodeId, toolbarNodeId, cropNodeId, maskEditNodeId, splitNodeId, upscaleNodeId, angleNodeId, previewNodeId, retainedMediaVersion]);
 
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -1548,7 +1393,7 @@ function ReactFlowCanvasPage() {
     }, [canvasGraph, nodes]);
     const mentionReferencesByNodeId = useMemo(() => {
         const targetNodeIds = new Set<string>();
-        visibleNodes.forEach((node) => {
+        mountedNodeItems.forEach((node) => {
             if (node.type === CanvasNodeType.Text || isGenerationConfigNode(node.type)) targetNodeIds.add(node.id);
         });
         [dialogNodeId, activeNodeId, editingNodeId, toolbarNodeId].forEach((nodeId) => {
@@ -1561,7 +1406,7 @@ function ReactFlowCanvasPage() {
             if (node) mentionReferencesByNodeId.set(nodeId, buildNodeMentionReferences(node, canvasGraph));
         });
         return mentionReferencesByNodeId;
-    }, [activeNodeId, canvasGraph, dialogNodeId, editingNodeId, nodeById, toolbarNodeId, visibleNodes]);
+    }, [activeNodeId, canvasGraph, dialogNodeId, editingNodeId, mountedNodeItems, nodeById, toolbarNodeId]);
     const relatedHighlight = useMemo(() => {
         const nodeIds = new Set<string>();
         const connectionIds = new Set<string>();
@@ -1877,14 +1722,14 @@ function ReactFlowCanvasPage() {
         setDialogNodeId(null);
     }, [resetImageTapGesture]);
 
-    const openConnectionContextMenu = useCallback((event: ReactMouseEvent<Element>, connectionId: string) => {
+    const openConnectionContextMenu = useCallback((connectionId: string, clientX: number, clientY: number) => {
         resetImageTapGesture();
         selectedNodeIdsRef.current = new Set();
         selectedConnectionIdRef.current = connectionId;
         setSelectedConnectionId(connectionId);
         setSelectedNodeIds(new Set());
         setDialogNodeId(null);
-        setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId });
+        setContextMenu({ type: "connection", x: clientX, y: clientY, connectionId });
     }, [resetImageTapGesture]);
 
     const deselectCanvas = useCallback(() => {
@@ -2041,7 +1886,7 @@ function ReactFlowCanvasPage() {
         const padding = 96;
         const contentWidth = Math.max(1, bounds.right - bounds.left);
         const contentHeight = Math.max(1, bounds.bottom - bounds.top);
-        const scale = Math.max(0.2, Math.min(1, (width - padding * 2) / contentWidth, (height - padding * 2) / contentHeight));
+        const scale = clampCanvasZoom(Math.min(1, (width - padding * 2) / contentWidth, (height - padding * 2) / contentHeight));
         const centerX = (bounds.left + bounds.right) / 2;
         const centerY = (bounds.top + bounds.bottom) / 2;
         const next = { x: width / 2 - centerX * scale, y: height / 2 - centerY * scale, k: scale };
@@ -2052,7 +1897,7 @@ function ReactFlowCanvasPage() {
 
     const setZoomScale = useCallback(
         (scale: number) => {
-            const nextScale = Math.min(Math.max(scale, 0.2), 5);
+            const nextScale = clampCanvasZoom(scale);
             const rect = containerRef.current?.getBoundingClientRect();
             const width = rect?.width && rect.width > 0 ? rect.width : size.width;
             const height = rect?.height && rect.height > 0 ? rect.height : size.height;
@@ -2082,6 +1927,7 @@ function ReactFlowCanvasPage() {
         setActiveChatId(entry.activeChatId);
         setBackgroundMode(entry.backgroundMode);
         setSnapToGrid(entry.snapToGrid);
+        setAlignmentGuidesEnabled(entry.alignmentGuidesEnabled !== false);
         setShowImageInfo(entry.showImageInfo);
         setSelectedNodeIds(new Set());
         setSelectedConnectionId(null);
@@ -2308,13 +2154,13 @@ function ReactFlowCanvasPage() {
 
             if (isModifierShortcut && !event.altKey && (event.key === "+" || event.key === "=")) {
                 event.preventDefault();
-                setZoomScale(viewportRef.current.k * 1.12);
+                setZoomScale(stepCanvasZoom(viewportRef.current.k, "in"));
                 return;
             }
 
             if (isModifierShortcut && !event.altKey && event.key === "-") {
                 event.preventDefault();
-                setZoomScale(viewportRef.current.k / 1.12);
+                setZoomScale(stepCanvasZoom(viewportRef.current.k, "out"));
                 return;
             }
 
@@ -2423,7 +2269,7 @@ function ReactFlowCanvasPage() {
             node?.type === CanvasNodeType.Image &&
             Boolean(node.metadata?.content || node.metadata?.storageKey);
         if (!isMediaPreviewNode || isToggle || imageTapGestureRef.current.nodeId !== nodeId) resetImageTapGesture();
-        if (!isToggle && nextSelected.size === 1 && !isMediaPreviewNode && node?.type !== CanvasNodeType.Group && node?.metadata?.canvasTool !== "director") {
+        if (!isToggle && nextSelected.size === 1 && node?.type !== CanvasNodeType.Group && node?.metadata?.canvasTool !== "director") {
             setDialogNodeId(nodeId);
         } else {
             setDialogNodeId(null);
@@ -2443,6 +2289,35 @@ function ReactFlowCanvasPage() {
             });
             return changed ? reconcileGroupMembership(next) : prev;
         });
+    }, []);
+
+    const handleLeaferNodesTransform = useCallback((updates: Array<{ id: string; position: Position; width: number; height: number }>) => {
+        const updatesById = new Map(updates.map((update) => [update.id, update]));
+        setNodes((prev) => {
+            let changed = false;
+            const next = prev.map((node) => {
+                const update = updatesById.get(node.id);
+                if (!update) return node;
+                if (
+                    node.position.x === update.position.x
+                    && node.position.y === update.position.y
+                    && node.width === update.width
+                    && node.height === update.height
+                ) return node;
+                changed = true;
+                return { ...node, position: update.position, width: update.width, height: update.height };
+            });
+            return changed ? next : prev;
+        });
+    }, []);
+
+    const handleLeaferNodesTransformEnd = useCallback(() => {
+        setNodes((prev) => reconcileGroupMembership(prev));
+        multiNodeDragStartRef.current = null;
+        setAlignmentGuides(null);
+        historyPausedRef.current = false;
+        nodeDraggingRef.current = false;
+        setIsNodeDragging(false);
     }, []);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
@@ -4274,7 +4149,7 @@ function ReactFlowCanvasPage() {
 
     const viewportRafRef = useRef<number>(0);
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
-    const handleReactFlowViewportChange = useCallback((next: ViewportTransform) => {
+    const handleLeaferViewportChange = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
         pendingViewportRef.current = next;
         if (viewportRafRef.current) return;
@@ -4294,7 +4169,6 @@ function ReactFlowCanvasPage() {
     // 组件卸载时取消未执行的 RAF
     useEffect(() => () => {
         if (viewportRafRef.current) cancelAnimationFrame(viewportRafRef.current);
-        if (nodeDragRafRef.current) cancelAnimationFrame(nodeDragRafRef.current);
     }, []);
 
     const selectOnlyNode = useCallback((nodeId: string) => {
@@ -4497,33 +4371,15 @@ function ReactFlowCanvasPage() {
         },
         [createConnectedGenerationNode, createScriptNarrationNode, createScriptStoryboard, createScriptVideoNode, effectiveConfig.imageModel, effectiveConfig.model, openNodeComposer],
     );
-    const reactFlowConnections = useMemo(
+    const visibleConnections = useMemo(
         () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
         [batchVisibilityIndex.hiddenConnectionEndpointIds, connections],
     );
-    // 拖拽期间冻结连接线路径 —— nodeById 每帧都会变化（节点位置更新），
-    // 但连接线端点位置的微小偏移在拖拽时不可见，重算反而占用大量帧时间。
-    // 拖拽结束后（isNodeDragging 变为 false）再一次性重算所有路径。
-    const frozenConnectionPathsRef = useRef<Array<{ connection: CanvasConnection; path: string }> | null>(null);
-    const connectionPaths = useMemo(() => {
-        if (isNodeDragging) {
-            // 拖拽中：返回上次缓存的路径，如果还没有则正常计算一次作为初始帧
-            if (frozenConnectionPathsRef.current) return frozenConnectionPathsRef.current;
-        }
-        const paths = reactFlowConnections.flatMap((connection) => {
-            const points = getConnectionPoints(connection, nodeById);
-            if (!points) return [];
-            return [{ connection, path: buildConnectionPathFromPoints(points.from, points.to) }];
-        });
-        frozenConnectionPathsRef.current = paths;
-        return paths;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isNodeDragging, nodeById, reactFlowConnections]);
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const dialogNode = useMemo(() => {
-        const node = dialogNodeId ? visibleNodeItems.find((item) => item.id === dialogNodeId) || null : null;
+        const node = dialogNodeId ? mountedNodeItems.find((item) => item.id === dialogNodeId) || null : null;
         return node?.metadata?.canvasTool === "director" ? null : node;
-    }, [dialogNodeId, visibleNodeItems]);
+    }, [dialogNodeId, mountedNodeItems]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
     const composerWidth = dialogNode ? Math.min(isGenerationConfigNode(dialogNode.type) ? 500 : 760, Math.max(isGenerationConfigNode(dialogNode.type) ? 420 : 520, composerShellWidth - 48)) : 0;
     dialogNodeRef.current = dialogNode;
@@ -4636,19 +4492,27 @@ function ReactFlowCanvasPage() {
                 <LeaferCanvas
                     containerRef={containerRef}
                     viewport={viewport}
-                    nodes={visibleNodeItems}
-                    connections={reactFlowConnections}
+                    nodes={mountedNodeItems}
+                    connections={visibleConnections}
                     backgroundMode={backgroundMode}
                     alignmentGuides={alignmentGuides}
                     selectedNodeIds={selectedNodeIds}
                     selectedConnectionId={selectedConnectionId}
-                    onViewportChange={handleReactFlowViewportChange}
+                    onViewportChange={handleLeaferViewportChange}
                     onViewportPresentation={handleViewportPresentation}
                     onNodePointerDown={handleLeaferNodePointerDown}
                     onNodeTap={handleLeaferNodeTap}
                     onNodeDragStart={handleLeaferNodeDragStart}
-                    onNodeDrag={handleLeaferNodeDrag}
-                    onNodeDragStop={handleLeaferNodeDragStop}
+                    resolveNodeMove={resolveDraggedPosition}
+                    onNodesTransform={handleLeaferNodesTransform}
+                    onNodesTransformEnd={handleLeaferNodesTransformEnd}
+                    onNodeHoverChange={(nodeId) => {
+                        if (nodeId) handleNodeHoverStart(nodeId);
+                        else handleNodeHoverEnd();
+                    }}
+                    onNodeContextMenu={(nodeId, clientX, clientY) => {
+                        setContextMenu({ type: "node", x: clientX, y: clientY, nodeId });
+                    }}
                     onCanvasMouseDown={handleCanvasMouseDown}
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={(event, canvasPos) => {
@@ -4682,94 +4546,13 @@ function ReactFlowCanvasPage() {
                         connectionTargetNodeIdRef.current = nodeId;
                         setConnectionTargetNodeId(nodeId);
                     }}
+                    relatedNodeIds={relatedHighlight.nodeIds}
+                    relatedConnectionIds={relatedHighlight.connectionIds}
+                    onEdgeContextMenu={openConnectionContextMenu}
                     miniMapOpen={isMiniMapOpen}
                 >
-                    <svg
-                        className="pointer-events-none absolute overflow-visible"
-                        style={{ left: 0, top: 0, width: 1, height: 1, zIndex: 1 }}
-                        aria-hidden
-                    >
-                        {connectionPaths.map(({ connection, path }) => {
-                            const isConnectionSelected = selectedConnectionId === connection.id;
-                            const isConnectionHovered = hoveredConnectionId === connection.id;
-                            const isRelatedConnection = relatedHighlight.connectionIds.has(connection.id);
-                            return (
-                                <g
-                                    key={connection.id}
-                                    className={`canvas-connection-group${isConnectionSelected ? " is-selected" : ""}${isConnectionHovered ? " is-hovered" : ""}`}
-                                >
-                                    <path
-                                        className="canvas-connection-hit"
-                                        data-connection-id={connection.id}
-                                        d={path}
-                                        fill="none"
-                                        stroke="transparent"
-                                        strokeWidth={20}
-                                        strokeLinecap="round"
-                                        vectorEffect="non-scaling-stroke"
-                                        style={{ cursor: "pointer", pointerEvents: "stroke" }}
-                                        onPointerEnter={() => setHoveredConnectionId(connection.id)}
-                                        onPointerLeave={() => {
-                                            setHoveredConnectionId((current) => current === connection.id ? null : current);
-                                        }}
-                                        onPointerDown={(event) => {
-                                            event.stopPropagation();
-                                            selectConnection(connection.id);
-                                        }}
-                                        onContextMenu={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            openConnectionContextMenu(event, connection.id);
-                                        }}
-                                    />
-                                    <path
-                                        className="canvas-connection-line"
-                                        d={path}
-                                        fill="none"
-                                        stroke={isConnectionSelected ? "#e0e4e8" : isRelatedConnection ? "#67e8f9" : "#86909c"}
-                                        strokeWidth={isConnectionSelected ? 3 : 2.4}
-                                        strokeLinecap="round"
-                                        opacity={isConnectionSelected ? 1 : isRelatedConnection ? 0.88 : 0.78}
-                                        vectorEffect="non-scaling-stroke"
-                                        style={{ pointerEvents: "none" }}
-                                    />
-                                    {isConnectionSelected
-                                        ? [0, 1, 2].map((index) => (
-                                            <path
-                                                key={index}
-                                                className="canvas-flow-edge canvas-connection-selected-flow"
-                                                d={path}
-                                                fill="none"
-                                                stroke="#e0f2fe"
-                                                strokeWidth={4}
-                                                strokeLinecap="round"
-                                                strokeDasharray="10 34"
-                                                vectorEffect="non-scaling-stroke"
-                                                style={{ pointerEvents: "none", animationDelay: `${index * -300}ms` }}
-                                            />
-                                        ))
-                                        : isConnectionHovered
-                                            ? (
-                                                <path
-                                                    key={`hover-${connection.id}`}
-                                                    className="canvas-flow-edge canvas-flow-edge-hover canvas-connection-flow"
-                                                    d={path}
-                                                    fill="none"
-                                                    stroke="#a5f3fc"
-                                                    strokeWidth={3.4}
-                                                    strokeLinecap="round"
-                                                    strokeDasharray="8 42"
-                                                    vectorEffect="non-scaling-stroke"
-                                                    style={{ pointerEvents: "none" }}
-                                                />
-                                            )
-                                            : null}
-                                </g>
-                            );
-                        })}
-                    </svg>
                     {/* Render node DOM elements */}
-                    {renderedNodes.map((node) => {
+                    {mountedNodeItems.map((node) => {
                         const isSelected = selectedNodeIds.has(node.id);
                         return (
                             <CanvasNode
@@ -4791,6 +4574,7 @@ function ReactFlowCanvasPage() {
                                 batchMotion={batchMotionById.get(node.id)}
                                 showImageInfo={showImageInfo}
                                 isOverview={isOverviewCanvas}
+                                editorManaged
                                 resourceLabel={resourceReferenceByNodeId.get(node.id)}
                                 mentionReferences={mentionReferencesByNodeId.get(node.id) || EMPTY_MENTION_REFERENCES}
                                 renderPanel={renderCanvasNodePanel}
@@ -4895,7 +4679,7 @@ function ReactFlowCanvasPage() {
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
                 ) : null}
 
-                {!dialogNode && !isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode ? (
+                {!isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode ? (
                     <CanvasNodeHoverToolbar
                         node={toolbarNode}
                         viewport={viewport}
@@ -4929,6 +4713,7 @@ function ReactFlowCanvasPage() {
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
                     snapToGrid={snapToGrid}
+                    alignmentGuidesEnabled={alignmentGuidesEnabled}
                     showImageInfo={showImageInfo}
                     onAddImage={() => createNode(CanvasNodeType.Image)}
                     onAddVideo={() => createNode(CanvasNodeType.Video)}
@@ -4945,6 +4730,7 @@ function ReactFlowCanvasPage() {
                     onDeselect={deselectCanvas}
                     onBackgroundModeChange={setBackgroundMode}
                     onSnapToGridChange={setSnapToGrid}
+                    onAlignmentGuidesEnabledChange={handleAlignmentGuidesEnabledChange}
                     onShowImageInfoChange={setShowImageInfo}
                     assetPanelOpen={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
@@ -6018,26 +5804,6 @@ function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeDat
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
-}
-
-function nodeSpatialRect(node: CanvasNodeData): CanvasSpatialRect {
-    return {
-        left: node.position.x,
-        top: node.position.y,
-        right: node.position.x + node.width,
-        bottom: node.position.y + node.height,
-    };
-}
-
-function viewportSpatialRect(viewport: ViewportTransform, width: number, height: number, padding: number): CanvasSpatialRect {
-    const left = -viewport.x / viewport.k - padding;
-    const top = -viewport.y / viewport.k - padding;
-    return {
-        left,
-        top,
-        right: left + width / viewport.k + padding * 2,
-        bottom: top + height / viewport.k + padding * 2,
-    };
 }
 
 function getInputSummary(inputs: NodeGenerationInput[]) {

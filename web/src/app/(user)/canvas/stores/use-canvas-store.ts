@@ -18,11 +18,12 @@ export type CanvasProject = {
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
     snapToGrid: boolean;
+    alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "showImageInfo" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -49,6 +50,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         activeChatId: null,
         backgroundMode: "lines",
         snapToGrid: false,
+        alignmentGuidesEnabled: true,
         showImageInfo: false,
         viewport: initialViewport,
     };
@@ -72,6 +74,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",
         snapToGrid: Boolean(source.snapToGrid),
+        alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || initialViewport,
     };

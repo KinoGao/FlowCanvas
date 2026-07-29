@@ -6,12 +6,23 @@ import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.StandardOpenOption;
 import java.util.Base64;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Iterator;
 import java.util.UUID;
 
 @Service
@@ -54,6 +65,80 @@ public class PublicImageService {
             throw new RuntimeException("保存图片失败", e);
         }
         return filename;
+    }
+
+    public String saveModelReferenceImage(MultipartFile file, int maxEdge, int maxBytes) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("参考图为空");
+        }
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IllegalArgumentException("参考图必须是图片类型，收到: " + contentType);
+        }
+
+        BufferedImage source;
+        try {
+            source = ImageIO.read(file.getInputStream());
+        } catch (IOException error) {
+            throw new IllegalArgumentException("参考图无法读取，请转换为 PNG 或 JPEG 后重试", error);
+        }
+        if (source == null) {
+            if (file.getSize() <= maxBytes) return saveImage(file);
+            throw new IllegalArgumentException("参考图格式无法压缩且文件过大，请转换为 PNG 或 JPEG 后重试");
+        }
+
+        double scale = Math.min(1.0, (double) maxEdge / Math.max(source.getWidth(), source.getHeight()));
+        int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
+        int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
+        BufferedImage compatible = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = compatible.createGraphics();
+        try {
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, width, height);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            graphics.drawImage(source, 0, 0, width, height, null);
+        } finally {
+            graphics.dispose();
+        }
+
+        byte[] encoded = encodeJpeg(compatible, maxBytes);
+        String filename = UUID.randomUUID().toString().replace("-", "") + ".jpg";
+        Path target = imageDir.resolve(filename).normalize();
+        if (!target.startsWith(imageDir)) throw new IllegalArgumentException("文件路径非法");
+        try {
+            Files.write(target, encoded, StandardOpenOption.CREATE_NEW);
+        } catch (IOException error) {
+            throw new RuntimeException("保存参考图失败", error);
+        }
+        return filename;
+    }
+
+    private byte[] encodeJpeg(BufferedImage image, int maxBytes) {
+        for (float quality : new float[]{0.9f, 0.82f, 0.74f, 0.66f}) {
+            byte[] encoded = encodeJpeg(image, quality);
+            if (encoded.length <= maxBytes) return encoded;
+        }
+        throw new IllegalArgumentException("参考图压缩后仍超过 5 MB，请先缩小图片后重试");
+    }
+
+    private byte[] encodeJpeg(BufferedImage image, float quality) {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+        if (!writers.hasNext()) throw new IllegalStateException("当前运行环境缺少 JPEG 编码器");
+        ImageWriter writer = writers.next();
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream();
+             ImageOutputStream imageOutput = ImageIO.createImageOutputStream(output)) {
+            writer.setOutput(imageOutput);
+            ImageWriteParam params = writer.getDefaultWriteParam();
+            params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            params.setCompressionQuality(quality);
+            writer.write(null, new IIOImage(image, null, null), params);
+            return output.toByteArray();
+        } catch (IOException error) {
+            throw new RuntimeException("压缩参考图失败", error);
+        } finally {
+            writer.dispose();
+        }
     }
 
     public String saveMedia(MultipartFile file) {

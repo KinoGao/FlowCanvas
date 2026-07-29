@@ -6,6 +6,7 @@ import {
     CircleDot,
     Clapperboard,
     Clock3,
+    Crosshair,
     Eraser,
     FileText,
     FolderOpen,
@@ -43,6 +44,7 @@ export function CanvasToolbar({
     canRedo,
     backgroundMode,
     snapToGrid,
+    alignmentGuidesEnabled,
     showImageInfo,
     onAddImage,
     onAddVideo,
@@ -63,6 +65,7 @@ export function CanvasToolbar({
     onClear,
     onBackgroundModeChange,
     onSnapToGridChange,
+    onAlignmentGuidesEnabledChange,
     onShowImageInfoChange,
     onOpenMyAssets,
     onOpenMaterialLibrary,
@@ -74,6 +77,7 @@ export function CanvasToolbar({
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
     snapToGrid: boolean;
+    alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
     onAddImage: () => void;
     onAddVideo: () => void;
@@ -96,6 +100,7 @@ export function CanvasToolbar({
     onDeselect: () => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onSnapToGridChange: (enabled: boolean) => void;
+    onAlignmentGuidesEnabledChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
@@ -313,6 +318,13 @@ export function CanvasToolbar({
                             对齐网格
                         </span>
                         <Switch size="small" checked={snapToGrid} onChange={onSnapToGridChange} />
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium opacity-65">
+                            <Crosshair className="size-3.5" />
+                            辅助基准线
+                        </span>
+                        <Switch size="small" checked={alignmentGuidesEnabled} onChange={onAlignmentGuidesEnabledChange} />
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
                         <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium opacity-65">

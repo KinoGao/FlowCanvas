@@ -125,10 +125,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         onConfigChangeRef.current(node.id, patch);
     }, [currentVideoGenerationMode, isVideoCapabilityFetching, isVideoCapabilityLoading, mode, node.id, videoCapabilityKey, videoConfigSignature, videoModel]);
 
-    useEffect(() => {
-        textareaRef.current?.focus();
-    }, [node.id]);
-
     const updatePrompt = (value: string) => {
         const nextPrompt = normalizePromptReferences(value, stableMentionReferences, mentionLabels);
         setPrompt((current) => (current === nextPrompt ? current : nextPrompt));

@@ -4,6 +4,20 @@ import type { ViewportTransform } from "../types";
 
 export type LeaferViewport = ViewportTransform;
 
+export const MIN_CANVAS_ZOOM = 0.2;
+export const MAX_CANVAS_ZOOM = 1.25;
+const CANVAS_ZOOM_STEP_FACTOR = 1.2;
+
+export function clampCanvasZoom(scale: number): number {
+    const finiteScale = Number.isFinite(scale) ? scale : 1;
+    return Math.max(MIN_CANVAS_ZOOM, Math.min(MAX_CANVAS_ZOOM, finiteScale));
+}
+
+export function stepCanvasZoom(scale: number, direction: "in" | "out"): number {
+    const current = clampCanvasZoom(scale);
+    return clampCanvasZoom(direction === "in" ? current * CANVAS_ZOOM_STEP_FACTOR : current / CANVAS_ZOOM_STEP_FACTOR);
+}
+
 export function screenToCanvas(clientX: number, clientY: number, containerRect: DOMRect, viewport: LeaferViewport): { x: number; y: number } {
     return {
         x: (clientX - containerRect.left - viewport.x) / viewport.k,
@@ -19,13 +33,10 @@ export function canvasToScreen(canvasX: number, canvasY: number, viewport: Leafe
 }
 
 export function clampViewport(viewport: LeaferViewport, _containerWidth: number, _containerHeight: number): LeaferViewport {
-    const minZoom = 0.2;
-    const maxZoom = 5;
-    const k = Math.max(minZoom, Math.min(maxZoom, viewport.k));
     return {
         x: Number.isFinite(viewport.x) ? viewport.x : 0,
         y: Number.isFinite(viewport.y) ? viewport.y : 0,
-        k,
+        k: clampCanvasZoom(viewport.k),
     };
 }
 
