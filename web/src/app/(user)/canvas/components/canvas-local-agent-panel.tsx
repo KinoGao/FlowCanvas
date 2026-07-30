@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { App, Button, Input, Segmented, Tooltip } from "antd";
+import { App, Button, Input, Segmented, Select, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
 import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
@@ -74,6 +74,9 @@ export function CanvasLocalAgentPanel({
         workspacePath,
         loadingThreads,
         activeTab,
+        agentMode,
+        storySkill,
+        artSkill,
         confirmTools,
         activity,
         connectError,
@@ -218,7 +221,7 @@ export function CanvasLocalAgentPanel({
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })) }),
+                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined }),
             });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
@@ -573,6 +576,26 @@ export function CanvasLocalAgentPanel({
                 />
             ) : (
                 <>
+                    <AgentModeBar
+                        mode={agentMode}
+                        storySkill={storySkill}
+                        artSkill={artSkill}
+                        theme={theme}
+                        onModeChange={(mode) => {
+                            localStorage.setItem("canvas-agent-mode", mode);
+                            setAgentState({ agentMode: mode, storySkill: null, artSkill: null });
+                            localStorage.removeItem("canvas-agent-story-skill");
+                            localStorage.removeItem("canvas-agent-art-skill");
+                        }}
+                        onStorySkillChange={(skill) => {
+                            localStorage.setItem("canvas-agent-story-skill", skill || "");
+                            setAgentState({ storySkill: skill });
+                        }}
+                        onArtSkillChange={(skill) => {
+                            localStorage.setItem("canvas-agent-art-skill", skill || "");
+                            setAgentState({ artSkill: skill });
+                        }}
+                    />
                     <div ref={listRef} className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
                         {messages.map((item) => (
                             <AgentChatMessage key={item.id} item={agentMessageToChatMessage(item)} theme={theme} user={user} />
@@ -1147,6 +1170,105 @@ function formatThreadTime(value?: number) {
 
 function createId() {
     return typeof crypto === "undefined" ? `${Date.now()}-${Math.random()}` : crypto.randomUUID();
+}
+
+const MODE_OPTIONS = [
+    { label: "自由创作", value: "default" },
+    { label: "剧本改编", value: "script" },
+    { label: "视频制作", value: "production" },
+] as const;
+
+const STORY_SKILL_OPTIONS = [
+    { label: "喜剧幽默", value: "Comedy_humor" },
+    { label: "成长青春", value: "Coming_of_age" },
+    { label: "家庭温情", value: "Family_warmth" },
+    { label: "历史史诗", value: "Historical_epic" },
+    { label: "恐怖灵异", value: "Horror_supernatural" },
+    { label: "热血动作", value: "Hot_blooded_action" },
+    { label: "悬疑惊悚", value: "Mystery_thriller" },
+    { label: "心理剧情", value: "Psychological_drama" },
+    { label: "科幻末世", value: "Scifi_post_apocalypse" },
+    { label: "甜宠言情", value: "Sweet_romance_novel" },
+    { label: "都市职场", value: "Urban_workplace_drama" },
+    { label: "古风仙侠", value: "Xianxia_fantasy" },
+];
+
+const ART_SKILL_OPTIONS = [
+    { label: "2D 日式动画", value: "2D_90s_japanese_anime" },
+    { label: "2D 中式古风", value: "2D_chinese_guofeng" },
+    { label: "2D 扁平设计", value: "2D_flat_design" },
+    { label: "2D 都市恋爱", value: "2D_mature_urban_romance" },
+    { label: "3D 动画渲染", value: "3D_anime_render" },
+    { label: "3D 国风传统", value: "3D_chinese_traditional" },
+    { label: "3D 黏土定格", value: "3D_clay_stopmotion" },
+    { label: "3D 国风赛博", value: "3D_guofeng_cyber" },
+    { label: "真人古装", value: "realpeople_ancient_chinese" },
+    { label: "真人现代都市", value: "realpeople_modern_city" },
+    { label: "真人都市现代", value: "realpeople_urban_modern" },
+];
+
+function AgentModeBar({
+    mode,
+    storySkill,
+    artSkill,
+    theme,
+    onModeChange,
+    onStorySkillChange,
+    onArtSkillChange,
+}: {
+    mode: string;
+    storySkill: string | null;
+    artSkill: string | null;
+    theme: Record<string, unknown>;
+    onModeChange: (mode: "default" | "script" | "production") => void;
+    onStorySkillChange: (skill: string | null) => void;
+    onArtSkillChange: (skill: string | null) => void;
+}) {
+    return (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2" style={{ borderBottom: `1px solid ${(theme.node as Record<string, string>)?.border || "#e5e7eb"}` }}>
+            <span className="text-xs" style={{ color: (theme.node as Record<string, string>)?.muted || "#9ca3af" }}>
+                模式
+            </span>
+            <Segmented
+                size="small"
+                value={mode}
+                onChange={(value) => onModeChange(value as "default" | "script" | "production")}
+                options={[...MODE_OPTIONS]}
+            />
+            {mode !== "default" && (
+                <>
+                    <span className="ml-2 text-xs" style={{ color: (theme.node as Record<string, string>)?.muted || "#9ca3af" }}>
+                        故事
+                    </span>
+                    <Select
+                        size="small"
+                        style={{ minWidth: 110 }}
+                        value={storySkill || undefined}
+                        placeholder="不限定"
+                        allowClear
+                        onChange={(value) => onStorySkillChange(value || null)}
+                        options={STORY_SKILL_OPTIONS.map(({ label, value }) => ({ label, value }))}
+                    />
+                </>
+            )}
+            {mode === "production" && (
+                <>
+                    <span className="text-xs" style={{ color: (theme.node as Record<string, string>)?.muted || "#9ca3af" }}>
+                        美术
+                    </span>
+                    <Select
+                        size="small"
+                        style={{ minWidth: 120 }}
+                        value={artSkill || undefined}
+                        placeholder="不限定"
+                        allowClear
+                        onChange={(value) => onArtSkillChange(value || null)}
+                        options={ART_SKILL_OPTIONS.map(({ label, value }) => ({ label, value }))}
+                    />
+                </>
+            )}
+        </div>
+    );
 }
 
 function clamp(value: number, min: number, max: number) {
