@@ -28,6 +28,26 @@ Connect token: xxxxxx
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
+## Agent 工作模式
+
+Canvas Agent 支持三种工作模式，在画布 Agent 面板顶部切换：
+
+| 模式 | 说明 | 可用技能 |
+|------|------|----------|
+| 自由创作 | 通用画布操作，不限定领域 | 全部 MCP 工具 |
+| 剧本改编 | 短剧剧本改编流水线（故事骨架 → 改编策略 → 剧本编写） | + 12 种故事类型 |
+| 视频制作 | 视频制作流水线（导演规划 → 分镜表 → 分镜图生成） | + 12 种故事类型 + 12 种美术风格 |
+
+### 技能库
+
+Canvas Agent 内置以下领域知识（位于 `src/prompts/skills/`）：
+
+- **剧本改编流水线** (`script_pipeline.md`)：三阶段改编流程与质量门
+- **视频制作流水线** (`production_pipeline.md`)：六阶段制作流程
+- **美术风格** (`art_skills/`)：12 种视觉风格的定义、提示词和导演技法
+- **故事类型** (`story_skills/`)：12 种故事类型的叙事手法和分镜技法
+- **制作技法** (`production_skills/`)：分镜提示词和分镜表通用技法
+
 ## 发布
 
 `canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。

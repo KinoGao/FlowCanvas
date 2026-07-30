@@ -5,23 +5,24 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { AGENT_PROMPT, VERSION } from "./config.js";
+import { AGENT_PROMPT, buildAgentPrompt, VERSION, type AgentMode, type PromptBuildOptions } from "./config.js";
 import type { AgentAttachment, AgentEmit } from "./types.js";
 
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type CodexRunOptions = { threadId?: string; cwd?: string };
+type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string };
 type AgentHistoryMessage = { id: string; role: "user" | "assistant" | "tool" | "error"; title?: string; text: string; detail?: unknown; streamId?: string };
 
 let codexQueue: Promise<unknown> = Promise.resolve();
 let codexApp: CodexAppClient | null = null;
 let codexThreadId = "";
+let currentSystemPrompt = AGENT_PROMPT;
 const canvasAgentMcp = canvasAgentMcpCommand();
 const require = createRequire(import.meta.url);
 
-export function withAgentPrompt(prompt: string) {
-    return prompt.trim() ? `${AGENT_PROMPT}\n\n用户请求：${prompt}` : "";
+export function withAgentPrompt(prompt: string, mode?: AgentMode, skillOptions?: PromptBuildOptions) {
+    return prompt.trim() ? `${mode ? buildAgentPrompt(mode, skillOptions) : AGENT_PROMPT}\n\n用户请求：${prompt}` : "";
 }
 
 export async function runCodexTurn(prompt: string, emit: AgentEmit, attachments: AgentAttachment[] = [], options: CodexRunOptions = {}) {
@@ -33,10 +34,16 @@ export async function runCodexTurn(prompt: string, emit: AgentEmit, attachments:
 async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: AgentAttachment[], options: CodexRunOptions) {
     let files: string[] = [];
     try {
+        const skillOptions: PromptBuildOptions = {
+            storySkill: options.storySkill as PromptBuildOptions["storySkill"],
+            artSkill: options.artSkill as PromptBuildOptions["artSkill"],
+        };
+        const fullPrompt = withAgentPrompt(prompt, options.mode, skillOptions);
+        currentSystemPrompt = options.mode ? buildAgentPrompt(options.mode, skillOptions) : AGENT_PROMPT;
         files = await writeAttachmentFiles(attachments);
         codexApp ||= await CodexAppClient.start(emit);
         const threadId = await ensureCodexThread(codexApp, options);
-        await codexApp.startTurn(threadId, prompt, files);
+        await codexApp.startTurn(threadId, fullPrompt, files);
     } catch (error) {
         emit("agent_error", { message: errorMessage(error) });
     } finally {

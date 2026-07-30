@@ -77,6 +77,9 @@ export function startHttpServer() {
         const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
         const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
         let threadId = String(req.body?.threadId || workspace.activeThreadId || "");
+        const mode = validateMode(req.body?.mode);
+        const storySkill = String(req.body?.storySkill || "") || undefined;
+        const artSkill = String(req.body?.artSkill || "") || undefined;
         if (!threadId) {
             const thread = await startCodexThread(emit, workspace.workspacePath);
             threadId = String((thread as Record<string, unknown>).id || "");
@@ -85,7 +88,7 @@ export function startHttpServer() {
             await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
-        void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });
+        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill });
         res.json({ ok: true, threadId });
     }));
     app.post("/agent/claude/turn", (req, res) => {
@@ -134,4 +137,9 @@ function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfi
 function validToken(req: Request, url: URL, token: string) {
     const header = req.headers["x-canvas-agent-token"];
     return url.searchParams.get("token") === token || header === token || (Array.isArray(header) && header.includes(token));
+}
+
+function validateMode(value: unknown): "default" | "script" | "production" {
+    if (value === "script" || value === "production") return value;
+    return "default";
 }
