@@ -21,19 +21,21 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     references: CanvasResourceReference[];
     onChange: (value: string) => void;
     onSubmit?: () => void;
+    mentionRequestNonce?: number;
     containerClassName?: string;
     highlightLabels?: boolean;
     "data-canvas-no-zoom"?: boolean | "true" | "false";
 };
 
 export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
-    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, "data-canvas-no-zoom": canvasNoZoom, ...props },
+    { value, references, onChange, onSubmit, mentionRequestNonce = 0, onKeyDown, className, containerClassName, style, highlightLabels = true, "data-canvas-no-zoom": canvasNoZoom, ...props },
     forwardedRef,
 ) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
     const lastInsertRef = useRef<{ key: string; at: number } | null>(null);
+    const lastMentionRequestRef = useRef(0);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [hasSelection, setHasSelection] = useState(false);
@@ -71,6 +73,25 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         setMention({ start: cursor - match[2].length - 1, query: match[2] });
         setActiveIndex(0);
     };
+
+    useEffect(() => {
+        if (!mentionRequestNonce || lastMentionRequestRef.current === mentionRequestNonce) return;
+        lastMentionRequestRef.current = mentionRequestNonce;
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        const cursor = textarea.selectionStart ?? value.length;
+        const needsSpace = cursor > 0 && !/\s/.test(value[cursor - 1] || "");
+        const trigger = `${needsSpace ? " " : ""}@`;
+        const next = `${value.slice(0, cursor)}${trigger}${value.slice(cursor)}`;
+        const nextCursor = cursor + trigger.length;
+        onChange(next);
+        setMention({ start: nextCursor - 1, query: "" });
+        setActiveIndex(0);
+        requestAnimationFrame(() => {
+            textarea.focus();
+            textarea.setSelectionRange(nextCursor, nextCursor);
+        });
+    }, [mentionRequestNonce]);
 
     const insertReference = (reference: CanvasResourceReference) => {
         if (!mention) return;

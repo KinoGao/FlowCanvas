@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
 @Service
 public class GenericOpenAiAdapter implements ModelRequestAdapter {
     private static final Duration TIMEOUT = Duration.ofMinutes(30);
+    private static final Duration CREATE_TIMEOUT = Duration.ofSeconds(90);
     private static final Set<String> HOP_HEADERS = Set.of(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "trailers", "transfer-encoding", "upgrade",
@@ -93,7 +94,8 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
             return ResponseEntity.badRequest().body(error.getMessage());
         }
 
-        HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(TIMEOUT);
+        boolean videoCreate = "POST".equalsIgnoreCase(request.getMethod()) && "/videos".equals(suffix);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(videoCreate ? CREATE_TIMEOUT : TIMEOUT);
         if (gemini) builder.header("x-goog-api-key", runtime.provider().getApiKey());
         else builder.header("Authorization", "Bearer " + runtime.provider().getApiKey());
         copyHeader(request, builder, "Content-Type");

@@ -160,6 +160,11 @@ export function shouldUseB64JsonResponse(config: Pick<AiConfig, "imageResponseFo
     return B64_JSON_MODEL_KEYWORDS.some((keyword) => name.includes(keyword));
 }
 
+function requestedImageResponseFormat(config: Pick<AiConfig, "imageResponseFormat">, model: string): "b64_json" | "url" | undefined {
+    if (config.imageResponseFormat === "url") return "url";
+    return shouldUseB64JsonResponse(config, model) ? "b64_json" : undefined;
+}
+
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
     return ["low", "medium", "high", "standard", "hd"].includes(value) ? value : undefined;
@@ -834,7 +839,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     if (isAgnesImageModel(requestConfig.model)) {
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, prompt), [], n, requestSize, options);
     }
-    const useB64Json = shouldUseB64JsonResponse(config, requestConfig.model);
+    const responseFormat = requestedImageResponseFormat(config, requestConfig.model);
     try {
         const url = aiApiUrl(requestConfig, "/images/generations");
         const response = await axios.post<ImageApiResponse>(
@@ -846,7 +851,8 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 ...(capability ? { _flowcanvas_mode: "text-to-image" } : {}),
                 ...(!seedream && quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
+                ...(responseFormat ? { response_format: responseFormat } : {}),
+                ...(responseFormat === "b64_json" && seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}),
             },
             {
                 headers: { ...aiHeaders(requestConfig, "application/json"), ...durableGenerationHeaders(url, options?.jobId) },
@@ -891,15 +897,12 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         if (mask) throw new Error("Agnes 图像接口暂不支持蒙版编辑");
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, requestSize, options);
     }
-    const useB64Json = shouldUseB64JsonResponse(config, requestConfig.model);
+    const responseFormat = requestedImageResponseFormat(config, requestConfig.model);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
     formData.set("n", String(n));
-    if (useB64Json) {
-        formData.set("response_format", "b64_json");
-        formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-    }
+    if (responseFormat) formData.set("response_format", responseFormat);
     if (!seedream && quality) {
         formData.set("quality", quality);
     }
@@ -980,7 +983,7 @@ function readAgnesImageError(error: unknown, size: string | undefined) {
 async function requestSeedreamImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, resolution: string, size: string, mode: ImageGenerationMode, capability: ImageModelCapability | null, options?: RequestOptions) {
     try {
         const requestSize = resolveSeedreamSize(config.model, normalizeResolution(resolution), size);
-        const useB64Json = shouldUseB64JsonResponse(config, config.model);
+        const responseFormat = requestedImageResponseFormat(config, config.model);
         const imageUrls = await Promise.all(references.map((image) => imageToDataUrl(image)));
         const url = aiApiUrl(config, "/images/generations");
         const response = await axios.post<ImageApiResponse>(
@@ -992,7 +995,8 @@ async function requestSeedreamImages(config: AiConfig, prompt: string, reference
                 ...imageOutputCountPayload(capability, n),
                 ...(capability ? { _flowcanvas_mode: mode } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...(useB64Json ? { response_format: "b64_json", ...(seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}) } : {}),
+                ...(responseFormat ? { response_format: responseFormat } : {}),
+                ...(responseFormat === "b64_json" && seedreamSupportsOutputFormat(config.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}),
             },
             { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
         );

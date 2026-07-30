@@ -587,13 +587,49 @@
         min-width: 58px;
     }
 
-    .creative-os-node {
-        border-radius: 8px !important;
-        transition: border-color 180ms ease, box-shadow 220ms ease, filter 220ms ease;
+    .node-element {
+        --canvas-node-radius: 8px;
     }
 
-    .creative-os-node:hover {
-        filter: brightness(1.015);
+    .creative-os-node {
+        border-radius: var(--canvas-node-radius) !important;
+        isolation: isolate;
+        transition: border-color 160ms ease, box-shadow 200ms ease, filter 180ms ease;
+    }
+
+    .canvas-node-render-surface {
+        border-radius: var(--canvas-node-radius);
+        transition: filter 180ms ease;
+    }
+
+    .node-element[data-node-hovered="true"] .canvas-node-render-surface {
+        filter: brightness(1.025) saturate(1.025);
+    }
+
+    .node-element[data-node-selected="true"] .canvas-node-render-surface {
+        filter: brightness(1.015) saturate(1.015);
+    }
+
+    .node-element[data-node-dragging="true"] .canvas-node-render-surface {
+        filter: brightness(1.035) saturate(1.035);
+    }
+
+    .canvas-node-title {
+        opacity: .72;
+        transition: color 160ms ease, opacity 160ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .node-element[data-node-hovered="true"] .canvas-node-title,
+    .node-element[data-node-selected="true"] .canvas-node-title {
+        color: var(--creative-text) !important;
+        opacity: 1;
+        transform: translateY(-1px);
+    }
+
+    .node-element:not(.is-leafer-managed) .creative-os-node:hover {
+        border-color: var(--creative-accent) !important;
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--creative-text) 16%, transparent);
+        filter: brightness(1.02);
     }
 
     .node-element.is-leafer-managed,
@@ -606,7 +642,6 @@
         input,
         textarea,
         select,
-        video,
         audio,
         a,
         [role="button"],
@@ -642,6 +677,78 @@
     .creative-os-composer {
         border-radius: 8px;
         transform-origin: top center;
+    }
+
+    .creative-os-video-composer,
+    .creative-os-image-composer {
+        background: var(--creative-material-elevated);
+        box-shadow: var(--creative-shadow);
+        -webkit-backdrop-filter: saturate(1.35) blur(24px);
+        backdrop-filter: saturate(1.35) blur(24px);
+    }
+
+    .creative-os-video-composer .canvas-composer-model-picker .ant-select-selector,
+    .creative-os-image-composer .canvas-composer-model-picker .ant-select-selector {
+        background: transparent !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+        padding-inline: 8px !important;
+    }
+
+    .creative-os-video-composer .canvas-composer-model-picker:hover .ant-select-selector,
+    .creative-os-image-composer .canvas-composer-model-picker:hover .ant-select-selector {
+        background: var(--creative-control-fill) !important;
+    }
+
+    .video-composer-toolbar,
+    .image-composer-toolbar {
+        scrollbar-width: none;
+    }
+
+    .video-composer-toolbar::-webkit-scrollbar,
+    .image-composer-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .video-composer-tool-button {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        border-radius: 6px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        gap: 5px;
+        height: 32px;
+        max-width: 156px;
+        padding: 0 8px;
+        transition: background-color 160ms ease, opacity 160ms ease;
+        white-space: nowrap;
+    }
+
+    .video-composer-tool-button:hover {
+        background: var(--creative-control-fill) !important;
+    }
+
+    .video-composer-tool-button:disabled {
+        cursor: not-allowed;
+        opacity: .4;
+    }
+
+    .video-composer-popover .ant-popover-inner {
+        background: var(--creative-material-elevated) !important;
+        border: 1px solid var(--creative-hairline);
+        border-radius: 8px !important;
+        box-shadow: var(--creative-shadow) !important;
+        padding: 6px !important;
+    }
+
+    .video-composer-popover .ant-popover-inner-content {
+        color: var(--creative-text);
+    }
+
+    .video-composer-range {
+        accent-color: var(--creative-accent);
+        cursor: pointer;
     }
 
     .creative-os-composer textarea,
@@ -727,6 +834,21 @@
 
     .creative-os-shortcuts::-webkit-scrollbar {
         display: none;
+    }
+
+    .canvas-restore-status {
+        animation: canvas-restore-status-in 160ms ease 180ms both;
+    }
+
+    @keyframes canvas-restore-status-in {
+        from {
+            opacity: 0;
+            transform: translateY(2px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
     }
 
     @media (max-width: 760px) {

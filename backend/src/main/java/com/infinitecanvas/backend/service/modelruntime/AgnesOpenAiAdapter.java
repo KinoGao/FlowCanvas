@@ -38,6 +38,7 @@ import java.util.regex.Pattern;
 @Service
 public class AgnesOpenAiAdapter implements ModelRequestAdapter {
     private static final Duration TIMEOUT = Duration.ofMinutes(30);
+    private static final Duration CREATE_TIMEOUT = Duration.ofSeconds(90);
     private static final List<Duration> CREATE_RETRY_DELAYS = List.of(Duration.ofSeconds(1), Duration.ofSeconds(2));
     private static final Set<Integer> TRANSIENT_CREATE_STATUSES = Set.of(429, 502, 503, 504);
     private static final Pattern TASK_PATH = Pattern.compile("^/videos/([^/]+)(/content)?$");
@@ -122,6 +123,7 @@ public class AgnesOpenAiAdapter implements ModelRequestAdapter {
         ObjectNode payload = buildCreatePayload(request, runtime.model());
         URI target = URI.create(joinUrl(runtime.provider().getBaseUrl(), "/videos"));
         HttpRequest upstreamRequest = authorized(target, runtime.provider().getApiKey())
+                .timeout(CREATE_TIMEOUT)
                 .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(payload)))
                 .build();

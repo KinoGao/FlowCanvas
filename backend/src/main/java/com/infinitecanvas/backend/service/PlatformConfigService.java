@@ -684,7 +684,6 @@ public class PlatformConfigService {
     private void applyOfficialCapabilityTemplates(PlatformConfigDocument document) {
         document.getModels().stream()
                 .filter(model -> "video".equals(model.getCategory()))
-                .filter(model -> model.getVideoCapabilities() == null)
                 .forEach(capabilityTemplateResolver::applyOfficialVideoTemplate);
     }
 

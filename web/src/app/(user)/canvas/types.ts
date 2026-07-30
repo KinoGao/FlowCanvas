@@ -77,6 +77,9 @@ export type CanvasGenerationMetadata = {
     watermark?: string;
     draft?: string;
     videoGenerationMode?: VideoGenerationMode;
+    videoStylePreset?: string;
+    videoCameraPreset?: string;
+    imageStylePreset?: string;
     videoTask?: { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
     videoTaskStartedAt?: number;
     generationJobId?: string;

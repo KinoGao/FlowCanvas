@@ -250,7 +250,8 @@ const CanvasNodeInfoModal = lazy(() => import("../components/canvas-node-hover-t
 const CanvasNodePromptPanel = lazy(() => import("../components/canvas-node-prompt-panel").then((mod) => ({ default: mod.CanvasNodePromptPanel })));
 const AssetPickerModal = lazy(() => import("../components/asset-picker-modal").then((mod) => ({ default: mod.AssetPickerModal })));
 const StoryAiDirectorDesk = lazy(() => import("../director/storyai/DirectorDesk").then((mod) => ({ default: mod.StoryAiDirectorDesk })));
-const LazyCanvasFallback = <div className="pointer-events-none absolute inset-0" />;
+const LazyCanvasFallback = <CanvasRefreshShell />;
+const LazyComposerFallback = <div className="grid min-h-32 place-items-center text-xs opacity-55">正在加载节点面板...</div>;
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -403,14 +404,6 @@ function resolveComposerOverlayPosition({
 }
 
 export default function CanvasPage() {
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => {
-        setMounted(true);
-    }, []);
-
-    if (!mounted) return <CanvasRefreshShell />;
-
     return (
         <ErrorBoundary>
             <Suspense fallback={LazyCanvasFallback}>
@@ -423,35 +416,31 @@ export default function CanvasPage() {
 function CanvasRefreshShell() {
     return (
         <main className="relative h-full min-h-0 overflow-hidden bg-background text-foreground">
-            <div
-                className="absolute inset-0 opacity-60"
-                style={{
-                    backgroundImage: "radial-gradient(circle, var(--border) 1px, transparent 1px)",
-                    backgroundSize: "28px 28px",
-                }}
-            />
-
-            <div className="absolute bottom-5 left-1/2 z-50 flex h-14 -translate-x-1/2 items-center gap-1 rounded-xl border px-2 shadow-lg backdrop-blur" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
-                {Array.from({ length: 7 }).map((_, index) => (
-                    <div key={index} className="size-8 rounded-md bg-current opacity-10" />
-                ))}
-            </div>
-
-            <div className="absolute bottom-24 left-6 z-50 h-40 w-[240px] rounded-lg border shadow-2xl backdrop-blur-sm" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
-                <div className="absolute left-7 top-7 h-5 w-12 rounded-sm bg-current opacity-10" />
-                <div className="absolute left-28 top-16 h-6 w-16 rounded-sm bg-current opacity-10" />
-                <div className="absolute bottom-7 left-16 h-8 w-20 rounded-sm bg-current opacity-10" />
-                <div className="absolute inset-5 rounded border border-current opacity-15" />
-            </div>
-
-            <div className="absolute bottom-5 left-5 z-50 flex h-14 w-[260px] items-center gap-2 rounded-xl border px-2 shadow-lg backdrop-blur" style={{ background: "var(--background)", borderColor: "var(--border)" }} aria-hidden="true">
-                <div className="size-8 rounded-md bg-current opacity-10" />
-                <div className="size-8 rounded-md bg-current opacity-10" />
-                <div className="h-1 flex-1 rounded-full bg-current opacity-10" />
-                <div className="h-4 w-10 rounded bg-current opacity-10" />
-                <div className="size-8 rounded-md bg-current opacity-10" />
-            </div>
+            <CanvasRestoreCover />
         </main>
+    );
+}
+
+function CanvasRestoreCover({ ready = false }: { ready?: boolean }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    return (
+        <div
+            className={`absolute inset-0 z-[200] grid place-items-center ${ready ? "pointer-events-none opacity-0 transition-opacity duration-200" : "pointer-events-auto opacity-100"}`}
+            style={{
+                backgroundColor: theme.canvas.background,
+                color: theme.node.muted,
+            }}
+            aria-live="polite"
+            aria-busy={!ready}
+        >
+            <div
+                className="canvas-restore-status flex items-center gap-2 rounded-lg border px-3 py-2 text-xs backdrop-blur"
+                style={{ background: theme.ui.material, borderColor: theme.ui.hairline }}
+            >
+                <span className="size-1.5 rounded-full" style={{ background: theme.ui.accent, boxShadow: `0 0 0 4px ${theme.ui.accentSoft}` }} />
+                正在恢复画布
+            </div>
+        </div>
     );
 }
 
@@ -626,6 +615,7 @@ function LeaferCanvasPage() {
     const saveMode = useUserStore((state) => state.saveMode);
     const workspaceStatus = useUserStore((state) => state.workspaceStatus);
     const backendWorkspaceReady = saveMode !== "backend" || (userHydrated && Boolean(user && token) && workspaceStatus === "ready");
+    const backendWorkspaceBlocked = saveMode === "backend" && userHydrated && ((!user || !token) || workspaceStatus === "error");
     const canvasSessionExpired = useCanvasSingleOpenLock(projectId, backendWorkspaceReady);
     const createProject = useCanvasStore((state) => state.createProject);
     const openProject = useCanvasStore((state) => state.openProject);
@@ -683,6 +673,7 @@ function LeaferCanvasPage() {
     const [materialLibraryTab, setMaterialLibraryTab] = useState<"styles" | "effects" | "assets">("styles");
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
+    const [canvasVisualReady, setCanvasVisualReady] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
@@ -936,7 +927,7 @@ function LeaferCanvasPage() {
         [modal, stopGenerationByRunningId],
     );
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!backendWorkspaceReady || canvasSessionExpired) return;
         const restoreKey = `${saveMode}:${user?.id || "anonymous"}:${projectId}`;
         if (restoredProjectKeyRef.current === restoreKey) return;
@@ -945,6 +936,7 @@ function LeaferCanvasPage() {
         restoreGenerationRef.current = restoreGeneration;
         let cancelled = false;
         setProjectLoaded(false);
+        setCanvasVisualReady(false);
         const project = openProject(projectId);
         if (!project) {
             navigate("/canvas", { replace: true });
@@ -1710,6 +1702,10 @@ function LeaferCanvasPage() {
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
+    }, []);
+
+    const removeNodeReference = useCallback((targetNodeId: string, sourceNodeId: string) => {
+        setConnections((previous) => previous.filter((connection) => !(connection.fromNodeId === sourceNodeId && connection.toNodeId === targetNodeId)));
     }, []);
 
     const selectConnection = useCallback((connectionId: string) => {
@@ -4081,6 +4077,7 @@ function LeaferCanvasPage() {
                     onConfigChange={handleConfigNodeChange}
                     onGenerate={handleGenerateNode}
                     onStop={confirmStopGeneration}
+                    onRemoveReference={removeNodeReference}
                     onImageSettingsOpenChange={(open) => {
                         setNodeImageSettingsOpen(open);
                         if (open) setToolbarNodeId(null);
@@ -4097,6 +4094,7 @@ function LeaferCanvasPage() {
             handleGenerateNode,
             handleNodePromptChange,
             mentionReferencesByNodeId,
+            removeNodeReference,
             runningNodeId,
             theme,
         ],
@@ -4381,7 +4379,12 @@ function LeaferCanvasPage() {
         return node?.metadata?.canvasTool === "director" ? null : node;
     }, [dialogNodeId, mountedNodeItems]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
-    const composerWidth = dialogNode ? Math.min(isGenerationConfigNode(dialogNode.type) ? 500 : 760, Math.max(isGenerationConfigNode(dialogNode.type) ? 420 : 520, composerShellWidth - 48)) : 0;
+    const composerWidth = dialogNode
+        ? Math.min(
+              isGenerationConfigNode(dialogNode.type) ? 500 : dialogNode.type === CanvasNodeType.Video ? 1040 : dialogNode.type === CanvasNodeType.Image ? 880 : 760,
+              Math.max(isGenerationConfigNode(dialogNode.type) ? 420 : dialogNode.type === CanvasNodeType.Video ? 680 : dialogNode.type === CanvasNodeType.Image ? 620 : 520, composerShellWidth - 48),
+          )
+        : 0;
     dialogNodeRef.current = dialogNode;
     composerWidthRef.current = composerWidth;
     useLayoutEffect(() => {
@@ -4448,13 +4451,12 @@ function LeaferCanvasPage() {
         const panel = composerPanelRef.current;
         if (panel) panel.style.maxHeight = `${position.maxHeight}px`;
     }, [size.height, size.width]);
-    if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
+    if (backendWorkspaceBlocked) return <BackendWorkspaceGate title="画布工作区" />;
     if (canvasSessionExpired) return <CanvasExpiredShell onBack={() => navigate("/canvas")} />;
-    if (!projectLoaded) return <CanvasRefreshShell />;
 
     return (
         <main
-            className="creative-os-shell flex h-full min-h-0 overflow-hidden"
+            className="creative-os-shell relative flex h-full min-h-0 overflow-hidden"
             style={
                 {
                     background: theme.canvas.background,
@@ -4472,7 +4474,10 @@ function LeaferCanvasPage() {
                 } as CSSProperties
             }
         >
+            <CanvasRestoreCover ready={projectLoaded && canvasVisualReady} />
             <section ref={canvasShellRef} className="creative-os-canvas relative min-w-0 flex-1 overflow-hidden">
+                {projectLoaded ? (
+                    <>
                 <CanvasTopBar
                     title={projectTitle || "未命名画布"}
                     titleDraft={titleDraft}
@@ -4549,6 +4554,7 @@ function LeaferCanvasPage() {
                     relatedNodeIds={relatedHighlight.nodeIds}
                     relatedConnectionIds={relatedHighlight.connectionIds}
                     onEdgeContextMenu={openConnectionContextMenu}
+                    onReady={() => setCanvasVisualReady(true)}
                     miniMapOpen={isMiniMapOpen}
                 >
                     {/* Render node DOM elements */}
@@ -4630,7 +4636,7 @@ function LeaferCanvasPage() {
                                 event.stopPropagation();
                             }}
                         >
-                            <Suspense fallback={LazyCanvasFallback}>{renderCanvasNodePanel(dialogNode)}</Suspense>
+                            <Suspense fallback={LazyComposerFallback}>{renderCanvasNodePanel(dialogNode)}</Suspense>
                         </div>
                     </div>
                 ) : null}
@@ -4865,8 +4871,10 @@ function LeaferCanvasPage() {
                     }}
                 />
                 <CanvasGenerationHistoryModal open={generationHistoryOpen} nodes={nodes} onClose={() => setGenerationHistoryOpen(false)} onSelectNode={duplicateNode} />
+                    </>
+                ) : null}
             </section>
-            {assistantMounted ? (
+            {projectLoaded && assistantMounted ? (
                 <CanvasAssistantPanel
                     nodes={nodes}
                     selectedNodeIds={selectedNodeIds}

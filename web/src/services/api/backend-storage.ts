@@ -118,6 +118,7 @@ type BackendFileUrlCacheEntry = {
 };
 
 const backendFileUrlCache = new Map<string, BackendFileUrlCacheEntry>();
+const pendingBackendFileUrls = new Map<string, Promise<string>>();
 
 async function blobToDataUrl(blob: Blob): Promise<string | null> {
     if (typeof FileReader === "undefined") return null;
@@ -187,6 +188,7 @@ export function peekBackendFileUrl(storageKey: string, token: string) {
 
 export function clearBackendFileUrlCache() {
     backendFileUrlCache.clear();
+    pendingBackendFileUrls.clear();
 }
 
 export async function signBackendFiles(token: string, storageKeys: Iterable<string>) {
@@ -218,10 +220,18 @@ export async function resolveBackendFileUrl(storageKey: string, token: string) {
     if (!storageKey.startsWith("backend:") || !token) return "";
     const cached = peekBackendFileUrl(storageKey, token);
     if (cached) return cached;
-    const signed = await signBackendFiles(token, [storageKey]);
-    const url = signed.get(storageKey);
-    if (!url) throw new Error(`后端媒体文件不存在：${storageKey}`);
-    return url;
+    const pendingKey = `${token}\u001f${storageKey}`;
+    const pending = pendingBackendFileUrls.get(pendingKey);
+    if (pending) return pending;
+    const request = signBackendFiles(token, [storageKey])
+        .then((signed) => {
+            const url = signed.get(storageKey);
+            if (!url) throw new Error(`后端媒体文件不存在：${storageKey}`);
+            return url;
+        })
+        .finally(() => pendingBackendFileUrls.delete(pendingKey));
+    pendingBackendFileUrls.set(pendingKey, request);
+    return request;
 }
 
 export function replaceBackendStorageReferences<T>(value: T, uploads: ReadonlyMap<string, BackendUploadedFile>, token: string): T {

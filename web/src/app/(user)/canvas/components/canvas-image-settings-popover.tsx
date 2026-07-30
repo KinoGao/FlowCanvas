@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
 import { Button } from "antd";
@@ -20,9 +20,12 @@ type CanvasImageSettingsPopoverProps = {
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
     autoAdjustOverflow?: boolean;
     referenceCount?: number;
+    variant?: "default" | "composer";
+    summaryMode?: "full" | "dimensions";
+    buttonIcon?: ReactNode;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", referenceCount = 0 }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", referenceCount = 0, variant = "default", summaryMode = "full", buttonIcon }: CanvasImageSettingsPopoverProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -60,7 +63,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [onOpenChange, open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} referenceCount={referenceCount} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} referenceCount={referenceCount} variant={variant} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -70,11 +73,13 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
                     type="text"
                     className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"}
                     style={{ background: theme.node.fill, color: theme.node.text }}
-                    icon={<Settings2 className="size-3.5" />}
+                    icon={buttonIcon || <Settings2 className="size-3.5" />}
                     onClick={() => updateOpen(!open)}
                 >
                     <span className="truncate">
-                        {imageQualityLabel(quality)} · {imageResolutionLabel(resolution)} · {imageSizeLabel(activeSize)} · {count} 张
+                        {summaryMode === "dimensions"
+                            ? `${imageSizeLabel(activeSize)} · ${imageResolutionLabel(resolution)}`
+                            : `${imageQualityLabel(quality)} · ${imageResolutionLabel(resolution)} · ${imageSizeLabel(activeSize)} · ${count} 张`}
                     </span>
                 </Button>
             </span>
@@ -90,6 +95,7 @@ function ImageSettingsPortal({
     theme,
     config,
     referenceCount,
+    variant,
     onConfigChange,
 }: {
     buttonRect: DOMRect;
@@ -98,9 +104,10 @@ function ImageSettingsPortal({
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
     referenceCount: number;
+    variant: NonNullable<CanvasImageSettingsPopoverProps["variant"]>;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
 }) {
-    const width = 376;
+    const width = variant === "composer" ? 440 : 376;
     const gap = 8;
     const margin = 12;
     const alignRight = placement?.endsWith("Right");
@@ -113,12 +120,14 @@ function ImageSettingsPortal({
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
-        background: theme.toolbar.panel,
-        borderRadius: 18,
+        background: variant === "composer" ? theme.ui.materialElevated : theme.toolbar.panel,
+        border: variant === "composer" ? `1px solid ${theme.ui.hairline}` : undefined,
+        borderRadius: variant === "composer" ? 8 : 18,
         boxShadow: "0 18px 54px rgba(28, 25, 23, 0.16)",
-        padding: 18,
+        padding: variant === "composer" ? 14 : 18,
         overflowY: "auto",
         color: theme.node.text,
+        backdropFilter: variant === "composer" ? "blur(24px) saturate(1.3)" : undefined,
     } as const;
 
     return createPortal(
@@ -132,7 +141,15 @@ function ImageSettingsPortal({
             onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
             onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
-            <ImageSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" referenceCount={referenceCount} />
+            <ImageSettingsPanel
+                config={config}
+                onConfigChange={(key, value) => onConfigChange(key, value)}
+                theme={theme}
+                showTitle={variant !== "composer"}
+                className="space-y-4"
+                referenceCount={referenceCount}
+                variant={variant}
+            />
         </div>,
         document.body,
     );

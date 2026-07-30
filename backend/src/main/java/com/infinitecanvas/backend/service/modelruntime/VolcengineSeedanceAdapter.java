@@ -32,6 +32,7 @@ import java.util.regex.Pattern;
 @Service
 public class VolcengineSeedanceAdapter implements ModelRequestAdapter {
     private static final Duration TIMEOUT = Duration.ofMinutes(30);
+    private static final Duration CREATE_TIMEOUT = Duration.ofSeconds(90);
     private static final Pattern TASK_PATH = Pattern.compile("^/videos/([^/]+)(/content)?$");
     private static final Set<String> TRANSIENT_STATUSES = Set.of("queued", "pending", "processing", "running", "in_progress");
     private static final Set<String> CREATE_FIELDS = Set.of(
@@ -121,6 +122,7 @@ public class VolcengineSeedanceAdapter implements ModelRequestAdapter {
 
         HttpResponse<byte[]> upstream = httpClient.send(
                 authorized(URI.create(volcengineUrl(runtime.provider().getBaseUrl(), "/contents/generations/tasks")), runtime.provider().getApiKey())
+                        .timeout(CREATE_TIMEOUT)
                         .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                         .POST(HttpRequest.BodyPublishers.ofByteArray(objectMapper.writeValueAsBytes(payload)))
                         .build(),

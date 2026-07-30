@@ -459,13 +459,15 @@ export const CanvasNode = React.memo(function CanvasNode({
             }
             data-node-editing={isEditingContent ? "true" : undefined}
             data-node-selected={isSelected ? "true" : undefined}
-            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col transition-shadow duration-150 ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
+            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
                 height: data.height,
                 transition: editorManaged ? "opacity 160ms ease" : "box-shadow 160ms ease, opacity 160ms ease",
                 contain: "layout style",
+                contentVisibility: editorManaged && !isSelected ? "auto" : "visible",
+                containIntrinsicSize: `${data.width}px ${data.height}px`,
             }}
             onPointerEnter={() => {
                 if (shouldUseOverview) return;
@@ -478,7 +480,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <Card
-                className="creative-os-node relative h-full w-full overflow-visible rounded-[8px] border bg-transparent p-0 py-0 text-sm ring-0"
+                className="creative-os-node relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
                     background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
                     borderColor: editorManaged ? "transparent" : isGroup
@@ -507,7 +509,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
             >
                 <div
-                    className={`canvas-node-render-surface relative flex h-full w-full items-center justify-center rounded-[inherit] ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
+                    className={`canvas-node-render-surface relative flex h-full w-full items-center justify-center ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
                             background: editorManaged ? "transparent" : !hasImageContent && !hasVideoContent ? theme.node.panel : "transparent",
@@ -871,7 +873,7 @@ function NodeTitleBadge({
     return (
         <div
             data-canvas-no-zoom
-            className={`absolute -top-[24px] z-30 flex items-center gap-1 text-[11px] leading-4 ${node.type === CanvasNodeType.Image ? "inset-x-0 justify-between" : "left-0 max-w-full"}`}
+            className={`canvas-node-title absolute -top-[24px] z-30 flex items-center gap-1 text-[11px] leading-4 ${node.type === CanvasNodeType.Image ? "inset-x-0 justify-between" : "left-0 max-w-full"}`}
             style={{ color: theme.node.label }}
         >
             <div className="flex min-w-0 items-center gap-1">
@@ -1304,7 +1306,7 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
 
     return (
-        <div ref={containerRef} className="group/video relative h-full w-full overflow-hidden rounded-[18px] bg-black">
+        <div ref={containerRef} className="group/video relative h-full w-full overflow-hidden rounded-[inherit] bg-black">
             <video
                 ref={videoRef}
                 src={src}
@@ -1450,7 +1452,7 @@ function ImageContent({
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden rounded-[8px]">
+            <div className="h-full w-full overflow-hidden rounded-[inherit]">
                 {imgSrc ? (
                     <div className="relative h-full w-full">
                         <img

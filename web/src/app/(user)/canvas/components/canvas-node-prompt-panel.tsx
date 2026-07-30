@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, BadgePlus, Camera, ChevronDown, FileText, Languages, LoaderCircle, Maximize2, Sparkles, Square, Tag, TriangleAlert } from 'lucide-react';
-import { App, Button } from "antd";
+import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, Clock3, FileText, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, Sparkles, Square, Tag, TriangleAlert, WandSparkles } from "lucide-react";
+import { App, Button, Popover, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
+import { VideoSettingsPanel } from "@/components/video-settings-panel";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -13,11 +14,10 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasReferenceStrip } from "./canvas-reference-strip";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
-import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
-import type { VideoGenerationMode } from '@/services/api/model-capabilities';
+import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
@@ -32,10 +32,14 @@ type CanvasNodePromptPanelProps = {
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
     onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
+    onRemoveReference?: (nodeId: string, referenceNodeId: string) => void;
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "mode" | "advanced" | null;
+type ImageComposerMenu = "style" | null;
+
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -52,8 +56,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
-    const [videoModeOpen, setVideoModeOpen] = useState(false);
-    const [videoSettingsOpen, setVideoSettingsOpen] = useState(false);
+    const [videoMenuOpen, setVideoMenuOpen] = useState<VideoComposerMenu>(null);
+    const [imageMenuOpen, setImageMenuOpen] = useState<ImageComposerMenu>(null);
+    const [mentionRequestNonce, setMentionRequestNonce] = useState(0);
     const onPromptChangeRef = useRef(onPromptChange);
     const onConfigChangeRef = useRef(onConfigChange);
     const videoConfigRef = useRef(config);
@@ -72,6 +77,9 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const videoReferenceValidationMessage = mode === "video" && selectedVideoMode && videoCapability
         ? validateVideoReferenceCounts(selectedVideoMode, videoCapability, activeReferenceCounts)
         : "";
+    const videoPromptOptional = mode === "video"
+        && selectedVideoMode !== "text-to-video"
+        && activeReferenceCounts.image + activeReferenceCounts.video + activeReferenceCounts.audio > 0;
     useEffect(() => {
         onPromptChangeRef.current = onPromptChange;
         onConfigChangeRef.current = onConfigChange;
@@ -133,7 +141,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = normalizePromptReferences(prompt, stableMentionReferences, mentionLabels).trim();
-        if (!text || isRunning) return;
+        if ((!text && !videoPromptOptional) || isRunning) return;
         if (mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching)) {
             message.info("正在读取当前模型的视频能力，请稍候");
             return;
@@ -151,9 +159,70 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             openConfigDialog(true);
             return;
         }
-        onGenerate(node.id, mode, text);
+        const enrichedPrompt = mode === "video"
+            ? enrichVideoPrompt(text, node.metadata?.videoStylePreset, node.metadata?.videoCameraPreset)
+            : mode === "image"
+                ? enrichImagePrompt(text, node.metadata?.imageStylePreset)
+                : text;
+        onGenerate(node.id, mode, enrichedPrompt);
         setPrompt("");
     };
+
+    if (mode === "video") {
+        return (
+            <VideoComposer
+                node={node}
+                config={config}
+                prompt={prompt}
+                references={stableMentionReferences}
+                capability={videoCapability ?? undefined}
+                selectedMode={selectedVideoMode}
+                capabilityPending={isVideoCapabilityPending}
+                capabilityUnavailable={isVideoCapabilityUnavailable}
+                validationMessage={videoReferenceValidationMessage}
+                isRunning={isRunning}
+                theme={theme}
+                openMenu={videoMenuOpen}
+                mentionRequestNonce={mentionRequestNonce}
+                onMenuChange={setVideoMenuOpen}
+                onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
+                onPromptChange={updatePrompt}
+                onConfigChange={(patch) => onConfigChange(node.id, patch)}
+                onRemoveReference={onRemoveReference ? (reference) => onRemoveReference(node.id, reference.nodeId) : undefined}
+                onMissingConfig={() => openConfigDialog(true)}
+                onGenerate={submit}
+                onStop={() => onStop(node.id)}
+            />
+        );
+    }
+
+    if (mode === "image") {
+        return (
+            <ImageComposer
+                node={node}
+                config={config}
+                prompt={prompt}
+                references={stableMentionReferences}
+                hasImageContent={hasImageContent}
+                isRunning={isRunning}
+                theme={theme}
+                openMenu={imageMenuOpen}
+                mentionRequestNonce={mentionRequestNonce}
+                onMenuChange={setImageMenuOpen}
+                onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
+                onPromptChange={updatePrompt}
+                onConfigChange={(patch) => onConfigChange(node.id, patch)}
+                onRemoveReference={onRemoveReference ? (reference) => onRemoveReference(node.id, reference.nodeId) : undefined}
+                onMissingConfig={() => openConfigDialog(true)}
+                onSettingsOpenChange={(open) => {
+                    if (open) setImageMenuOpen(null);
+                    onImageSettingsOpenChange?.(open);
+                }}
+                onGenerate={submit}
+                onStop={() => onStop(node.id)}
+            />
+        );
+    }
 
     return (
         <div
@@ -186,73 +255,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
             <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
 
-            {mode === "video" && (isVideoCapabilityPending || isVideoCapabilityUnavailable) ? (
-                <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs" style={{ borderColor: theme.ui.hairline, color: theme.node.muted }}>
-                    {isVideoCapabilityPending ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : <TriangleAlert className="size-3.5 shrink-0" />}
-                    <span>{isVideoCapabilityPending ? "正在读取当前模型的视频能力" : "当前模型未配置可用的视频生成能力"}</span>
-                </div>
-            ) : null}
-            {videoReferenceValidationMessage ? (
-                <div className="mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs" style={{ borderColor: theme.ui.danger, color: theme.ui.danger }}>
-                    <TriangleAlert className="size-3.5 shrink-0" />
-                    <span>{videoReferenceValidationMessage}</span>
-                </div>
-            ) : null}
-
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
-                    {mode === "image" ? (
-                        <>
-                            <div className="w-[150px] shrink-0">
-                                <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} fullWidth />
-                            </div>
-                            <CanvasImageSettingsPopover
-                                config={config}
-                                referenceCount={mentionReferences.filter((reference) => reference.active && reference.kind === "image").length}
-                                placement="topLeft"
-                                buttonClassName="!h-8 !max-w-[150px] !justify-start !rounded-[8px] !border-transparent !px-2.5"
-                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
-                                onMissingConfig={() => openConfigDialog(true)}
-                                onOpenChange={onImageSettingsOpenChange}
-                            />
-                        </>
-                    ) : mode === "video" ? (
-                        <>
-                            <div className="w-[150px] shrink-0">
-                                <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} fullWidth />
-                            </div>
-                            <VideoGenerationModeMenu
-                                open={videoModeOpen}
-                                theme={theme}
-                                value={selectedVideoMode}
-                                modes={videoCapability?.modes || []}
-                                disabled={isVideoCapabilityPending || isVideoCapabilityUnavailable}
-                                loading={isVideoCapabilityPending}
-                                onOpenChange={(open) => {
-                                    setVideoModeOpen(open);
-                                    if (open) {
-                                        setVideoSettingsOpen(false);
-                                    }
-                                }}
-                                onChange={(value) => onConfigChange(node.id, { videoGenerationMode: value })}
-                            />
-                            <CanvasVideoSettingsPopover
-                                config={config}
-                                generationMode={selectedVideoMode}
-                                placement="bottomRight"
-                                open={videoSettingsOpen}
-                                buttonClassName="!h-8 !max-w-[200px] !justify-start !rounded-[8px] !border-transparent !px-2.5"
-                                onOpenChange={(open) => {
-                                    setVideoSettingsOpen(open);
-                                    if (open) {
-                                        setVideoModeOpen(false);
-                                    }
-                                }}
-                                onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))}
-                            />
-                        </>
-                    ) : mode === "audio" ? (
+                    {mode === "audio" ? (
                         <>
                             <div className="w-[150px] shrink-0">
                                 <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} fullWidth />
@@ -272,7 +278,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className="creative-os-primary-action !h-9 !min-w-9 shrink-0 !rounded-full !px-0"
                     danger={isRunning}
-                    disabled={!isRunning && (!prompt.trim() || isVideoCapabilityPending || isVideoCapabilityUnavailable || Boolean(videoReferenceValidationMessage))}
+                    disabled={!isRunning && !prompt.trim()}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? "停止生成" : "生成"}
                 >
@@ -291,6 +297,588 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
         </div>
     );
+}
+
+type ImageComposerProps = {
+    node: CanvasNodeData;
+    config: AiConfig;
+    prompt: string;
+    references: CanvasResourceReference[];
+    hasImageContent: boolean;
+    isRunning: boolean;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    openMenu: ImageComposerMenu;
+    mentionRequestNonce: number;
+    onMenuChange: (menu: ImageComposerMenu) => void;
+    onMentionRequest: () => void;
+    onPromptChange: (value: string) => void;
+    onConfigChange: (patch: Partial<CanvasNodeData["metadata"]>) => void;
+    onRemoveReference?: (reference: CanvasResourceReference) => void;
+    onMissingConfig: () => void;
+    onSettingsOpenChange: (open: boolean) => void;
+    onGenerate: () => void;
+    onStop: () => void;
+};
+
+function ImageComposer({
+    node,
+    config,
+    prompt,
+    references,
+    hasImageContent,
+    isRunning,
+    theme,
+    openMenu,
+    mentionRequestNonce,
+    onMenuChange,
+    onMentionRequest,
+    onPromptChange,
+    onConfigChange,
+    onRemoveReference,
+    onMissingConfig,
+    onSettingsOpenChange,
+    onGenerate,
+    onStop,
+}: ImageComposerProps) {
+    const activeReferences = references.filter((reference) => reference.active);
+    const selectedStyle = IMAGE_STYLE_PRESETS.find((item) => item.id === node.metadata?.imageStylePreset) || IMAGE_STYLE_PRESETS[0];
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+        <div
+            className="creative-os-composer creative-os-image-composer min-w-0 overflow-hidden rounded-lg border px-4 pb-3 pt-3"
+            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+            data-canvas-no-zoom
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+                if (!event.ctrlKey && !event.metaKey) event.stopPropagation();
+            }}
+        >
+            <CanvasReferenceStrip
+                references={activeReferences}
+                variant="media"
+                className={activeReferences.length ? "mb-2" : ""}
+                onRemove={onRemoveReference}
+            />
+
+            <div className="relative">
+                <CanvasResourceMentionTextarea
+                    value={prompt}
+                    references={references}
+                    mentionRequestNonce={mentionRequestNonce}
+                    onChange={onPromptChange}
+                    onSubmit={onGenerate}
+                    data-canvas-no-zoom
+                    containerClassName={expanded ? "min-h-[220px]" : "min-h-[112px]"}
+                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35`}
+                    style={{ color: theme.node.text }}
+                    placeholder={hasImageContent ? "描述你想如何修改这张图片，输入 @ 可引用画布素材" : "描述画面主体、环境、构图、光线与风格，输入 @ 可引用画布素材"}
+                />
+                <Tooltip title={expanded ? "收起输入框" : "展开输入框"}>
+                    <button type="button" className="creative-os-icon-button absolute right-0 top-0 !size-7" aria-label={expanded ? "收起输入框" : "展开输入框"} onClick={() => setExpanded((value) => !value)}>
+                        {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                    </button>
+                </Tooltip>
+            </div>
+
+            <div className="image-composer-toolbar flex h-11 min-w-0 items-center gap-1 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
+                    <CanvasPromptLibrary onSelect={onPromptChange} icon={<Plus className="size-4" />} tooltip="添加提示词" />
+
+                    <Tooltip title="引用画布中的图片或文本素材">
+                        <button
+                            type="button"
+                            className="video-composer-tool-button"
+                            style={{ color: theme.node.text }}
+                            aria-label="引用素材"
+                            onClick={onMentionRequest}
+                        >
+                            <AtSign className="size-4" />
+                            <span>引用</span>
+                        </button>
+                    </Tooltip>
+
+                    <ComposerPopover
+                        open={openMenu === "style"}
+                        onOpenChange={(open) => onMenuChange(open ? "style" : null)}
+                        content={
+                            <PresetGrid
+                                title="风格库"
+                                items={IMAGE_STYLE_PRESETS}
+                                value={selectedStyle.id}
+                                theme={theme}
+                                onChange={(id) => {
+                                    onConfigChange({ imageStylePreset: id || undefined });
+                                    onMenuChange(null);
+                                }}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Palette className="size-3.5" />} label={selectedStyle.shortLabel} active={openMenu === "style"} theme={theme} />
+                    </ComposerPopover>
+
+                    <div className="w-[210px] shrink-0">
+                        <ModelPicker
+                            config={config}
+                            value={config.model}
+                            capability="image"
+                            className="!h-8"
+                            fullWidth
+                            onChange={(model) => onConfigChange({ model })}
+                            onMissingConfig={onMissingConfig}
+                        />
+                    </div>
+
+                    <CanvasImageSettingsPopover
+                        config={config}
+                        referenceCount={activeReferences.filter((reference) => reference.kind === "image").length}
+                        placement="topRight"
+                        variant="composer"
+                        summaryMode="dimensions"
+                        buttonIcon={<RectangleHorizontal className="size-3.5" />}
+                        buttonClassName="video-composer-tool-button !max-w-[160px] !border-0 !px-2"
+                        onConfigChange={(key, value) => onConfigChange(key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                        onMissingConfig={onMissingConfig}
+                        onOpenChange={onSettingsOpenChange}
+                    />
+                </div>
+
+                <Tooltip title={isRunning ? "停止生成" : "生成图片"}>
+                    <Button
+                        type="primary"
+                        danger={isRunning}
+                        className="creative-os-primary-action !ml-1 !size-9 !min-w-9 shrink-0 !rounded-full !p-0"
+                        disabled={!isRunning && !prompt.trim()}
+                        aria-label={isRunning ? "停止生成" : "生成图片"}
+                        onClick={isRunning ? onStop : onGenerate}
+                    >
+                        {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                    </Button>
+                </Tooltip>
+            </div>
+        </div>
+    );
+}
+
+type VideoComposerProps = {
+    node: CanvasNodeData;
+    config: AiConfig;
+    prompt: string;
+    references: CanvasResourceReference[];
+    capability?: VideoModelCapability;
+    selectedMode?: VideoGenerationMode;
+    capabilityPending: boolean;
+    capabilityUnavailable: boolean;
+    validationMessage: string;
+    isRunning: boolean;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    openMenu: VideoComposerMenu;
+    mentionRequestNonce: number;
+    onMenuChange: (menu: VideoComposerMenu) => void;
+    onMentionRequest: () => void;
+    onPromptChange: (value: string) => void;
+    onConfigChange: (patch: Partial<CanvasNodeData["metadata"]>) => void;
+    onRemoveReference?: (reference: CanvasResourceReference) => void;
+    onMissingConfig: () => void;
+    onGenerate: () => void;
+    onStop: () => void;
+};
+
+function VideoComposer({
+    node,
+    config,
+    prompt,
+    references,
+    capability,
+    selectedMode,
+    capabilityPending,
+    capabilityUnavailable,
+    validationMessage,
+    isRunning,
+    theme,
+    openMenu,
+    mentionRequestNonce,
+    onMenuChange,
+    onMentionRequest,
+    onPromptChange,
+    onConfigChange,
+    onRemoveReference,
+    onMissingConfig,
+    onGenerate,
+    onStop,
+}: VideoComposerProps) {
+    const ratios = capability ? videoRatiosForMode(capability, selectedMode) : [];
+    const currentRatio = ratios.includes(normalizeSeedanceRatio(config.size)) ? normalizeSeedanceRatio(config.size) : ratios[0];
+    const durations = capability?.durations || [];
+    const currentDuration = durations.includes(Number(config.videoSeconds)) ? Number(config.videoSeconds) : durations[0];
+    const selectedStyle = VIDEO_STYLE_PRESETS.find((item) => item.id === node.metadata?.videoStylePreset) || VIDEO_STYLE_PRESETS[0];
+    const selectedCamera = VIDEO_CAMERA_PRESETS.find((item) => item.id === node.metadata?.videoCameraPreset) || VIDEO_CAMERA_PRESETS[0];
+    const activeReferences = references.filter((reference) => reference.active);
+    const disabled = capabilityPending || capabilityUnavailable;
+    const canGenerate = Boolean(prompt.trim() || (selectedMode !== "text-to-video" && activeReferences.some((reference) => reference.kind !== "text")));
+    const [expanded, setExpanded] = useState(false);
+    const menuOpen = (menu: Exclude<VideoComposerMenu, null>) => openMenu === menu;
+    const setMenuOpen = (menu: Exclude<VideoComposerMenu, null>, open: boolean) => onMenuChange(open ? menu : null);
+    const stopCanvasEvent = {
+        onMouseDown: (event: React.MouseEvent) => event.stopPropagation(),
+        onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+    };
+
+    return (
+        <div
+            className="creative-os-composer creative-os-video-composer min-w-0 overflow-hidden rounded-lg border px-4 pb-3 pt-3"
+            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+            data-canvas-no-zoom
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => {
+                if (!event.ctrlKey && !event.metaKey) event.stopPropagation();
+            }}
+        >
+            <CanvasReferenceStrip
+                references={activeReferences}
+                variant="media"
+                className={activeReferences.length ? "mb-2" : ""}
+                onRemove={onRemoveReference}
+            />
+
+            <div className="relative">
+                <CanvasResourceMentionTextarea
+                    value={prompt}
+                    references={references}
+                    mentionRequestNonce={mentionRequestNonce}
+                    onChange={onPromptChange}
+                    onSubmit={onGenerate}
+                    data-canvas-no-zoom
+                    containerClassName={expanded ? "min-h-[220px]" : "min-h-[112px]"}
+                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35`}
+                    style={{ color: theme.node.text }}
+                    placeholder="描述视频主体、动作、环境、镜头与声音，输入 @ 可引用画布素材"
+                />
+                <Tooltip title={expanded ? "收起输入框" : "展开输入框"}>
+                    <button type="button" className="creative-os-icon-button absolute right-0 top-0 !size-7" aria-label={expanded ? "收起输入框" : "展开输入框"} onClick={() => setExpanded((value) => !value)}>
+                        {expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                    </button>
+                </Tooltip>
+            </div>
+
+            {capabilityPending || capabilityUnavailable ? (
+                <ComposerNotice
+                    icon={capabilityPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <TriangleAlert className="size-3.5" />}
+                    text={capabilityPending ? "正在读取当前模型的视频能力" : "当前模型未配置可用的视频生成能力"}
+                    theme={theme}
+                />
+            ) : null}
+            {validationMessage ? <ComposerNotice icon={<TriangleAlert className="size-3.5" />} text={validationMessage} theme={theme} danger /> : null}
+
+            <div className="video-composer-toolbar flex h-11 min-w-0 items-center gap-1 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
+                    <CanvasPromptLibrary onSelect={onPromptChange} icon={<Plus className="size-4" />} tooltip="添加提示词" />
+                    <div className="w-[190px] shrink-0">
+                        <ModelPicker
+                            config={config}
+                            value={config.model}
+                            capability="video"
+                            className="!h-8"
+                            fullWidth
+                            onChange={(model) => onConfigChange({ model })}
+                            onMissingConfig={onMissingConfig}
+                        />
+                    </div>
+
+                    <ComposerPopover
+                        open={menuOpen("ratio")}
+                        onOpenChange={(open) => setMenuOpen("ratio", open)}
+                        content={
+                            <ComposerOptionMenu title="画面比例" width={176} theme={theme}>
+                                {ratios.map((ratio) => (
+                                    <ComposerOption
+                                        key={ratio}
+                                        selected={currentRatio === ratio}
+                                        icon={<RatioIcon ratio={ratio} />}
+                                        label={videoRatioLabel(ratio)}
+                                        theme={theme}
+                                        onClick={() => {
+                                            onConfigChange({ size: ratio });
+                                            onMenuChange(null);
+                                        }}
+                                    />
+                                ))}
+                            </ComposerOptionMenu>
+                        }
+                    >
+                        <ComposerToolbarButton icon={<RectangleHorizontal className="size-3.5" />} label={videoRatioLabel(currentRatio || "adaptive")} active={menuOpen("ratio")} disabled={disabled || !ratios.length} theme={theme} />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={menuOpen("duration")}
+                        onOpenChange={(open) => setMenuOpen("duration", open)}
+                        content={
+                            <DurationMenu
+                                durations={durations}
+                                value={currentDuration}
+                                theme={theme}
+                                onChange={(seconds) => onConfigChange({ seconds: String(seconds) })}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Clock3 className="size-3.5" />} label={videoDurationLabel(currentDuration)} active={menuOpen("duration")} disabled={disabled || !durations.length} theme={theme} compact />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={menuOpen("style")}
+                        onOpenChange={(open) => setMenuOpen("style", open)}
+                        content={
+                            <PresetGrid
+                                title="风格库"
+                                items={VIDEO_STYLE_PRESETS}
+                                value={selectedStyle.id}
+                                theme={theme}
+                                onChange={(id) => {
+                                    onConfigChange({ videoStylePreset: id || undefined });
+                                    onMenuChange(null);
+                                }}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Palette className="size-3.5" />} label={selectedStyle.shortLabel} active={menuOpen("style")} theme={theme} />
+                    </ComposerPopover>
+
+                    <Tooltip title="引用画布中的图片、视频、音频或文本">
+                        <button
+                            type="button"
+                            className="video-composer-tool-button"
+                            style={{ color: theme.node.text }}
+                            aria-label="引用素材"
+                            onClick={onMentionRequest}
+                        >
+                            <AtSign className="size-4" />
+                            <span>引用</span>
+                        </button>
+                    </Tooltip>
+
+                    <ComposerPopover
+                        open={menuOpen("mode")}
+                        onOpenChange={(open) => setMenuOpen("mode", open)}
+                        content={
+                            <ComposerOptionMenu title="参考方式" width={218} theme={theme}>
+                                {(capability?.modes || []).map((mode) => (
+                                    <ComposerOption
+                                        key={mode}
+                                        selected={selectedMode === mode}
+                                        icon={VIDEO_GENERATION_MODES[mode].icon}
+                                        label={VIDEO_GENERATION_MODE_LABELS[mode]}
+                                        theme={theme}
+                                        onClick={() => {
+                                            onConfigChange({ videoGenerationMode: mode });
+                                            onMenuChange(null);
+                                        }}
+                                    />
+                                ))}
+                            </ComposerOptionMenu>
+                        }
+                    >
+                        <ComposerToolbarButton
+                            icon={selectedMode ? VIDEO_GENERATION_MODES[selectedMode].icon : <BadgePlus className="size-3.5" />}
+                            label={selectedMode ? VIDEO_GENERATION_MODE_LABELS[selectedMode] : "参考方式"}
+                            active={menuOpen("mode")}
+                            disabled={disabled}
+                            theme={theme}
+                        />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={menuOpen("camera")}
+                        onOpenChange={(open) => setMenuOpen("camera", open)}
+                        content={
+                            <PresetGrid
+                                title="运镜库"
+                                items={VIDEO_CAMERA_PRESETS}
+                                value={selectedCamera.id}
+                                theme={theme}
+                                onChange={(id) => {
+                                    onConfigChange({ videoCameraPreset: id || undefined });
+                                    onMenuChange(null);
+                                }}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Camera className="size-3.5" />} label={selectedCamera.shortLabel} active={menuOpen("camera")} theme={theme} />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={menuOpen("advanced")}
+                        onOpenChange={(open) => setMenuOpen("advanced", open)}
+                        content={
+                            <div className="w-[520px] max-w-[calc(100vw-32px)] p-2" {...stopCanvasEvent}>
+                                <div className="mb-3 flex items-center gap-2 px-1 text-sm font-semibold">
+                                    <WandSparkles className="size-4" />
+                                    视频高级设置
+                                </div>
+                                <VideoSettingsPanel
+                                    config={config}
+                                    generationMode={selectedMode}
+                                    theme={theme}
+                                    showTitle={false}
+                                    variant="composer"
+                                    className="w-full"
+                                    onConfigChange={(key, value) => onConfigChange(videoConfigPatch(key, value))}
+                                />
+                            </div>
+                        }
+                    >
+                        <ComposerToolbarButton icon={<MoreHorizontal className="size-4" />} label="更多" active={menuOpen("advanced")} theme={theme} compact />
+                    </ComposerPopover>
+                </div>
+
+                <Tooltip title={isRunning ? "停止生成" : "生成视频"}>
+                    <Button
+                        type="primary"
+                        danger={isRunning}
+                        className="creative-os-primary-action !ml-1 !size-9 !min-w-9 shrink-0 !rounded-full !p-0"
+                        disabled={!isRunning && (!canGenerate || disabled || Boolean(validationMessage))}
+                        aria-label={isRunning ? "停止生成" : "生成视频"}
+                        onClick={isRunning ? onStop : onGenerate}
+                    >
+                        {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                    </Button>
+                </Tooltip>
+            </div>
+        </div>
+    );
+}
+
+function ComposerPopover({ open, onOpenChange, content, children }: { open: boolean; onOpenChange: (open: boolean) => void; content: ReactNode; children: ReactNode }) {
+    return (
+        <Popover
+            open={open}
+            trigger="click"
+            placement="topLeft"
+            arrow={false}
+            overlayClassName="video-composer-popover"
+            content={<div data-canvas-no-zoom>{content}</div>}
+            onOpenChange={onOpenChange}
+        >
+            <span className="inline-flex shrink-0">{children}</span>
+        </Popover>
+    );
+}
+
+function ComposerToolbarButton({ icon, label, active, disabled, theme, compact = false }: { icon: ReactNode; label: string; active?: boolean; disabled?: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; compact?: boolean }) {
+    return (
+        <button
+            type="button"
+            disabled={disabled}
+            className="video-composer-tool-button"
+            style={{ background: active ? theme.ui.controlFill : "transparent", color: theme.node.text }}
+            aria-label={label}
+            title={label}
+        >
+            {icon}
+            {compact ? null : <span className="max-w-[110px] truncate">{label}</span>}
+            <ChevronDown className="size-3 shrink-0 opacity-55" />
+        </button>
+    );
+}
+
+function ComposerOptionMenu({ title, width, theme, children }: { title: string; width: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; children: ReactNode }) {
+    return (
+        <div className="p-1" style={{ width, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="px-2 pb-1.5 pt-1 text-xs font-medium" style={{ color: theme.node.muted }}>{title}</div>
+            <div className="grid gap-0.5">{children}</div>
+        </div>
+    );
+}
+
+function ComposerOption({ selected, icon, label, theme, onClick }: { selected: boolean; icon: ReactNode; label: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-xs transition-opacity hover:opacity-75"
+            style={{ background: selected ? theme.ui.controlFill : "transparent", color: theme.node.text }}
+            onClick={onClick}
+        >
+            <span className="grid size-4 shrink-0 place-items-center">{icon}</span>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {selected ? <Check className="size-3.5" /> : null}
+        </button>
+    );
+}
+
+function DurationMenu({ durations, value, theme, onChange }: { durations: number[]; value?: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (value: number) => void }) {
+    const index = Math.max(0, durations.indexOf(value ?? durations[0]));
+    const selected = durations[index];
+    return (
+        <div className="w-[280px] p-3" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between text-xs">
+                <span style={{ color: theme.node.muted }}>视频时长</span>
+                <span className="rounded-md border px-2 py-1 font-semibold" style={{ borderColor: theme.ui.hairline }}>{videoDurationLabel(selected)}</span>
+            </div>
+            <input
+                className="video-composer-range w-full"
+                type="range"
+                min={0}
+                max={Math.max(0, durations.length - 1)}
+                step={1}
+                value={index}
+                disabled={durations.length < 2}
+                onChange={(event) => onChange(durations[Number(event.target.value)])}
+                aria-label="视频时长"
+            />
+            <div className="mt-2 flex justify-between text-[10px]" style={{ color: theme.node.muted }}>
+                <span>{videoDurationLabel(durations[0])}</span>
+                <span>{videoDurationLabel(durations[durations.length - 1])}</span>
+            </div>
+        </div>
+    );
+}
+
+type VideoPreset = {
+    id: string;
+    label: string;
+    shortLabel: string;
+    description: string;
+    prompt: string;
+    tone: string;
+};
+
+function PresetGrid({ title, items, value, theme, onChange }: { title: string; items: VideoPreset[]; value: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (value: string) => void }) {
+    return (
+        <div className="w-[430px] max-w-[calc(100vw-32px)] p-2" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="px-1 pb-2 text-sm font-semibold">{title}</div>
+            <div className="grid grid-cols-3 gap-2 max-[480px]:grid-cols-2">
+                {items.map((item) => (
+                    <button
+                        key={item.id || "default"}
+                        type="button"
+                        className="group relative min-h-[74px] overflow-hidden rounded-md border p-2 text-left transition hover:-translate-y-px"
+                        style={{ background: item.tone, borderColor: value === item.id ? theme.ui.accent : theme.ui.hairline, color: theme.node.text }}
+                        onClick={() => onChange(item.id)}
+                    >
+                        <span className="block text-xs font-semibold">{item.label}</span>
+                        <span className="mt-1 line-clamp-2 block text-[10px] leading-4 opacity-65">{item.description}</span>
+                        {value === item.id ? <Check className="absolute right-2 top-2 size-3.5" /> : null}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function ComposerNotice({ icon, text, theme, danger = false }: { icon: ReactNode; text: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; danger?: boolean }) {
+    return (
+        <div className="mb-2 flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs" style={{ borderColor: danger ? theme.ui.danger : theme.ui.hairline, color: danger ? theme.ui.danger : theme.node.muted }}>
+            {icon}
+            <span>{text}</span>
+        </div>
+    );
+}
+
+function RatioIcon({ ratio }: { ratio: string }) {
+    const vertical = ratio === "9:16" || ratio === "3:4";
+    const square = ratio === "1:1";
+    return <span className="block rounded-[2px] border border-current" style={{ width: square ? 12 : vertical ? 8 : 15, height: square ? 12 : vertical ? 14 : 9 }} />;
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
@@ -339,29 +927,54 @@ const VIDEO_GENERATION_MODES: Record<VideoGenerationMode, { label: string; icon:
     "multi-frame": { label: "智能多帧", icon: <BadgePlus className="size-3.5" /> },
 };
 
-function VideoGenerationModeMenu({ open, value, modes, disabled, loading, theme, onOpenChange, onChange }: { open: boolean; value?: VideoGenerationMode; modes: VideoGenerationMode[]; disabled: boolean; loading: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onOpenChange: (open: boolean) => void; onChange: (value: VideoGenerationMode) => void }) {
-    const items = modes.map((mode) => ({ value: mode, ...VIDEO_GENERATION_MODES[mode], label: VIDEO_GENERATION_MODE_LABELS[mode] }));
-    const selected = items.find((item) => item.value === value) || items[0];
-    return (
-        <div className="relative shrink-0" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-            <button type="button" disabled={disabled} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50" style={{ background: theme.node.fill, color: theme.node.text }} onClick={() => { if (!disabled) onOpenChange(!open); }}>
-                {selected?.icon || (loading ? <LoaderCircle className="size-3.5 animate-spin" /> : <TriangleAlert className="size-3.5" />)}
-                <span>{selected?.label || (loading ? "读取能力" : "能力不可用")}</span>
-                <ChevronDown className="size-3 opacity-70" />
-            </button>
-            {open && !disabled && items.length ? (
-                <div className="absolute bottom-full left-0 z-[1300] mb-2 w-[198px] rounded-2xl border p-2 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.ui.hairline, color: theme.node.text }}>
-                    <div className="px-2 pb-2 pt-1 text-xs" style={{ color: theme.node.muted }}>视频生成模式</div>
-                    {items.map((item) => (
-                        <button key={item.value} type="button" className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:opacity-85" style={{ background: item.value === selected?.value ? theme.node.fill : "transparent", color: theme.node.text }} onClick={() => { onChange(item.value); onOpenChange(false); }}>
-                            {item.icon}
-                            <span>{item.label}</span>
-                        </button>
-                    ))}
-                </div>
-            ) : null}
-        </div>
-    );
+const VIDEO_STYLE_PRESETS: VideoPreset[] = [
+    { id: "", label: "自动风格", shortLabel: "风格", description: "完全按提示词和参考素材生成", prompt: "", tone: "rgba(127,127,127,.08)" },
+    { id: "cinematic", label: "电影冷调", shortLabel: "电影冷调", description: "冷暖对比、真实镜头与电影光影", prompt: "cinematic lighting, cool color grade, strong contrast, realistic lens", tone: "rgba(64,104,142,.18)" },
+    { id: "documentary", label: "纪实写实", shortLabel: "纪实写实", description: "自然光线、真实材质与克制镜头", prompt: "documentary realism, natural light, authentic texture, restrained camera", tone: "rgba(88,116,92,.16)" },
+    { id: "anime", label: "二维动画", shortLabel: "二维动画", description: "清晰线条、平涂色彩与动画节奏", prompt: "2D animation, clean line art, cel shading, expressive motion", tone: "rgba(132,91,157,.16)" },
+    { id: "commercial", label: "商业质感", shortLabel: "商业质感", description: "干净布光、产品级细节与精致构图", prompt: "premium commercial look, polished lighting, precise composition, crisp detail", tone: "rgba(154,126,66,.16)" },
+    { id: "retro", label: "复古胶片", shortLabel: "复古胶片", description: "柔和颗粒、低饱和与胶片色彩", prompt: "vintage film look, subtle grain, muted colors, analog texture", tone: "rgba(137,91,64,.16)" },
+];
+
+const IMAGE_STYLE_PRESETS: VideoPreset[] = [
+    { id: "", label: "自动风格", shortLabel: "风格", description: "完全按提示词和参考素材生成", prompt: "", tone: "rgba(127,127,127,.08)" },
+    { id: "cinematic", label: "电影质感", shortLabel: "电影质感", description: "电影光影、真实镜头与层次构图", prompt: "cinematic still, dramatic lighting, realistic lens, layered composition", tone: "rgba(64,104,142,.18)" },
+    { id: "documentary", label: "纪实写实", shortLabel: "纪实写实", description: "自然光线、真实材质与生活感", prompt: "documentary photography, natural light, authentic texture, lifelike detail", tone: "rgba(88,116,92,.16)" },
+    { id: "anime", label: "二维动画", shortLabel: "二维动画", description: "清晰线稿、平涂色彩与动画表现", prompt: "2D anime illustration, clean line art, cel shading, expressive composition", tone: "rgba(132,91,157,.16)" },
+    { id: "commercial", label: "商业摄影", shortLabel: "商业摄影", description: "精致布光、干净背景与产品级细节", prompt: "premium commercial photography, polished lighting, clean composition, crisp detail", tone: "rgba(154,126,66,.16)" },
+    { id: "retro", label: "复古胶片", shortLabel: "复古胶片", description: "柔和颗粒、低饱和与胶片色彩", prompt: "vintage film photography, subtle grain, muted colors, analog texture", tone: "rgba(137,91,64,.16)" },
+];
+
+const VIDEO_CAMERA_PRESETS: VideoPreset[] = [
+    { id: "", label: "自动运镜", shortLabel: "运镜", description: "由模型根据场景自动安排镜头", prompt: "", tone: "rgba(127,127,127,.08)" },
+    { id: "fixed", label: "固定镜头", shortLabel: "固定镜头", description: "机位固定，突出主体动作", prompt: "locked camera, fixed shot", tone: "rgba(82,115,132,.16)" },
+    { id: "dolly-in", label: "镜头推进", shortLabel: "镜头推进", description: "平滑向主体靠近，增强聚焦", prompt: "smooth dolly in toward the subject", tone: "rgba(80,105,151,.16)" },
+    { id: "dolly-out", label: "镜头后移", shortLabel: "镜头后移", description: "逐步拉远，展示环境关系", prompt: "smooth dolly out revealing the environment", tone: "rgba(91,126,107,.16)" },
+    { id: "orbit", label: "环绕拍摄", shortLabel: "环绕拍摄", description: "围绕主体平稳运动", prompt: "smooth orbit camera around the subject", tone: "rgba(129,91,144,.16)" },
+    { id: "handheld", label: "手持跟拍", shortLabel: "手持跟拍", description: "轻微手持感，紧跟主体运动", prompt: "subtle handheld tracking shot following the subject", tone: "rgba(147,103,74,.16)" },
+];
+
+function videoRatioLabel(value: string) {
+    if (value === "adaptive" || value === "auto") return "自动";
+    if (value === "16:9") return "16:9（横屏）";
+    if (value === "21:9") return "21:9（电影）";
+    if (value === "9:16") return "9:16（竖屏）";
+    return value;
+}
+
+function videoDurationLabel(value?: number) {
+    return value === -1 ? "智能" : `${value || 5}s`;
+}
+
+function enrichVideoPrompt(prompt: string, styleId?: string, cameraId?: string) {
+    const style = VIDEO_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
+    const camera = VIDEO_CAMERA_PRESETS.find((item) => item.id === cameraId)?.prompt;
+    return [prompt, style, camera].filter(Boolean).join(", ");
+}
+
+function enrichImagePrompt(prompt: string, styleId?: string) {
+    const style = IMAGE_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
+    return [prompt, style].filter(Boolean).join(", ");
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {

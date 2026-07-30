@@ -1,8 +1,8 @@
-import type { CanvasConnection, CanvasNodeData, CanvasNodeType } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 
 export type CanvasNodeSequenceCounters = Partial<Record<CanvasNodeType, number>>;
 
-const NODE_TYPES = new Set<CanvasNodeData["type"]>(["image", "text", "config", "comfyui", "video", "audio", "group"]);
+const NODE_TYPES = new Set<CanvasNodeData["type"]>(Object.values(CanvasNodeType));
 
 const TITLE_STEM_BY_TYPE: Record<CanvasNodeData["type"], string> = {
     text: "文本",

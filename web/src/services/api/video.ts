@@ -50,10 +50,10 @@ type AgnesTask = {
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type RequestOptions = DurableGenerationOptions & { generationMode?: VideoGenerationMode };
 
-/** 视频创建任务请求超时（毫秒） */
-const VIDEO_CREATE_TIMEOUT_MS = 1_800_000;
-/** Agnes 会在创建时拉取公网参考图，响应可能明显慢于其他视频接口。 */
-const AGNES_VIDEO_CREATE_TIMEOUT_MS = 1_800_000;
+/** 创建接口只负责返回任务 ID，生成过程由后续轮询负责。 */
+const VIDEO_CREATE_TIMEOUT_MS = 90_000;
+/** Agnes 创建时会拉取公网参考图，保留相同的 90 秒网络窗口。 */
+const AGNES_VIDEO_CREATE_TIMEOUT_MS = 90_000;
 /** 视频轮询单次请求超时（毫秒） */
 const VIDEO_POLL_TIMEOUT_MS = 60_000;
 

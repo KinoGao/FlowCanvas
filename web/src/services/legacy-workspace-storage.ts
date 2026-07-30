@@ -95,6 +95,8 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         updatedAt: source.updatedAt || source.createdAt || now,
         nodes: Array.isArray(source.nodes) ? source.nodes : [],
         connections: Array.isArray(source.connections) ? source.connections : [],
+        nodeSequenceCounters: source.nodeSequenceCounters || {},
+        referenceOrderCounter: source.referenceOrderCounter || 0,
         chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",

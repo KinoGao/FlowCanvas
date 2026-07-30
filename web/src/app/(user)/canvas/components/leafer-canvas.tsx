@@ -52,6 +52,7 @@ type LeaferCanvasProps = {
     } | null;
     connectionTargetNodeId?: string | null;
     onConnectionTargetChange?: (nodeId: string | null) => void;
+    onReady?: () => void;
     miniMapOpen?: boolean;
     children?: React.ReactNode;
 };
@@ -61,6 +62,9 @@ const EMPTY_CONNECTIONS: CanvasConnection[] = [];
 const EMPTY_ID_SET = new Set<string>();
 const CONNECTION_SNAP_RADIUS = 48;
 const CONNECTION_SNAP_RELEASE_RADIUS = 64;
+const CANVAS_NODE_RADIUS = 8;
+const EDITOR_STATE_COMMIT_INTERVAL_MS = 96;
+const CANVAS_READY_FALLBACK_MS = 4_000;
 
 type LeaferConnectionVisual = {
     hit: LUI.Path;
@@ -106,6 +110,7 @@ export function LeaferCanvas({
     pendingConnection,
     connectionTargetNodeId,
     onConnectionTargetChange,
+    onReady,
     miniMapOpen = false,
     children,
 }: LeaferCanvasProps) {
@@ -131,12 +136,19 @@ export function LeaferCanvas({
     const nodePaintSignatureRef = useRef(new Map<string, string>());
     const nodeMediaUrlRef = useRef(new Map<string, string>());
     const connectionVisualMapRef = useRef(new Map<string, LeaferConnectionVisual>());
+    const hoveredNodeIdRef = useRef<string | null>(null);
+    const draggingNodeIdsRef = useRef(new Set<string>());
     const backgroundCanvasRef = useRef<LUI.Canvas | null>(null);
     const backgroundSizeRef = useRef({ width: 0, height: 0 });
     const verticalGuideRef = useRef<LUI.Line | null>(null);
     const horizontalGuideRef = useRef<LUI.Line | null>(null);
     const tempEdgePathRef = useRef<LUI.Path | null>(null);
     const connectionFlowFrameRef = useRef<number | null>(null);
+    const readyFrameRef = useRef<number | null>(null);
+    const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const readyReportedRef = useRef(false);
+    const onReadyRef = useRef(onReady);
+    onReadyRef.current = onReady;
     const viewportPresentationFrameRef = useRef<number | null>(null);
     const pendingViewportPresentationRef = useRef<{ viewport: ViewportTransform; syncLeafer: boolean } | null>(null);
     const editorTransformActiveRef = useRef(false);
@@ -326,6 +338,72 @@ export function LeaferCanvas({
         if (flowCount) ensureConnectionFlowAnimation();
     }, [ensureConnectionFlowAnimation]);
 
+    const refreshNodeInteractionVisual = useCallback((nodeId: string) => {
+        const rect = editorNodeMapRef.current.get(nodeId);
+        if (!rect) return;
+        applyNodeInteractionVisual(rect, themeRef.current, {
+            selected: selectedNodeIdsRef.current.has(nodeId),
+            related: relatedNodeIdsRef.current.has(nodeId),
+            connectionTarget: connectionTargetNodeIdRef.current === nodeId,
+            hovered: hoveredNodeIdRef.current === nodeId,
+            dragging: draggingNodeIdsRef.current.has(nodeId),
+        });
+        const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (element) {
+            if (hoveredNodeIdRef.current === nodeId) element.dataset.nodeHovered = "true";
+            else element.removeAttribute("data-node-hovered");
+            if (draggingNodeIdsRef.current.has(nodeId)) element.dataset.nodeDragging = "true";
+            else element.removeAttribute("data-node-dragging");
+        }
+    }, [containerRef]);
+
+    const visibleImagesSettled = useCallback(() => {
+        const container = containerRef.current;
+        if (!container) return false;
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const currentViewport = viewportRef.current;
+        return nodesRef.current.every((node) => {
+            if (
+                node.type !== CanvasNodeType.Image
+                || (!node.metadata?.content && !node.metadata?.storageKey)
+                || node.metadata?.status === "loading"
+                || node.metadata?.status === "error"
+            ) return true;
+            const left = node.position.x * currentViewport.k + currentViewport.x;
+            const top = node.position.y * currentViewport.k + currentViewport.y;
+            const right = left + node.width * currentViewport.k;
+            const bottom = top + node.height * currentViewport.k;
+            if (right < 0 || bottom < 0 || left > width || top > height) return true;
+            const element = container.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"]`);
+            const state = element?.dataset.leaferImageReady;
+            return state === "true" || state === "error";
+        });
+    }, [containerRef]);
+
+    const reportCanvasReady = useCallback((force = false) => {
+        if (readyReportedRef.current) return;
+        if (!force && !visibleImagesSettled()) {
+            if (readyTimeoutRef.current === null) {
+                readyTimeoutRef.current = setTimeout(() => reportCanvasReady(true), CANVAS_READY_FALLBACK_MS);
+            }
+            return;
+        }
+        if (readyTimeoutRef.current !== null) {
+            clearTimeout(readyTimeoutRef.current);
+            readyTimeoutRef.current = null;
+        }
+        if (readyFrameRef.current !== null) return;
+        readyFrameRef.current = requestAnimationFrame(() => {
+            readyFrameRef.current = requestAnimationFrame(() => {
+                readyFrameRef.current = null;
+                if (readyReportedRef.current) return;
+                readyReportedRef.current = true;
+                onReadyRef.current?.();
+            });
+        });
+    }, [visibleImagesSettled]);
+
     const flushViewportPresentation = useCallback(() => {
         viewportPresentationFrameRef.current = null;
         const pending = pendingViewportPresentationRef.current;
@@ -452,7 +530,7 @@ export function LeaferCanvas({
             });
         }
         const now = performance.now();
-        if (updates.length && (forceStateCommit || now - editorStateCommitAtRef.current >= 32)) {
+        if (updates.length && (forceStateCommit || now - editorStateCommitAtRef.current >= EDITOR_STATE_COMMIT_INTERVAL_MS)) {
             editorStateCommitAtRef.current = now;
             callbacksRef.current.onNodesTransform?.(updates);
         }
@@ -463,11 +541,17 @@ export function LeaferCanvas({
         const editor = editorRef.current;
         const anchor = editor?.list[0] as LUI.Rect | undefined;
         const anchorId = anchor ? editorNodeIdRef.current.get(anchor) : null;
-        if (!anchorId) return;
+        if (!editor || !anchorId) return;
         editorTransformActiveRef.current = true;
         editorTransformTypeRef.current = type;
+        editor.list.forEach((item) => {
+            const id = editorNodeIdRef.current.get(item as LUI.Rect);
+            if (!id) return;
+            draggingNodeIdsRef.current.add(id);
+            refreshNodeInteractionVisual(id);
+        });
         callbacksRef.current.onNodeDragStart?.(anchorId);
-    }, []);
+    }, [refreshNodeInteractionVisual]);
 
     const commitViewportChange = useCallback(() => {
         wheelCommitTimerRef.current = null;
@@ -631,6 +715,9 @@ export function LeaferCanvas({
             editorTransformActiveRef.current = false;
             flushEditorTransform(true);
             editorTransformTypeRef.current = null;
+            const draggingIds = Array.from(draggingNodeIdsRef.current);
+            draggingNodeIdsRef.current.clear();
+            draggingIds.forEach(refreshNodeInteractionVisual);
             callbacksRef.current.onNodesTransformEnd?.();
         };
         window.addEventListener("pointerup", finishTransform);
@@ -644,11 +731,18 @@ export function LeaferCanvas({
             window.removeEventListener("blur", finishTransform);
             if (connectionFlowFrameRef.current !== null) cancelAnimationFrame(connectionFlowFrameRef.current);
             connectionFlowFrameRef.current = null;
+            if (readyFrameRef.current !== null) cancelAnimationFrame(readyFrameRef.current);
+            readyFrameRef.current = null;
+            if (readyTimeoutRef.current !== null) clearTimeout(readyTimeoutRef.current);
+            readyTimeoutRef.current = null;
+            readyReportedRef.current = false;
             if (viewportPresentationFrameRef.current !== null) cancelAnimationFrame(viewportPresentationFrameRef.current);
             viewportPresentationFrameRef.current = null;
             pendingViewportPresentationRef.current = null;
             editorTransformTypeRef.current = null;
             editorNodeMapRef.current.clear();
+            hoveredNodeIdRef.current = null;
+            draggingNodeIdsRef.current.clear();
             nodeTextMapRef.current.clear();
             nodeLayoutSignatureRef.current.clear();
             nodeTextSignatureRef.current.clear();
@@ -663,7 +757,7 @@ export function LeaferCanvas({
             leaferRef.current = null;
             editorRef.current = null;
         };
-    }, [beginEditorTransform, drawBackground, flushEditorTransform, presentLeaferViewport, syncEditorViewport, syncSkyOverlays]);
+    }, [beginEditorTransform, drawBackground, flushEditorTransform, presentLeaferViewport, refreshNodeInteractionVisual, reportCanvasReady, syncEditorViewport, syncSkyOverlays]);
 
     useEffect(() => {
         const app = leaferRef.current;
@@ -675,6 +769,8 @@ export function LeaferCanvas({
             if (editor.hasItem(rect)) editor.removeItem(rect);
             rect.remove();
             editorNodeMapRef.current.delete(id);
+            if (hoveredNodeIdRef.current === id) hoveredNodeIdRef.current = null;
+            draggingNodeIdsRef.current.delete(id);
             nodeTextMapRef.current.get(id)?.remove();
             nodeTextMapRef.current.delete(id);
             nodeLayoutSignatureRef.current.delete(id);
@@ -697,7 +793,7 @@ export function LeaferCanvas({
                     hitFill: "all",
                     editable: true,
                     cursor: "move",
-                    cornerRadius: 8,
+                    cornerRadius: CANVAS_NODE_RADIUS,
                 });
                 editorNodeMapRef.current.set(node.id, rect);
                 editorNodeIdRef.current.set(rect, node.id);
@@ -713,8 +809,19 @@ export function LeaferCanvas({
                     const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"] .creative-os-node`);
                     element?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
                 });
-                rect.on(LUI.PointerEvent.ENTER, () => callbacksRef.current.onNodeHoverChange?.(node.id));
-                rect.on(LUI.PointerEvent.LEAVE, () => callbacksRef.current.onNodeHoverChange?.(null));
+                rect.on(LUI.PointerEvent.ENTER, () => {
+                    const previousId = hoveredNodeIdRef.current;
+                    hoveredNodeIdRef.current = node.id;
+                    if (previousId && previousId !== node.id) refreshNodeInteractionVisual(previousId);
+                    refreshNodeInteractionVisual(node.id);
+                    callbacksRef.current.onNodeHoverChange?.(node.id);
+                });
+                rect.on(LUI.PointerEvent.LEAVE, () => {
+                    const wasHovered = hoveredNodeIdRef.current === node.id;
+                    if (wasHovered) hoveredNodeIdRef.current = null;
+                    refreshNodeInteractionVisual(node.id);
+                    if (wasHovered) callbacksRef.current.onNodeHoverChange?.(null);
+                });
                 rect.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
                     const pagePoint = event.getPagePoint();
                     const bounds = containerRef.current?.getBoundingClientRect();
@@ -722,8 +829,14 @@ export function LeaferCanvas({
                     callbacksRef.current.onNodeContextMenu?.(node.id, bounds.left + pagePoint.x, bounds.top + pagePoint.y);
                 });
                 rect.on(LUI.ImageEvent.LOAD, () => markLeaferImageReady(containerRef.current, node.id, false));
-                rect.on(LUI.ImageEvent.LOADED, () => markLeaferImageReady(containerRef.current, node.id, true));
-                rect.on(LUI.ImageEvent.ERROR, () => markLeaferImageReady(containerRef.current, node.id, false));
+                rect.on(LUI.ImageEvent.LOADED, () => {
+                    markLeaferImageReady(containerRef.current, node.id, true);
+                    reportCanvasReady();
+                });
+                rect.on(LUI.ImageEvent.ERROR, () => {
+                    markLeaferImageReady(containerRef.current, node.id, "error");
+                    reportCanvasReady();
+                });
                 app.tree.add(rect);
             }
             const bounds = editorBounds(node);
@@ -731,6 +844,8 @@ export function LeaferCanvas({
             const related = relatedNodeIdsRef.current.has(node.id);
             const connectionTarget = connectionTargetNodeIdRef.current === node.id;
             const active = selected || connectionTarget;
+            const hovered = hoveredNodeIdRef.current === node.id;
+            const dragging = draggingNodeIdsRef.current.has(node.id);
             const mediaUrl = nodeMediaUrlRef.current.get(node.id);
             const paintSignature = [
                 node.type,
@@ -738,6 +853,8 @@ export function LeaferCanvas({
                 mediaUrl,
                 active,
                 related,
+                hovered,
+                dragging,
                 theme.node.panel,
                 theme.ui.controlFill,
                 theme.ui.accent,
@@ -767,9 +884,7 @@ export function LeaferCanvas({
                     height: node.height,
                     visible: node.type !== CanvasNodeType.Group || node.width > 0,
                     zIndex: node.type === CanvasNodeType.Group ? 0 : 20,
-                    cornerRadius: 8,
-                    stroke: active || related ? theme.ui.accent : theme.ui.hairline,
-                    strokeWidth: active ? 2 : 1,
+                    cornerRadius: CANVAS_NODE_RADIUS,
                     fill: paintChanged ? getNodeLeaferFill(node, theme, mediaUrl) : rect.fill,
                     widthRange: { min: bounds.minWidth, max: bounds.maxWidth },
                     heightRange: { min: bounds.minHeight, max: bounds.maxHeight },
@@ -781,6 +896,7 @@ export function LeaferCanvas({
                     },
                 });
             }
+            refreshNodeInteractionVisual(node.id);
 
             const text = getNodeLeaferText(node);
             let textVisual = nodeTextMapRef.current.get(node.id);
@@ -825,7 +941,8 @@ export function LeaferCanvas({
             }
         });
         editor.update();
-    }, [connectionTargetNodeId, containerRef, nodes, relatedNodeIds, selectedNodeIds, theme]);
+        reportCanvasReady();
+    }, [connectionTargetNodeId, containerRef, nodes, refreshNodeInteractionVisual, relatedNodeIds, reportCanvasReady, selectedNodeIds, theme]);
 
     useEffect(() => {
         let cancelled = false;
@@ -856,7 +973,10 @@ export function LeaferCanvas({
                     if (!cancelled && url) applyResolvedNodeImage(node, url);
                 })
                 .catch(() => {
-                    if (!cancelled) markLeaferImageReady(containerRef.current, node.id, false);
+                    if (!cancelled) {
+                        markLeaferImageReady(containerRef.current, node.id, "error");
+                        reportCanvasReady();
+                    }
                 });
         });
 
@@ -875,7 +995,7 @@ export function LeaferCanvas({
         return () => {
             cancelled = true;
         };
-    }, [containerRef, nodes]);
+    }, [containerRef, nodes, reportCanvasReady]);
 
     useEffect(() => {
         const app = leaferRef.current;
@@ -1399,6 +1519,44 @@ function editorBounds(node: CanvasNodeData) {
     };
 }
 
+function applyNodeInteractionVisual(
+    rect: LUI.Rect,
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
+    state: {
+        selected: boolean;
+        related: boolean;
+        connectionTarget: boolean;
+        hovered: boolean;
+        dragging: boolean;
+    },
+) {
+    const active = state.selected || state.connectionTarget;
+    const isDark = theme.canvas.background === canvasThemes.dark.canvas.background;
+    const ambientShadow = isDark ? "rgba(0,0,0,.42)" : "rgba(15,23,42,.18)";
+    const accentShadow = state.connectionTarget
+        ? "rgba(10,132,255,.34)"
+        : "rgba(10,132,255,.22)";
+    rect.set({
+        cornerRadius: CANVAS_NODE_RADIUS,
+        stroke: active || state.related || state.hovered ? theme.ui.accent : theme.ui.hairline,
+        strokeWidth: state.connectionTarget ? 2.6 : state.selected ? 2.2 : state.hovered ? 1.5 : state.related ? 1.25 : 1,
+        shadow: state.dragging
+            ? [
+                { x: 0, y: 14, blur: 34, spread: 1, color: ambientShadow },
+                { x: 0, y: 0, blur: 18, spread: 1, color: accentShadow },
+            ]
+            : active
+              ? [
+                  { x: 0, y: 9, blur: 26, spread: 0, color: ambientShadow },
+                  { x: 0, y: 0, blur: state.connectionTarget ? 20 : 14, spread: 1, color: accentShadow },
+              ]
+              : state.hovered
+                ? { x: 0, y: 7, blur: 20, spread: 0, color: ambientShadow }
+                : undefined,
+        cursor: state.dragging ? "grabbing" : "move",
+    });
+}
+
 function getNodeLeaferFill(
     node: CanvasNodeData,
     theme: (typeof canvasThemes)[keyof typeof canvasThemes],
@@ -1425,9 +1583,10 @@ function getNodeLeaferText(node: CanvasNodeData) {
     return "";
 }
 
-function markLeaferImageReady(container: HTMLDivElement | null, nodeId: string, ready: boolean) {
+function markLeaferImageReady(container: HTMLDivElement | null, nodeId: string, ready: boolean | "error") {
     const element = container?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
     if (!element) return;
-    if (ready) element.dataset.leaferImageReady = "true";
+    if (ready === true) element.dataset.leaferImageReady = "true";
+    else if (ready === "error") element.dataset.leaferImageReady = "error";
     else element.removeAttribute("data-leafer-image-ready");
 }

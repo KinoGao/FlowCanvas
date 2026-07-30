@@ -3,6 +3,10 @@ title: 待测试
 description: 当前版本已实现但仍需人工验证的变更项
 ---
 
+## OpenAI 图片响应格式
+
+- OpenAI 兼容图片模型现在会把“生图响应格式 = URL”明确发送为 `response_format: "url"`，文生图、参考图生图和 multipart 图片编辑不再仅仅省略 `b64_json` 后回退到厂商默认值；返回的 `data[].url` 继续由现有图片响应解析器接收。需要确认 Junli 等默认返回 Base64 的中转服务在选择 URL 后实际返回临时媒体地址，并验证 Base64、自动模式和 Seedream 输出格式不受影响。
+
 ## Agnes 参考图兼容
 
 - Agnes 图生视频上传的参考图会在后端生成独立的兼容副本：最长边限制为 2048px、透明背景合成为白色，并编码为不超过 5MB 的 JPEG；画布素材原图和其他模型的参考图处理保持不变。需要使用原先触发 `image URL could not be downloaded or did not return a valid supported image` 的大尺寸图片重新生成，确认 Agnes 能创建任务并正常返回视频。
@@ -17,11 +21,15 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 - Resuming a persisted video task now always performs one provider status lookup before enforcing the local 30-minute deadline. A completed provider task can therefore still be restored after the canvas was closed; a task that is still queued or running after the deadline is ended as before. If the provider result is ready but saving it to the account media library fails, the task ID is retained for the next canvas open instead of submitting and charging for another generation.
 
+- 视频任务创建请求现在必须在 90 秒内返回任务 ID，Agnes、Seedance 和通用 OpenAI 视频协议的后端适配器使用相同上限；任务创建成功后的轮询、恢复和最终媒体下载仍沿用原有 30 分钟生成窗口。需要分别确认上游不可达时能在 90 秒左右明确失败，以及正常创建后长时间排队的任务不会被创建超时误杀。
+
 ## Model Protocol Catalog
 
 - The administrator model drawer now selects a backend-provided calling protocol instead of typing a free-form adapter name. OpenAI direct, Gemini, Agnes Video V2, and Seedance 1.0/1.5/2.0 Ark task protocols are listed from the registered backend adapters. Adding a model should only require selecting one of these protocols plus its capabilities; a truly new vendor HTTP contract still needs one new adapter, which then appears in the selector automatically. Confirm the catalog loads in `/admin`, existing model protocol values are retained, and saving/verifying a model uses the selected protocol.
 
 - Seedance 1.0 Lite runtime entries now use the Seedance task adapter rather than the generic OpenAI video path. The adapter also permits explicitly disabled unsupported flags such as `watermark: false`; only an unsupported enabled feature is rejected. Confirm Lite text-to-video and image-to-video create a task, reach a terminal state, and do not fail before task creation because of disabled audio, watermark, or draft fields.
+
+- Official Seedance model IDs now reapply their authoritative protocol and capability template when runtime configuration is loaded, even if an older saved model contains an empty capability object or the generic `openai` adapter. Confirm existing Seedance 2.0 configurations publish as `seedance-v2` without requiring the administrator to recreate the model.
 
 ## Canvas Grid Snap
 
@@ -32,6 +40,10 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 画布滚轮、加减按钮和快捷键统一按当前比例的 20% 递增或递减（例如当前为 20%、40%、70% 时，一次放大约增加 4%、8%、14%）；手动百分比输入、旧画布视口恢复和适合屏幕统一限制在 `20%–125%`。需要确认所有缩放入口均不会越界，滚轮缩放保持以鼠标位置为中心，旧项目中超过范围的缩放值会自动收口。
 
 ## Leafer Canvas Interaction Engine
+
+- Leafer 拖动和连线仍按动画帧直接更新视觉位置，React 节点状态改为约 10fps 同步并在松手时强制提交最终位置；未选中的 DOM 节点保持挂载，同时允许浏览器跳过视口外绘制。需要在 100 个以上节点的画布中确认拖动连续、连线不脱离、松手后位置准确且媒体不会重新请求。
+- 已有画布恢复遮罩会等待当前视口内的图片在 Leafer 中解码完成或明确失败后再淡出，最长等待 4 秒；相同后端媒体的并发签名 URL 请求会合并为一次。需要确认刷新后不再出现空节点闪烁、同一素材不再重复请求签名接口，并验证坏图不会永久阻塞画布。
+- 图片和视频 Composer 的展开按钮现在可切换输入区高度；视频多模态模式在已有图片或视频引用时允许不填写文本提示词，纯文生视频仍要求提示词。需要确认首帧、首尾帧和多模态参考模式可空提示词提交，普通文生视频不可空提交。
 
 - 画布已按 LeaferJS 的 `App + ground/tree/sky + Editor` 分层：`ground` 绘制背景与网格，`tree` 管理节点外壳、静态概览、连接线和命中区域，`sky` 绘制辅助线与临时连接线；React 仅保留视频、音频、输入框、Composer 等必须依赖 DOM 的原生交互控件和业务状态。需要确认单选/多选、框选、组移动、缩放、平移、节点改名、文本编辑和媒体控制均保持原行为。
 - 单击选中普通节点时会同时保持节点操作菜单和 Composer 可见，图片内容节点也不再需要额外点击才能打开 Composer；被动打开不会自动聚焦或选中 Composer 内容，用户点击输入区后才进入编辑。需要确认鼠标移出节点后菜单不会消失，多选、组节点和导演台仍保持原有交互。
@@ -47,6 +59,22 @@ description: 当前版本已实现但仍需人工验证的变更项
 ## Canvas Node Panels
 
 - Empty text, image, and video nodes now expose a compact spotlight card with node-specific identity, guidance, and action rows; ComfyUI keeps its existing controls inside the same material system. Confirm light and dark themes, image/video readability, node dragging, resize handles, selection, and connection creation on both dense and sparse canvases.
+
+## 节点圆角与交互反馈
+
+- 文本、图片、视频、音频、ComfyUI、配置和组节点统一使用 8px 圆角，React 内容层与 Leafer 绘制层共用同一轮廓，媒体内容会沿节点边缘裁切。悬停、选中、连接目标和拖动分别提供轻微提亮、强调描边与按层级增强的阴影，视觉更新只作用于当前交互节点，不触发整张画布 React 重渲染或常驻动画。需要确认浅色/深色主题、图片与视频边缘、批量图片叠层、组节点、节点拖动和连接吸附状态下圆角与反馈均保持一致，并在百节点画布中观察帧率没有明显下降。
+
+## 已有画布刷新稳定性
+
+- 画布恢复改为单一常驻渲染窗口：后端工作区正常加载和项目媒体恢复共用同一个前台缓冲层，不再先切换通用加载页；真实节点、连线、背景模式和保存视口在异步恢复完成后作为同一批状态挂载到后台画布。恢复层进入时立即不带动画地盖住旧窗口，只在 Leafer 节点和视口完成首帧后单向淡出，并使用纯主题底色避免自身网格与项目背景再次切换；只有未登录或后端工作区恢复失败时才进入对应锁定页面。自动回归已连续采样单节点硬刷新和三节点画布进入过程，第一次出现 Leafer 时节点数量与最终 transform 已完整就位，淡出期间未再次变化。需要继续确认深浅主题、画布间直接切换、空白新画布和包含大量媒体节点的画布均不会出现闪烁，恢复失败或会话过期仍显示原有错误页。
+
+## 图片 Composer
+
+- 图片节点 Composer 改为独立宽面板：顶部按引用顺序展示图片、文本等素材缩略图并可移除引用，中央为大尺寸提示词输入区，底部集中提示词库、`@` 素材引用、风格、模型、画质、清晰度、比例、生成数量和生成按钮。图片参数继续读取后台发布的模型能力；风格只在提交任务时追加，不修改用户原始提示词。需要确认浅色/深色主题、窄屏横向滚动、不同厂商能力、图生图引用、移除引用连线，以及刷新后节点级风格选择仍能保留。
+
+## 视频 Composer
+
+- 视频节点 Composer 改为独立宽面板：顶部按引用顺序展示媒体缩略图并可移除引用，中央为大尺寸提示词输入区，底部集中模型、比例、时长、风格、`@` 素材引用、生成模式、运镜、高级设置和生成按钮。比例、时长、分辨率、声音、水印等继续读取后台发布的真实模型能力；风格和运镜作为可见的提示词增强预设，仅在提交视频任务时追加，不改变用户原始提示词。需要确认浅色/深色主题、窄屏横向滚动、各厂商能力差异、首帧/首尾帧/多模态引用校验、移除缩略图后对应连线消失，以及刷新后节点级风格和运镜选择仍保留。
 
 # 待测试
 - 后端 OpenAI 兼容音频模型：后台模型分类新增“音频”，可为每个音频模型声明 `text-to-speech`、可用音色、输出格式、语速和是否支持语音指令；只有通过验证且发布的音频模型才会进入画布的音频模型列表。画布音频节点请求仍使用 `/audio/speech`，后端会注入真实 `requestModel` 和厂商 API Key，并拒绝错误分类、空输入、不支持的音色/格式/语速或指令参数。需要确认：添加一个 OpenAI 兼容 TTS 模型后能在画布音频节点选择，`mp3/wav` 等输出可保存并刷新恢复；配置为不支持的选项时前端得到可读错误；视频、图片和文本模型调用不会受到影响。
@@ -121,7 +149,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 全节点生成任务刷新续跑：文本、图片、视频、音频和 ComfyUI 节点在请求模型前会把用户级 `generationJobId` 强制保存到账号画布；后端模型代理与 ComfyUI 排队接口按该 ID 持久化并回放原始响应。刷新或关闭页面不会取消后端执行，重新打开画布后会自动恢复仍为 `loading` 的任务；视频在厂商任务 ID 尚未返回时也能恢复创建响应，返回后继续沿用原有厂商轮询；批量图片和批量文本为每个输出节点保存独立任务 ID。生成请求统一以 30 分钟为客户端和后端上限，页面关闭不再弹出“生成将中断”的离开确认。需要分别确认文生图、图生图、文本、多模态文本、音频、Seedance/Agnes/OpenAI 视频、ComfyUI 图片/视频/音频/文本输出在“刚提交即刷新”“执行中关闭后重开”“结果返回瞬间刷新”三种场景均不会重复提交或丢失结果，并确认不同账号不能复用彼此的任务响应。
 - ComfyUI 公网代理稳定性：历史轮询遇到临时网络错误或 502/503/504 时会有限退避重试，不再因隧道瞬时抖动直接判定生成失败；视频 `/view` 改为流式转发并保留上游状态码、`Range`、`Content-Range`、`Accept-Ranges` 和媒体类型，错误 JSON 或空响应不会再被保存成视频文件。需要确认通过固定公网地址生成较长 MP4 时任务能完成并插入视频节点，播放、拖动进度条和刷新恢复均正常，持续故障仍能给出明确错误。
 - 后端账号同步瞬时错误恢复：首次工作区加载不再重复推送配置和素材；配置、画布、素材的幂等 GET/PUT 请求遇到网络中断或 502/503/504 时会短退避重试两次，持续故障则由共享的 5 秒延迟补偿继续同步，不再立即递归形成请求风暴。媒体上传 POST 不自动重放，避免重复文件。需要确认：通过固定 cpolar 地址登录后刷新画布，短暂断网或隧道抖动恢复后配置、画布和素材会自动补同步，控制台不再连续刷出 initial config push failed。
-- 视频节点拖拽与原生控制条交互：视频画面主体恢复为画布节点拖拽区域，浏览器原生媒体拖影已禁用；底部播放控制区仍保留播放/暂停、进度、音量和全屏交互，不触发节点拖动。需要确认：从视频上部或中部拖动时节点位置正常更新并保存，底部控制条全部可用，图片、音频、文本节点的拖拽与点击行为不受影响。
+- 视频节点拖拽与原生控制条交互：视频画面主体已从 Leafer DOM 交互白名单中移除，保持为画布节点拖拽区域，浏览器原生媒体拖影已禁用；底部播放控制区仍通过按钮和输入控件独立接收播放/暂停、进度、音量和全屏交互，不触发节点拖动。自动回归已确认从视频内容区拖动时节点位置实时更新。需要继续确认：已加载视频播放中仍可从上部或中部拖动并保存位置，底部控制条全部可用，图片、音频、文本节点的拖拽与点击行为不受影响。
 - 重开画布后首次创建节点与自动保存恢复：后端账号工作区已经完成首次 bootstrap 后，配置、画布或素材自动保存的瞬时网络错误不会再把 `workspaceStatus` 切换为会卸载画布的错误页，当前内存编辑会保留并由 5 秒延迟补偿重试；异步媒体恢复按账号、保存模式和项目 ID 只执行一次，过期恢复结果不会覆盖用户刚创建的节点。已验证重新打开画布后第一次右键添加文本节点立即成功，等待自动保存后节点仍在，再次刷新可从后端恢复。需要继续确认：首次创建图片、视频、音频、脚本和配置节点同样不会触发画布闪烁或丢失；模拟一次 502/网络中断后未保存节点仍留在画布，服务恢复后自动同步成功。
 - LeaferJS 画布帧率优化：移除重复的 LeaferJS 点阵/网格对象，滚轮缩放、滚轮平移和鼠标拖动画布改为先直接更新 DOM/Leafer 展示，再在滚轮停止 100ms 或拖拽结束时提交 React 视口状态；Composer 与临时 SVG 连接线在过渡期间同步跟随。自动回归已覆盖 Composer 打开、输入、生成按钮命中、单击空白关闭、节点拖拽、连接线 hover、临时拉线与空白创建菜单，未出现 `Maximum update depth exceeded`。需要继续人工确认：大型真实画布连续缩放/平移保持流畅，Composer、图片/视频/音频媒体、组、360 场景、导演台和后端自动保存均无视觉跳动或状态丢失。
 - 画布媒体视口缓存：图片、视频、音频节点首次进入视口并完成媒体绑定后会继续保持挂载，平移离开再返回或跨越概览缩放阈值时不再重复创建媒体元素；后端账号媒体响应增加私有长期缓存。需要确认大型画布中未访问节点仍按视口裁剪，已访问媒体无空白闪烁、视频/音频播放状态不重置、Network 不重复请求同一文件，并验证删除媒体节点后不会残留。

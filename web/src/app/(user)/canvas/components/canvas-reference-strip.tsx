@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FocusEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
+import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -13,6 +13,8 @@ import type { CanvasResourceReference } from "../utils/canvas-resource-reference
 type CanvasReferenceStripProps = {
     references?: CanvasResourceReference[];
     className?: string;
+    variant?: "default" | "media";
+    onRemove?: (reference: CanvasResourceReference) => void;
 };
 
 type HoveredReference = {
@@ -20,7 +22,7 @@ type HoveredReference = {
     rect: DOMRect;
 };
 
-export function CanvasReferenceStrip({ references = [], className = "" }: CanvasReferenceStripProps) {
+export function CanvasReferenceStrip({ references = [], className = "", variant = "default", onRemove }: CanvasReferenceStripProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const activeReferences = references.filter((reference) => reference.active);
     const [hoveredReference, setHoveredReference] = useState<HoveredReference | null>(null);
@@ -45,6 +47,8 @@ export function CanvasReferenceStrip({ references = [], className = "" }: Canvas
                         reference={reference}
                         index={index}
                         theme={theme}
+                        variant={variant}
+                        onRemove={onRemove}
                         onPreview={(event) => setHoveredReference({ reference, rect: event.currentTarget.getBoundingClientRect() })}
                         onHidePreview={() => setHoveredReference(null)}
                     />
@@ -59,15 +63,50 @@ function ReferenceChip({
     reference,
     index,
     theme,
+    variant,
+    onRemove,
     onPreview,
     onHidePreview,
 }: {
     reference: CanvasResourceReference;
     index: number;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    variant: "default" | "media";
+    onRemove?: (reference: CanvasResourceReference) => void;
     onPreview: (event: MouseEvent<HTMLDivElement> | FocusEvent<HTMLDivElement>) => void;
     onHidePreview: () => void;
 }) {
+    if (variant === "media") {
+        return (
+            <div
+                className="group/reference relative size-12 shrink-0 overflow-hidden rounded-lg border"
+                style={{ background: theme.node.fill, borderColor: theme.node.stroke }}
+                title={`${index + 1}. ${reference.title || reference.label}`}
+                tabIndex={0}
+                onMouseEnter={onPreview}
+                onMouseLeave={onHidePreview}
+                onFocus={onPreview}
+                onBlur={onHidePreview}
+            >
+                <ReferenceVisual reference={reference} large />
+                <span className="pointer-events-none absolute bottom-0.5 left-0.5 grid size-4 place-items-center rounded bg-black/65 text-[9px] font-semibold text-white">{index + 1}</span>
+                {onRemove ? (
+                    <button
+                        type="button"
+                        className="absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full bg-black/70 text-white opacity-75 transition hover:opacity-100"
+                        aria-label={`移除引用 ${reference.title || reference.label}`}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onRemove(reference);
+                        }}
+                    >
+                        <X className="size-2.5" />
+                    </button>
+                ) : null}
+            </div>
+        );
+    }
+
     return (
         <div
             className="flex h-8 min-w-0 max-w-[132px] shrink-0 cursor-default items-center gap-1.5 rounded-md border py-1 pl-1 pr-2 text-[11px] transition-colors hover:brightness-110 focus:outline-none focus:ring-1"
@@ -129,21 +168,21 @@ function ReferenceHoverPreview({ reference, rect }: HoveredReference) {
     );
 }
 
-function ReferenceVisual({ reference }: { reference: CanvasResourceReference }) {
+function ReferenceVisual({ reference, large = false }: { reference: CanvasResourceReference; large?: boolean }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { src, failed, setFailed } = useReferencePreviewUrl(reference);
 
     if (reference.kind === "image" && src && !failed) {
-        return <img className="size-5 shrink-0 rounded-[4px] object-cover" src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
+        return <img className={large ? "size-full object-cover" : "size-5 shrink-0 rounded-[4px] object-cover"} src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
     }
     if (reference.kind === "video" && src && !failed) {
-        return <video className="size-5 shrink-0 rounded-[4px] object-cover" src={src} muted preload="metadata" aria-hidden="true" onError={() => setFailed(true)} />;
+        return <video className={large ? "size-full object-cover" : "size-5 shrink-0 rounded-[4px] object-cover"} src={src} muted preload="metadata" aria-hidden="true" onError={() => setFailed(true)} />;
     }
 
     const Icon = reference.kind === "audio" ? Music2 : reference.kind === "text" ? FileText : reference.kind === "video" ? Video : ImageIcon;
     return (
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-[4px]" style={{ background: theme.ui.controlFill, color: theme.node.muted }}>
-            <Icon className="size-3" />
+        <span className={large ? "flex size-full items-center justify-center" : "flex size-5 shrink-0 items-center justify-center rounded-[4px]"} style={{ background: theme.ui.controlFill, color: theme.node.muted }}>
+            <Icon className={large ? "size-5" : "size-3"} />
         </span>
     );
 }

@@ -45,9 +45,10 @@ type ImageSettingsPanelProps = {
     className?: string;
     maxCount?: number;
     referenceCount?: number;
+    variant?: "default" | "composer";
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[376px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, referenceCount = 0 }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[376px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, referenceCount = 0, variant = "default" }: ImageSettingsPanelProps) {
     const quality = normalizeImageQuality(config.quality);
     const resolution = normalizeImageResolution(config.resolution);
     const model = config.model || config.imageModel;
@@ -116,7 +117,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </div>
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>比例</SettingTitle>
-                    <div className="grid grid-cols-5 gap-2.5">
+                    <div className={`grid ${variant === "composer" ? "grid-cols-4" : "grid-cols-5"} gap-2.5`}>
                         {aspectOptions.map((item) => {
                             const disabled = imageSizeDisabled(item.value, imageCapability);
                             return (
@@ -124,7 +125,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                     key={item.value}
                                     type="button"
                                     disabled={disabled}
-                                    className="flex h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border bg-transparent text-xs transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45"
+                                    className={`flex ${variant === "composer" ? "h-14" : "h-16"} cursor-pointer flex-col items-center justify-center gap-1 rounded-[8px] border bg-transparent text-xs transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-45`}
                                     style={{ borderColor: selectedAspect.value === item.value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
                                     onMouseDown={(event) => event.stopPropagation()}
                                     onClick={() => onConfigChange("size", item.value)}

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CanvasConnection, CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
     normalizeCanvasNodeIdentities,
     sortConnectionsByReferenceOrder,
-} from "./canvas-node-identity.ts";
+} from "./canvas-node-identity";
 
 function node(id: string, type: CanvasNodeData["type"], title: string, typeSequence?: number): CanvasNodeData {
     return {
@@ -24,9 +24,9 @@ function node(id: string, type: CanvasNodeData["type"], title: string, typeSeque
 test("allocates persistent type-specific titles without replacing custom titles", () => {
     const result = normalizeCanvasNodeIdentities(
         [
-            node("text-legacy", "text", "Note"),
-            node("image-custom", "image", "Mood board"),
-            node("text-legacy-2", "text", ""),
+            node("text-legacy", CanvasNodeType.Text, "Note"),
+            node("image-custom", CanvasNodeType.Image, "Mood board"),
+            node("text-legacy-2", CanvasNodeType.Text, ""),
         ],
         { text: 3 },
     );
@@ -62,7 +62,7 @@ test("preserves explicit connection order and assigns a stable order to legacy e
 });
 
 test("allocates the next title from persisted counters instead of the live node count", () => {
-    const result = allocateCanvasNodeIdentity("comfyui", { comfyui: 4, text: 9 });
+    const result = allocateCanvasNodeIdentity(CanvasNodeType.ComfyUI, { comfyui: 4, text: 9 });
 
     assert.deepEqual(result, {
         title: "ComfyUI节点 5",
@@ -73,8 +73,8 @@ test("allocates the next title from persisted counters instead of the live node 
 
 test("migrates generated placeholder titles to the type sequence default", () => {
     const result = normalizeCanvasNodeIdentities([
-        node("image-generated", "image", "Generated Image"),
-        node("video-generated", "video", "Generated Video"),
+        node("image-generated", CanvasNodeType.Image, "Generated Image"),
+        node("video-generated", CanvasNodeType.Video, "Generated Video"),
     ]);
 
     assert.deepEqual(
