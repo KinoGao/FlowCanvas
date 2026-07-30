@@ -1,7 +1,7 @@
 # FlowCanvas Agent 编排引擎 — 设计文档
 
 > 日期：2026-07-30
-> 状态：设计已定稿
+> 状态：设计已定稿（含一致性约束）
 
 ## 背景与问题
 
@@ -33,6 +33,21 @@ Agent 应能**自主编排完整的图片/视频制作流水线**：
 > 7. 阶段6 视频合成：触发视频生成（可选）
 
 用户只需在关键决策点回复"确认"或"调整"。
+
+### 一致性约束
+
+端到端制作的核心难点不是"走完流程"，而是**跨阶段产出保持一致**。当前 Agent 每次生成相互独立，导致：
+
+| 一致性维度 | 断裂表现 | 根因 |
+|-----------|---------|------|
+| **故事连贯** | 第 3 集角色性格与第 1 集矛盾；情节线中断 | 每集/每阶段 LLM 调用独立，无共享上下文 |
+| **人物一致** | 同一人物在不同分镜图中长相不同（换脸） | 图片生成无角色参考图传递机制 |
+| **场景一致** | 同一场景在不同镜头中色调/构图/光影跳变 | 缺少场景资产锁定和风格锚定 |
+| **道具一致** | 关键道具在不同分镜中形态变化 | 缺少资产 ID 跨阶段引用 |
+
+这些断裂的根因不是"LLM 不够强"，而是**编排层没有把一致性作为硬约束**。每次 Agent 调用时，它不知道上一个阶段产出了什么人物、什么场景、什么道具——也就无法在下一阶段保持连贯。
+
+**一致性修复的核心思路**：每个阶段结束时，从产出物中**提取一致性资产**（人物描述、场景描述、道具清单、角色参考图），作为下一阶段的**必传上下文**注入 Agent Prompt。这不是让 LLM "努力保持一致"，而是在输入层面**剥夺它产生不一致的能力**。
 
 ---
 
@@ -125,7 +140,7 @@ pipeline/
 ├── manager.ts    # PipelineManager: create/advance/get/buildPrompt
 ├── stages.ts     # 两套流水线阶段定义（script 3阶段 / production 6阶段）
 ├── state.ts      # JSON 文件持久化 → ~/.infinite-canvas/pipelines/
-└── quality.ts    # 质量门检查（初期只做存在性检查）
+└── quality.ts    # 质量门 + 一致性检查
 ```
 
 核心接口：
@@ -136,10 +151,22 @@ class PipelineManager {
   get(pipelineId): PipelineState | null
   advance(pipelineId, stageOutput): PipelineState
   buildPrompt(pipelineId): string  // 为当前阶段构建 Agent 上下文
+  // 一致性资产管理
+  extractAssets(stageOutput): ConsistencyAssets
+  injectAssets(prompt: string, assets: ConsistencyAssets): string
+}
+
+type ConsistencyAssets = {
+  characters: Array<{ name: string; description: string; referenceImageNodeId?: string }>
+  scenes: Array<{ name: string; description: string; styleKeywords: string[] }>
+  props: Array<{ name: string; description: string }>
+  storyContext: string  // 跨集故事摘要（角色弧线、情节线状态）
+  styleAnchor: string   // 全局视觉锚定词（如 "3D 动画渲染，赛璐珞质感，暖色调"）
 }
 
 type PipelineState = {
   id, mode, config, currentStage, completedStages, stageOutputs, status
+  assets: ConsistencyAssets  // 累积的一致性资产
 }
 ```
 
@@ -223,9 +250,11 @@ type PipelineStage = {
 | 风险 | 应对 |
 |------|------|
 | LLM 不输出 `[STAGE_COMPLETE]` | 同时监听 tool call 模式——调用特定工具+内容匹配产出模板时也视为完成 |
-| 长流水线上下文超载 | 每阶段只注入当前阶段+已完成摘要，控制在 3000 token 内 |
+| 长流水线上下文超载 | 每阶段只注入当前阶段+已完成摘要+一致性资产，控制在 4000 token 内 |
+| 人物一致性断裂 | 阶段3 提取角色描述→ConsistencyAssets；阶段5 注入参考图节点 ID 到 prompt |
+| 故事连贯性断裂 | 阶段间注入 storyContext（上阶段摘要+角色弧线），Agent 生成时基于此校验 |
+| 场景风格跳变 | 阶段1 锁定 styleAnchor 全局锚定词，后续所有生图 prompt 自动追加 |
 | 用户中断流水线 | 状态持久化到 JSON 文件，支持 pause/resume |
-| 质量门误判 | 初期只做存在性检查（"节点是否已创建？"），内容质量留给用户确认 |
 
 ---
 
