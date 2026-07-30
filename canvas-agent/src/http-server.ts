@@ -1,6 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 
-import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
+import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, pipelineManager, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
 import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
@@ -80,6 +80,7 @@ export function startHttpServer() {
         const mode = validateMode(req.body?.mode);
         const storySkill = String(req.body?.storySkill || "") || undefined;
         const artSkill = String(req.body?.artSkill || "") || undefined;
+        const pipelineId = String(req.body?.pipelineId || "") || undefined;
         if (!threadId) {
             const thread = await startCodexThread(emit, workspace.workspacePath);
             threadId = String((thread as Record<string, unknown>).id || "");
@@ -88,13 +89,35 @@ export function startHttpServer() {
             await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
-        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill });
+        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill, pipelineId });
         res.json({ ok: true, threadId });
     }));
     app.post("/agent/claude/turn", (req, res) => {
         runClaudeTurn(withAgentPrompt(String(req.body?.prompt || "")), emit);
         res.json({ ok: true });
     });
+    app.post("/pipeline/create", route(async (req, res) => {
+        const mode = validateMode(req.body?.mode);
+        const config = (req.body?.config || {}) as Record<string, unknown>;
+        const state = pipelineManager.create(mode, config);
+        session.emitAll("pipeline_update", { pipelineId: state.id, state });
+        res.json({ ok: true, pipelineId: state.id, state });
+    }));
+    app.get("/pipeline/:id", route(async (req, res) => {
+        const id = routeParam(req.params.id);
+        const state = pipelineManager.get(id);
+        if (!state) return res.status(404).json({ ok: false, error: "pipeline not found" });
+        res.json({ ok: true, state });
+    }));
+    app.post("/pipeline/:id/advance", route(async (req, res) => {
+        const id = routeParam(req.params.id);
+        const summary = String(req.body?.summary || "");
+        const nodeIds = Array.isArray(req.body?.nodeIds) ? req.body.nodeIds : [];
+        const state = pipelineManager.advance(id, { stageName: "", summary, nodeIds });
+        if (!state) return res.status(404).json({ ok: false, error: "pipeline not found or already completed" });
+        session.emitAll("pipeline_update", { pipelineId: id, state });
+        res.json({ ok: true, state });
+    }));
     app.use((_req, res) => res.status(404).json({ ok: false, error: "not found" }));
     app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => res.status(500).json({ ok: false, error: error.message }));
 

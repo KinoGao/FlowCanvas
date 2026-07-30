@@ -11,6 +11,9 @@ export type AgentThreadSummary = { id: string; preview: string; name?: string | 
 export type AgentPanelTab = "chat" | "setup" | "history" | "log";
 export type AgentMode = "default" | "script" | "production";
 
+export type PipelineStageInfo = { name: string; order: number; completed: boolean };
+export type PipelineInfo = { id: string; mode: string; currentStage: string; stages: PipelineStageInfo[]; status: string };
+
 type CanvasAgentStore = {
     width: number;
     url: string;
@@ -31,6 +34,8 @@ type CanvasAgentStore = {
     agentMode: AgentMode;
     storySkill: string | null;
     artSkill: string | null;
+    pipelineId: string | null;
+    pipeline: PipelineInfo | null;
     confirmTools: boolean;
     activity: string;
     connectError: string;
@@ -61,6 +66,8 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     agentMode: (typeof window === "undefined" ? "default" : localStorage.getItem("canvas-agent-mode") || "default") as AgentMode,
     storySkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-story-skill") || null,
     artSkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-art-skill") || null,
+    pipelineId: null,
+    pipeline: null,
     confirmTools: true,
     activity: "就绪",
     connectError: "",

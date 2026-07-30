@@ -9,7 +9,7 @@ import { motion } from "motion/react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type PipelineInfo } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 
@@ -77,6 +77,8 @@ export function CanvasLocalAgentPanel({
         agentMode,
         storySkill,
         artSkill,
+        pipelineId,
+        pipeline,
         confirmTools,
         activity,
         connectError,
@@ -159,6 +161,10 @@ export function CanvasLocalAgentPanel({
             const data = parseEventData<AgentEventPayload>(event);
             if (data) handleAgentEvent(data);
         });
+        source.addEventListener("pipeline_update", (event) => {
+            const data = parseEventData<{ pipelineId?: string; state?: Record<string, unknown> }>(event);
+            if (data?.state) setAgentState({ pipeline: formatPipelineInfo(data.state), pipelineId: data.pipelineId || null });
+        });
         source.addEventListener("agent_log", (event) => {
             const text = parseEventData<{ text?: unknown }>(event)?.text;
             addEventLog("日志", text, text);
@@ -221,7 +227,7 @@ export function CanvasLocalAgentPanel({
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined }),
+                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, pipelineId: useCanvasAgentStore.getState().pipelineId || undefined }),
             });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
@@ -515,6 +521,21 @@ export function CanvasLocalAgentPanel({
         }
     };
 
+    const createPipeline = async (mode: string) => {
+        if (!connected) return;
+        try {
+            const res = await fetch(`${endpoint}/pipeline/create?token=${encodeURIComponent(token)}`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ mode }),
+            });
+            const data = (await res.json()) as { ok?: boolean; pipelineId?: string; state?: Record<string, unknown> };
+            if (data.ok && data.state) {
+                setAgentState({ pipeline: formatPipelineInfo(data.state), pipelineId: data.pipelineId || null });
+            }
+        } catch { /* ignore */ }
+    };
+
     const content = (
         <>
             <AgentPanelTabs
@@ -586,6 +607,7 @@ export function CanvasLocalAgentPanel({
                             setAgentState({ agentMode: mode, storySkill: null, artSkill: null });
                             localStorage.removeItem("canvas-agent-story-skill");
                             localStorage.removeItem("canvas-agent-art-skill");
+                            if (mode !== "default") void createPipeline(mode);
                         }}
                         onStorySkillChange={(skill) => {
                             localStorage.setItem("canvas-agent-story-skill", skill || "");
@@ -596,6 +618,7 @@ export function CanvasLocalAgentPanel({
                             setAgentState({ artSkill: skill });
                         }}
                     />
+                    <PipelineProgressBar pipeline={pipeline} theme={theme} />
                     <div ref={listRef} className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
                         {messages.map((item) => (
                             <AgentChatMessage key={item.id} item={agentMessageToChatMessage(item)} theme={theme} user={user} />
@@ -1170,6 +1193,41 @@ function formatThreadTime(value?: number) {
 
 function createId() {
     return typeof crypto === "undefined" ? `${Date.now()}-${Math.random()}` : crypto.randomUUID();
+}
+
+function formatPipelineInfo(state: Record<string, unknown>): PipelineInfo | null {
+    if (!state) return null;
+    const stages = (Array.isArray(state.stages) ? state.stages : []) as Array<Record<string, unknown>>;
+    const completed = (Array.isArray(state.completedStages) ? state.completedStages : []) as string[];
+    return {
+        id: String(state.id || ""),
+        mode: String(state.mode || ""),
+        currentStage: String(state.currentStage || ""),
+        status: String(state.status || ""),
+        stages: stages.map((s) => ({
+            name: String(s.name || ""),
+            order: Number(s.order || 0),
+            completed: completed.includes(String(s.name || "")),
+        })).sort((a, b) => a.order - b.order),
+    };
+}
+
+function PipelineProgressBar({ pipeline, theme }: { pipeline: PipelineInfo | null; theme: Record<string, unknown> }) {
+    if (!pipeline || !pipeline.stages.length) return null;
+    const muted = (theme.node as Record<string, string>)?.muted || "#9ca3af";
+    const accent = (theme.node as Record<string, string>)?.accent || "#1677ff";
+    return (
+        <div className="flex items-center gap-1 px-4 py-2 overflow-x-auto" style={{ borderBottom: `1px solid ${(theme.node as Record<string, string>)?.border || "#e5e7eb"}` }}>
+            {pipeline.stages.map((stage: PipelineInfo["stages"][number], i: number) => (
+                <span key={stage.name} className="flex items-center gap-1 text-xs whitespace-nowrap">
+                    <span style={{ color: stage.completed ? accent : muted }}>
+                        {stage.completed ? "●" : "○"} {stage.name}
+                    </span>
+                    {i < pipeline.stages.length - 1 && <span style={{ color: muted }}>→</span>}
+                </span>
+            ))}
+        </div>
+    );
 }
 
 const MODE_OPTIONS = [

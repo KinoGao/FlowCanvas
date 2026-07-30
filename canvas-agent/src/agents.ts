@@ -5,13 +5,13 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { AGENT_PROMPT, buildAgentPrompt, VERSION, type AgentMode, type PromptBuildOptions } from "./config.js";
+import { AGENT_PROMPT, buildAgentPrompt, pipelineManager, VERSION, type AgentMode, type PromptBuildOptions } from "./config.js";
 import type { AgentAttachment, AgentEmit } from "./types.js";
 
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string };
+type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string; pipelineId?: string };
 type AgentHistoryMessage = { id: string; role: "user" | "assistant" | "tool" | "error"; title?: string; text: string; detail?: unknown; streamId?: string };
 
 let codexQueue: Promise<unknown> = Promise.resolve();
@@ -38,8 +38,17 @@ async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: Age
             storySkill: options.storySkill as PromptBuildOptions["storySkill"],
             artSkill: options.artSkill as PromptBuildOptions["artSkill"],
         };
-        const fullPrompt = withAgentPrompt(prompt, options.mode, skillOptions);
+        let fullPrompt = withAgentPrompt(prompt, options.mode, skillOptions);
         currentSystemPrompt = options.mode ? buildAgentPrompt(options.mode, skillOptions) : AGENT_PROMPT;
+
+        // 注入流水线上下文
+        if (options.pipelineId) {
+            const pipelinePrompt = pipelineManager.buildPrompt(options.pipelineId);
+            if (pipelinePrompt) {
+                fullPrompt = `${pipelinePrompt}\n\n${fullPrompt}`;
+            }
+        }
+
         files = await writeAttachmentFiles(attachments);
         codexApp ||= await CodexAppClient.start(emit);
         const threadId = await ensureCodexThread(codexApp, options);

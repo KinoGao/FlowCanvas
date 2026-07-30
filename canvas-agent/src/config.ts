@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AgentPromptBuilder, type AgentMode, type PromptBuildOptions } from "./prompts/builder.js";
+import { PipelineManager } from "./pipeline/manager.js";
 
 export const DEFAULT_PORT = 17371;
 export const CONFIG_DIR = path.join(os.homedir(), ".infinite-canvas");
@@ -13,6 +14,7 @@ export const VERSION = readPackageVersion();
 
 const SKILLS_DIR = resolveSkillsDir();
 const promptBuilder = new AgentPromptBuilder(SKILLS_DIR);
+export const pipelineManager = new PipelineManager();
 
 export function buildAgentPrompt(mode: AgentMode = "default", options: PromptBuildOptions = {}): string {
   return promptBuilder.build(mode, options);
