@@ -70,6 +70,7 @@ export function CanvasToolbar({
     onOpenMyAssets,
     onOpenMaterialLibrary,
     onOpenGenerationHistory,
+    onOpenWorkflowToolbox,
     assetPanelOpen = false,
 }: {
     selectedCount: number;
@@ -105,6 +106,7 @@ export function CanvasToolbar({
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
     onOpenGenerationHistory: () => void;
+    onOpenWorkflowToolbox: () => void;
     assetPanelOpen?: boolean;
 }) {
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -178,6 +180,9 @@ export function CanvasToolbar({
                 <Divider theme={theme} />
                 <ToolbarButton id="tool-material" label="素材库" active={materialOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "material")}>
                     <Boxes className="size-4.5" />
+                </ToolbarButton>
+                <ToolbarButton id="tool-toolbox" label="工具箱" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={onOpenWorkflowToolbox}>
+                    <PackagePlus className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-history" label="历史" active={historyOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "history")}>
                     <Clock3 className="size-4.5" />
@@ -541,6 +546,7 @@ function toolLabel(id: string) {
     if (id === 'tool-storyboard-group') return '分镜组';
     if (id === "tool-add") return "添加节点";
     if (id === "tool-material") return "素材库";
+    if (id === "tool-toolbox") return "工具箱";
     if (id === "tool-history") return "历史";
     if (id === "tool-shortcuts") return "快捷键";
     if (id === "tool-style") return "画布外观";

@@ -27,6 +27,7 @@ import { fitNodeSize, nodeSizeFromRatio, VIDEO_NODE_SIZE_RANGE } from "../utils/
 import { App, Button, Dropdown, Modal, message } from "antd";
 import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constants";
 import { CanvasConfigComposer, type CanvasSlashCommand } from "../components/canvas-config-composer";
+import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
@@ -48,11 +49,11 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
+import { canvasSelectionCenter, cloneCanvasSelection, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
     normalizeCanvasNodeIdentities,
-    sortConnectionsByReferenceOrder,
     type CanvasNodeSequenceCounters,
 } from "../utils/canvas-node-identity";
 import type { DirectorDeskCapture } from "../director/storyai/DirectorDesk";
@@ -82,6 +83,13 @@ type CanvasClipboard = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
 };
+
+/**
+ * 跨画布剪贴板：模块级单例而非组件 useRef，使同一会话内切换不同画布（[id] 路由实例）
+ * 后复制内容仍可粘贴，实现「跨画布复制（带连线）」。
+ * 画布媒体通过 storageKey 引用后端账号存储，跨画布粘贴时媒体引用依然有效。
+ */
+const crossCanvasClipboard: { current: CanvasClipboard | null } = { current: null };
 
 type PendingConnectionCreate = {
     connection: ConnectionHandle;
@@ -584,7 +592,6 @@ function LeaferCanvasPage() {
     const composerHeightRef = useRef(360);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
-    const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -628,6 +635,10 @@ function LeaferCanvasPage() {
         const p = state.projects.find((project) => project.id === projectId);
         return p?.title || "";
     });
+    const workflowTemplates = useCanvasStore((state) => {
+        const p = state.projects.find((project) => project.id === projectId);
+        return p?.workflowTemplates ?? [];
+    });
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     useEffect(() => {
@@ -669,6 +680,7 @@ function LeaferCanvasPage() {
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [canvasAssetPanelOpen, setCanvasAssetPanelOpen] = useState(false);
+    const [workflowToolboxOpen, setWorkflowToolboxOpen] = useState(false);
     const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets">("canvas");
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
@@ -1802,56 +1814,102 @@ function LeaferCanvasPage() {
 
         if (!copiedNodes.length) return;
 
-        clipboardRef.current = {
+        crossCanvasClipboard.current = {
             nodes: copiedNodes,
             connections: connectionsRef.current.filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map((connection) => ({ ...connection })),
         };
     }, []);
 
+    const saveSelectionAsTemplate = useCallback(
+        (name: string) => {
+            const selectedIds = selectedNodeIdsRef.current;
+            if (!selectedIds.size) return null;
+            const templateNodes = nodesRef.current.filter((node) => selectedIds.has(node.id));
+            if (!templateNodes.length) return null;
+
+            const origin = canvasSelectionCenter(templateNodes);
+            const normalizedNodes = templateNodes.map((node) => ({
+                ...node,
+                position: { x: node.position.x - origin.x, y: node.position.y - origin.y },
+                metadata: node.metadata ? { ...node.metadata } : undefined,
+            }));
+            const templateConnections = connectionsRef.current
+                .filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId))
+                .map((connection) => ({ ...connection }));
+
+            const template: CanvasWorkflowTemplate = {
+                id: nanoid(),
+                name: name.trim() || `模板 ${workflowTemplates.length + 1}`,
+                createdAt: new Date().toISOString(),
+                nodes: normalizedNodes,
+                connections: templateConnections,
+            };
+            const nextTemplates = [...workflowTemplates, template];
+            updateProject(projectId, { workflowTemplates: nextTemplates });
+            message.success(`已保存模板「${template.name}」（${template.nodes.length} 个节点）`);
+            return template;
+        },
+        [message, projectId, updateProject, workflowTemplates],
+    );
+
+    const insertWorkflowTemplate = useCallback(
+        (template: CanvasWorkflowTemplate) => {
+            if (!template.nodes.length) return;
+            const center = getCanvasCenter();
+            const templateCenter = canvasSelectionCenter(template.nodes);
+            const dx = center.x - templateCenter.x;
+            const dy = center.y - templateCenter.y;
+            const { nodes: nextNodes, connections: nextConnections } = cloneCanvasSelection(
+                template.nodes,
+                template.connections,
+                { x: dx, y: dy },
+                (source, position, metadata) => ({
+                    ...createCanvasNode(source.type, { x: position.x + source.width / 2, y: position.y + source.height / 2 }, metadata),
+                    position,
+                    width: source.width,
+                    height: source.height,
+                }),
+                createCanvasConnection,
+            );
+            setNodes((prev) => [...prev, ...nextNodes]);
+            setConnections((prev) => [...prev, ...nextConnections]);
+            setSelectedNodeIds(new Set(nextNodes.map((node) => node.id)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            message.success(`已插入模板「${template.name}」`);
+        },
+        [createCanvasConnection, createCanvasNode, getCanvasCenter, message],
+    );
+
+    const deleteWorkflowTemplate = useCallback(
+        (templateId: string) => {
+            const nextTemplates = workflowTemplates.filter((template) => template.id !== templateId);
+            updateProject(projectId, { workflowTemplates: nextTemplates });
+            message.success("已删除模板");
+        },
+        [message, projectId, updateProject, workflowTemplates],
+    );
+
     const pasteCopiedNodes = useCallback(() => {
-        const clipboard = clipboardRef.current;
+        const clipboard = crossCanvasClipboard.current;
         if (!clipboard?.nodes.length) return false;
 
         const center = getCanvasCenter();
-        const bounds = clipboard.nodes.reduce(
-            (acc, node) => ({
-                left: Math.min(acc.left, node.position.x),
-                top: Math.min(acc.top, node.position.y),
-                right: Math.max(acc.right, node.position.x + node.width),
-                bottom: Math.max(acc.bottom, node.position.y + node.height),
+        const boundsCenter = canvasSelectionCenter(clipboard.nodes);
+        const dx = center.x - boundsCenter.x;
+        const dy = center.y - boundsCenter.y;
+        const { nodes: nextNodes, connections: nextConnections } = cloneCanvasSelection(
+            clipboard.nodes,
+            clipboard.connections,
+            { x: dx, y: dy },
+            (source, position, metadata) => ({
+                ...createCanvasNode(source.type, { x: position.x + source.width / 2, y: position.y + source.height / 2 }, metadata),
+                position,
+                width: source.width,
+                height: source.height,
             }),
-            { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+            createCanvasConnection,
         );
-        const dx = center.x - (bounds.left + bounds.right) / 2;
-        const dy = center.y - (bounds.top + bounds.bottom) / 2;
-        const idMap = new Map<string, string>();
-        const nextNodes = clipboard.nodes.map((node, index) => {
-            const nextPosition = {
-                x: node.position.x + dx,
-                y: node.position.y + dy,
-            };
-            const next = {
-                ...createCanvasNode(
-                    node.type,
-                    { x: nextPosition.x + node.width / 2, y: nextPosition.y + node.height / 2 },
-                    node.metadata,
-                ),
-                position: {
-                    ...nextPosition,
-                },
-                width: node.width,
-                height: node.height,
-            };
-            idMap.set(node.id, next.id);
-            return next;
-        });
-
-        const nextConnections = sortConnectionsByReferenceOrder(clipboard.connections).flatMap((connection) => {
-            const fromNodeId = idMap.get(connection.fromNodeId);
-            const toNodeId = idMap.get(connection.toNodeId);
-            if (!fromNodeId || !toNodeId) return [];
-            return [createCanvasConnection(fromNodeId, toNodeId)];
-        });
 
         setNodes((prev) => [...prev, ...nextNodes]);
         setConnections((prev) => [...prev, ...nextConnections]);
@@ -4828,6 +4886,7 @@ function LeaferCanvasPage() {
                     }}
                     onOpenMaterialLibrary={openMaterialLibrary}
                     onOpenGenerationHistory={() => setGenerationHistoryOpen(true)}
+                    onOpenWorkflowToolbox={() => setWorkflowToolboxOpen(true)}
                     onAddScript={createScriptNode}
                     onAddVideoComposition={createVideoCompositionNode}
                     onAddDirector={createDirectorNode}
@@ -4952,6 +5011,15 @@ function LeaferCanvasPage() {
                         setMaterialLibraryOpen(false);
                         handleUploadRequest();
                     }}
+                />
+                <CanvasWorkflowToolbox
+                    open={workflowToolboxOpen}
+                    templates={workflowTemplates}
+                    selectedCount={selectedNodeIds.size}
+                    onClose={() => setWorkflowToolboxOpen(false)}
+                    onSaveSelection={saveSelectionAsTemplate}
+                    onInsert={insertWorkflowTemplate}
+                    onDelete={deleteWorkflowTemplate}
                 />
                 <CanvasGenerationHistoryModal open={generationHistoryOpen} nodes={nodes} onClose={() => setGenerationHistoryOpen(false)} onSelectNode={duplicateNode} />
                     </>
