@@ -15,6 +15,7 @@ type CanvasConfigComposerProps = {
     inputs: NodeGenerationInput[];
     onChange: (value: string) => void;
     onClose: () => void;
+    onSlashCommand?: (command: CanvasSlashCommand) => void;
 };
 
 type Token = { type: "text"; value: string } | { type: "reference"; nodeId: string };
@@ -23,18 +24,43 @@ type MentionState = {
     query: string;
 };
 
+export type CanvasSlashCommand = {
+    id: "four-grid" | "nine-grid" | "twentyfive-grid";
+    label: string;
+    description: string;
+    rows: number;
+    cols: number;
+};
+
+export const CANVAS_SLASH_COMMANDS: CanvasSlashCommand[] = [
+    { id: "four-grid", label: "四宫格分镜", description: "2×2 剧情推演 / 连贯分镜", rows: 2, cols: 2 },
+    { id: "nine-grid", label: "九宫格分镜", description: "3×3 多机位连贯分镜", rows: 3, cols: 3 },
+    { id: "twentyfive-grid", label: "25 宫格分镜", description: "5×5 连贯分镜", rows: 5, cols: 5 },
+];
+
+type SlashState = {
+    query: string;
+};
+
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ value, inputs, onChange, onClose }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ value, inputs, onChange, onClose, onSlashCommand }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
     const [mention, setMention] = useState<MentionState | null>(null);
+    const [slash, setSlash] = useState<SlashState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [resolvedImageUrlsByNodeId, setResolvedImageUrlsByNodeId] = useState<Record<string, string>>({});
     const tokens = useMemo(() => parseComposerTokens(value), [value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
+    const slashCommands = useMemo(() => {
+        if (!slash) return [];
+        const query = (slash.query || "").trim().toLowerCase();
+        if (!query) return CANVAS_SLASH_COMMANDS;
+        return CANVAS_SLASH_COMMANDS.filter((command) => `${command.label} ${command.description}`.toLowerCase().includes(query));
+    }, [slash]);
     const candidates = useMemo(() => {
         if (!mention) return [];
         const query = (mention.query || "").trim().toLowerCase();
@@ -89,6 +115,14 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
 
     const syncMention = () => {
         const text = textBeforeCaret();
+        const slashMatch = /(?:^|\s)\/([^\s/]*)$/.exec(text);
+        if (slashMatch && onSlashCommand) {
+            if (mention) closeMention();
+            setSlash({ query: slashMatch[1] || "" });
+            setActiveIndex(0);
+            return;
+        }
+        closeSlash();
         const match = /@([^\s@]*)$/.exec(text);
         if (!match || !inputs.length) {
             closeMention();
@@ -101,6 +135,34 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     const closeMention = () => {
         setMention(null);
         setActiveIndex(0);
+    };
+
+    const closeSlash = () => {
+        setSlash(null);
+        setActiveIndex(0);
+    };
+
+    const removeActiveSlash = () => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return;
+        const range = selection.getRangeAt(0);
+        const text = textBeforeCaret();
+        const slashMatch = /(?:^|\s)\/([^\s/]*)$/.exec(text);
+        if (!slashMatch) return;
+        const slashIndex = text.lastIndexOf("/");
+        if (slashIndex < 0) return;
+        range.setStart(range.startContainer, Math.max(0, range.startOffset - (text.length - slashIndex)));
+        range.deleteContents();
+    };
+
+    const runSlashCommand = (command: CanvasSlashCommand) => {
+        const editor = editorRef.current;
+        if (!editor || !onSlashCommand) return;
+        removeActiveSlash();
+        closeSlash();
+        const cleaned = serializeEditor(editor).replace(/^[ \t]*/, "");
+        onChange(cleaned);
+        onSlashCommand(command);
     };
 
     const insertReference = (input: NodeGenerationInput) => {
@@ -168,6 +230,28 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     }}
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         event.stopPropagation();
+                        if (slash && slashCommands.length) {
+                            if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setActiveIndex((index) => (index + 1) % slashCommands.length);
+                                return;
+                            }
+                            if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setActiveIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length);
+                                return;
+                            }
+                            if (event.key === "Enter") {
+                                event.preventDefault();
+                                runSlashCommand(slashCommands[Math.min(activeIndex, slashCommands.length - 1)]);
+                                return;
+                            }
+                            if (event.key === "Escape") {
+                                event.preventDefault();
+                                closeSlash();
+                                return;
+                            }
+                        }
                         if (mention && candidates.length) {
                             if (event.key === "ArrowDown") {
                                 event.preventDefault();
@@ -197,13 +281,72 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                         }
                         requestAnimationFrame(syncMention);
                     }}
-                    onBlur={() => window.setTimeout(closeMention, 120)}
+                    onBlur={() => window.setTimeout(() => {
+                        closeMention();
+                        closeSlash();
+                    }, 120)}
                 />
+                {slash && slashCommands.length ? (
+                    <SlashMenu commands={slashCommands} activeIndex={Math.min(activeIndex, slashCommands.length - 1)} theme={theme} onSelect={runSlashCommand} />
+                ) : null}
                 {mention && candidates.length ? (
                     <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} resolvedImageUrlsByNodeId={resolvedImageUrlsByNodeId} />
                 ) : null}
             </div>
             {imagePreview ? <Image src={imagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
+        </div>
+    );
+}
+
+function SlashMenu({
+    commands,
+    activeIndex,
+    theme,
+    onSelect,
+}: {
+    commands: CanvasSlashCommand[];
+    activeIndex: number;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onSelect: (command: CanvasSlashCommand) => void;
+}) {
+    const selectedRef = useRef(false);
+    const activeItemRef = useRef<HTMLButtonElement | null>(null);
+
+    useEffect(() => {
+        activeItemRef.current?.scrollIntoView({ block: "nearest" });
+    }, [activeIndex, commands]);
+
+    const selectCommand = (command: CanvasSlashCommand) => {
+        if (selectedRef.current) return;
+        selectedRef.current = true;
+        onSelect(command);
+    };
+
+    return (
+        <div className="absolute left-2 top-[calc(100%+6px)] z-[90] w-64 overflow-hidden rounded-xl border p-1 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+            <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium opacity-50">快捷分镜</div>
+            {commands.map((command, index) => (
+                <button
+                    key={command.id}
+                    ref={index === activeIndex ? activeItemRef : undefined}
+                    type="button"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
+                    style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        selectCommand(command);
+                    }}
+                >
+                    <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10 text-[10px] font-bold">
+                        {command.cols}×{command.rows}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block font-medium">{command.label}</span>
+                        <span className="block truncate opacity-65">{command.description}</span>
+                    </span>
+                </button>
+            ))}
         </div>
     );
 }

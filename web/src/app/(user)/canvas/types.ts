@@ -50,11 +50,22 @@ export type CanvasBaseMetadata = {
     fontSize?: number;
 };
 
+export type CanvasScriptBeat = {
+    id: string;
+    title: string;
+    content: string;
+    prompt: string;
+    /** 镜头景别：远景/全景/中景/近景/特写 等，由脚本正文推断或手动指定 */
+    shotType?: string;
+    /** 分镜时长（秒），默认 3s */
+    duration?: string;
+};
+
 export type CanvasScriptMetadata = {
     scriptTitle?: string;
     scriptLogline?: string;
     scriptBody?: string;
-    scriptBeats?: Array<{ id: string; title: string; content: string; prompt: string }>;
+    scriptBeats?: CanvasScriptBeat[];
     scriptOutputIds?: string[];
 };
 

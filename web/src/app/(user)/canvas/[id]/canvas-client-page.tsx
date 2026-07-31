@@ -26,7 +26,7 @@ import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image
 import { fitNodeSize, nodeSizeFromRatio, VIDEO_NODE_SIZE_RANGE } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal, message } from "antd";
 import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constants";
-import { CanvasConfigComposer } from "../components/canvas-config-composer";
+import { CanvasConfigComposer, type CanvasSlashCommand } from "../components/canvas-config-composer";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
@@ -47,6 +47,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
@@ -67,6 +68,7 @@ import {
     type CanvasNodeActionIntent,
     type CanvasNodeData,
     type CanvasNodeMetadata,
+    type CanvasScriptBeat,
     type ConnectionHandle,
     type ContextMenuState,
     type Position,
@@ -683,7 +685,8 @@ function LeaferCanvasPage() {
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
-    const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);    const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
+    const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
+    const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
@@ -1341,7 +1344,8 @@ function LeaferCanvasPage() {
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
-    const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;    const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
+    const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
+    const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null;
@@ -4007,6 +4011,80 @@ function LeaferCanvasPage() {
         [createCanvasConnection, createCanvasNode, message],
     );
 
+    const createScriptBeatNode = useCallback(
+        (scriptNode: CanvasNodeData, beat: CanvasScriptBeat, beatIndex: number) => {
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + beatIndex * (spec.height + 36) };
+            const node: CanvasNodeData = {
+                ...createCanvasNode(
+                    CanvasNodeType.Image,
+                    { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                    {
+                        content: scriptStoryboardDataUrl(beat.title, beatIndex),
+                        status: NODE_STATUS_SUCCESS,
+                        prompt: beat.prompt,
+                        generationMode: "image",
+                        generationType: "generation",
+                    },
+                ),
+                position,
+                width: spec.width,
+                height: spec.height,
+            };
+            setNodes((prev) => [...prev, node]);
+            setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+        },
+        [createCanvasConnection, createCanvasNode],
+    );
+
+    const createScriptGridStoryboard = useCallback(
+        (scriptNode: CanvasNodeData, command: CanvasSlashCommand) => {
+            const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
+            const baseBeats = buildScriptBeats(body);
+            const count = command.rows * command.cols;
+            const gap = 24;
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const startX = scriptNode.position.x + scriptNode.width + 96;
+            const startY = scriptNode.position.y;
+            const gridNodes = Array.from({ length: count }, (_, index) => {
+                const beat = baseBeats[index % baseBeats.length];
+                const col = index % command.cols;
+                const row = Math.floor(index / command.cols);
+                const position = { x: startX + col * (spec.width + gap), y: startY + row * (spec.height + gap) };
+                return {
+                    ...createCanvasNode(
+                        CanvasNodeType.Image,
+                        { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                        {
+                            content: scriptStoryboardDataUrl(`${command.label} ${index + 1}`, index),
+                            status: NODE_STATUS_SUCCESS,
+                            prompt: buildGridBeatPrompt(body, beat, index, count),
+                            generationMode: "image",
+                            generationType: "generation",
+                        },
+                    ),
+                    position,
+                    width: spec.width,
+                    height: spec.height,
+                } satisfies CanvasNodeData;
+            });
+            const outputIds = gridNodes.map((node) => node.id);
+            setNodes((prev) => [
+                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: baseBeats, scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []), ...outputIds], status: NODE_STATUS_SUCCESS } } : node)),
+                ...gridNodes,
+            ]);
+            setConnections((prev) => [...prev, ...gridNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
+            setSelectedNodeIds(new Set(outputIds));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            message.success(`已生成 ${count} 格${command.label}`);
+        },
+        [createCanvasConnection, createCanvasNode, message],
+    );
+
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
         const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
@@ -4059,6 +4137,7 @@ function LeaferCanvasPage() {
                     onCreateStoryboard={() => createScriptStoryboard(panelNode)}
                     onCreateNarration={() => createScriptNarrationNode(panelNode)}
                     onCreateVideo={() => createScriptVideoNode(panelNode)}
+                    onCreateBeat={(beat, index) => createScriptBeatNode(panelNode, beat, index)}
                     onClose={() => setDialogNodeId(null)}
                 />
             ) : isGenerationConfigNode(panelNode.type) ? (
@@ -4066,6 +4145,7 @@ function LeaferCanvasPage() {
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
                     onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
+                    onSlashCommand={(command) => createScriptGridStoryboard(panelNode, command)}
                     onClose={() => setDialogNodeId(null)}
                 />
             ) : (
@@ -4087,6 +4167,8 @@ function LeaferCanvasPage() {
         [
             configInputsById,
             confirmStopGeneration,
+            createScriptBeatNode,
+            createScriptGridStoryboard,
             createScriptNarrationNode,
             createScriptStoryboard,
             createScriptVideoNode,
@@ -4704,7 +4786,8 @@ function LeaferCanvasPage() {
                         onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                         onCrop={(node) => setCropNodeId(node.id)}
                         onSplit={(node) => setSplitNodeId(node.id)}
-                        onUpscale={(node) => setUpscaleNodeId(node.id)}                        onAngle={(node) => setAngleNodeId(node.id)}
+                        onUpscale={(node) => setUpscaleNodeId(node.id)}
+                        onAngle={(node) => setAngleNodeId(node.id)}
                         onViewImage={handleViewNodeImage}
                         onReversePrompt={createImageReversePromptNodes}
                         onRetry={handleRetryNodeAction}
@@ -4908,6 +4991,7 @@ function ScriptDeskPanel({
     onCreateStoryboard,
     onCreateNarration,
     onCreateVideo,
+    onCreateBeat,
     onClose,
 }: {
     node: CanvasNodeData;
@@ -4916,6 +5000,7 @@ function ScriptDeskPanel({
     onCreateStoryboard: () => void;
     onCreateNarration: () => void;
     onCreateVideo: () => void;
+    onCreateBeat: (beat: CanvasScriptBeat, index: number) => void;
     onClose: () => void;
 }) {
     const body = node.metadata?.scriptBody ?? node.metadata?.content ?? DEFAULT_SCRIPT_BODY;
@@ -4954,16 +5039,40 @@ function ScriptDeskPanel({
                     </label>
                 </div>
                 <div className="min-w-0 rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
-                    <div className="mb-2 text-xs font-medium opacity-65">分镜预览</div>
-                    <div className="thin-scrollbar max-h-[312px] space-y-2 overflow-y-auto pr-1">
-                        {beats.map((beat, index) => (
-                            <div key={beat.id} className="rounded-lg border p-2" style={{ borderColor: theme.toolbar.border }}>
-                                <div className="text-xs font-medium">
-                                    {index + 1}. {beat.title}
-                                </div>
-                                <div className="mt-1 line-clamp-3 text-xs leading-5 opacity-55">{beat.content}</div>
-                            </div>
-                        ))}
+                    <div className="mb-2 flex items-center justify-between">
+                        <div className="text-xs font-medium opacity-65">分镜表</div>
+                        <div className="text-[11px] opacity-45">{beats.length} 个分镜</div>
+                    </div>
+                    <div className="thin-scrollbar max-h-[312px] overflow-y-auto pr-1">
+                        <table className="w-full border-collapse text-left text-xs">
+                            <thead>
+                                <tr className="opacity-50">
+                                    <th className="w-7 pb-1.5 pr-2 font-medium">#</th>
+                                    <th className="w-14 pb-1.5 pr-2 font-medium">景别</th>
+                                    <th className="w-10 pb-1.5 pr-2 font-medium">时长</th>
+                                    <th className="pb-1.5 pr-2 font-medium">画面描述</th>
+                                    <th className="w-14 pb-1.5 font-medium">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {beats.map((beat, index) => (
+                                    <tr key={beat.id} className="border-t align-top" style={{ borderColor: theme.toolbar.border }}>
+                                        <td className="py-2 pr-2 opacity-55">{index + 1}</td>
+                                        <td className="py-2 pr-2">{beat.shotType || "—"}</td>
+                                        <td className="py-2 pr-2">{beat.duration || "—"}</td>
+                                        <td className="py-2 pr-2">
+                                            <div className="font-medium">{beat.title}</div>
+                                            <div className="mt-0.5 line-clamp-2 leading-5 opacity-60">{beat.content}</div>
+                                        </td>
+                                        <td className="py-2">
+                                            <Button size="small" onClick={() => onCreateBeat(beat, index)} title={`生成「${beat.title}」分镜图片`}>
+                                                生成
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -5001,29 +5110,6 @@ function escapeSvgText(value: string) {
     return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char] || char);
 }
 
-function buildScriptBeats(body: string) {
-    const lines = body
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    const chunks = lines.length
-        ? lines
-        : body
-              .split(/[。！？.!?]+/)
-              .map((line) => line.trim())
-              .filter(Boolean);
-    const source = chunks.length ? chunks.slice(0, 6) : ["建立场景", "角色行动", "情绪高潮"];
-    return source.map((content, index) => {
-        const clean = content.replace(/^\d+[.、\s]*/, "");
-        const title = clean.match(/^([^：:]{2,18})[：:]/)?.[1] || `分镜 ${index + 1}`;
-        return {
-            id: `beat-${index + 1}`,
-            title,
-            content: clean,
-            prompt: `根据脚本分镜生成画面：${clean}。要求画面有清晰主体、镜头景别、动作和氛围，电影感构图。`,
-        };
-    });
-}
 
 function scriptStoryboardDataUrl(title: string, index: number) {
     const palettes = [
