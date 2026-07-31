@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video, Workflow } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "../types";
+import { CANVAS_SLASH_COMMANDS, type CanvasSlashCommand } from "../utils/canvas-workflow-template";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
@@ -30,11 +31,13 @@ type CanvasNodeHoverToolbarProps = {
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
     onSplit: (node: CanvasNodeData) => void;
-    onUpscale: (node: CanvasNodeData) => void;    onAngle: (node: CanvasNodeData) => void;
+    onUpscale: (node: CanvasNodeData) => void;
+    onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
+    onQuickStoryboard: (node: CanvasNodeData, command: CanvasSlashCommand) => void;
     onDelete: (node: CanvasNodeData) => void;
 };
 
@@ -66,11 +69,13 @@ export function CanvasNodeHoverToolbar({
     onMaskEdit,
     onCrop,
     onSplit,
-    onUpscale,    onAngle,
+    onUpscale,
+    onAngle,
     onViewImage,
     onReversePrompt,
     onRetry,
     onToggleFreeResize,
+    onQuickStoryboard,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -78,6 +83,7 @@ export function CanvasNodeHoverToolbar({
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
+    const [storyboardMenuOpen, setStoryboardMenuOpen] = useState(false);
     const { message } = App.useApp();
     const copyText = useCopyText();
     const colorTheme = useThemeStore((state) => state.theme);
@@ -146,6 +152,7 @@ export function CanvasNodeHoverToolbar({
         ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "editText", title: "编辑文本", label: "编辑文字", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
+        ...(isText || currentNode.metadata?.canvasTool === "script" ? [{ id: "quickStoryboard", title: "快捷分镜", label: "快捷分镜", icon: <LayoutGrid className="size-4" />, onClick: () => { onKeep(currentNode.id); setStoryboardMenuOpen((value) => !value); } }] : []),
         ...(isConfig ? [{ id: "config", title: "打开生成配置", label: "配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isComfyUi ? [{ id: "comfyui", title: "打开 ComfyUI", label: "ComfyUI", icon: <Workflow className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
@@ -196,6 +203,37 @@ export function CanvasNodeHoverToolbar({
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
+                {storyboardMenuOpen ? (
+                    <div
+                        className="absolute left-1/2 top-full z-[80] mt-2 w-56 -translate-x-1/2 rounded-xl border p-1.5 shadow-[0_14px_34px_rgba(0,0,0,.28)] backdrop-blur-xl"
+                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                        onPointerEnter={() => onKeep(currentNode.id)}
+                        onPointerLeave={() => setStoryboardMenuOpen(false)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                    >
+                        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium opacity-50">快捷分镜 · 按宫格生成</div>
+                        {CANVAS_SLASH_COMMANDS.map((command) => (
+                            <button
+                                key={command.id}
+                                type="button"
+                                className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-black/5 dark:hover:bg-white/10"
+                                style={{ color: theme.node.text }}
+                                onClick={() => {
+                                    setStoryboardMenuOpen(false);
+                                    onQuickStoryboard(currentNode, command);
+                                }}
+                            >
+                                <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10 text-[10px] font-bold">
+                                    {command.cols}×{command.rows}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className="block font-medium">{command.label}</span>
+                                    <span className="block truncate opacity-65">{command.description}</span>
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
             </div>
             {hasImage ? (
                 <ImageToolSettingsModal

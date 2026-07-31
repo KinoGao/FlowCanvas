@@ -2,7 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
-import { canvasSelectionCenter, cloneCanvasSelection } from "./canvas-workflow-template";
+import { CANVAS_SLASH_COMMANDS, canvasSelectionCenter, cloneCanvasSelection } from "./canvas-workflow-template";
+
+test("CANVAS_SLASH_COMMANDS defines consistent grid dimensions matching their labels", () => {
+    assert.deepEqual(
+        CANVAS_SLASH_COMMANDS.map((command) => [command.id, command.rows * command.cols]),
+        [
+            ["four-grid", 4],
+            ["nine-grid", 9],
+            ["twentyfive-grid", 25],
+        ],
+    );
+    for (const command of CANVAS_SLASH_COMMANDS) {
+        assert.ok(command.rows >= 1 && command.cols >= 1, `${command.id} grid must be positive`);
+    }
+});
 
 function node(id: string, type: CanvasNodeData["type"], position: { x: number; y: number }, width = 160, height = 120, storageKey?: string): CanvasNodeData {
     return {

@@ -26,7 +26,7 @@ import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image
 import { fitNodeSize, nodeSizeFromRatio, VIDEO_NODE_SIZE_RANGE } from "../utils/canvas-node-size";
 import { App, Button, Dropdown, Modal, message } from "antd";
 import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constants";
-import { CanvasConfigComposer, type CanvasSlashCommand } from "../components/canvas-config-composer";
+import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -49,7 +49,7 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
-import { canvasSelectionCenter, cloneCanvasSelection, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
+import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
@@ -4203,7 +4203,6 @@ function LeaferCanvasPage() {
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
                     onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
-                    onSlashCommand={(command) => createScriptGridStoryboard(panelNode, command)}
                     onClose={() => setDialogNodeId(null)}
                 />
             ) : (
@@ -4226,7 +4225,6 @@ function LeaferCanvasPage() {
             configInputsById,
             confirmStopGeneration,
             createScriptBeatNode,
-            createScriptGridStoryboard,
             createScriptNarrationNode,
             createScriptStoryboard,
             createScriptVideoNode,
@@ -4850,6 +4848,7 @@ function LeaferCanvasPage() {
                         onReversePrompt={createImageReversePromptNodes}
                         onRetry={handleRetryNodeAction}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
+                        onQuickStoryboard={(node, command) => createScriptGridStoryboard(node, command)}
                         onDelete={(node) => deleteNodes(new Set([node.id]))}
                     />
                 ) : null}

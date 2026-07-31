@@ -1,5 +1,19 @@
 import type { CanvasConnection, CanvasNodeData } from "../types";
 
+export type CanvasSlashCommand = {
+    id: "four-grid" | "nine-grid" | "twentyfive-grid";
+    label: string;
+    description: string;
+    rows: number;
+    cols: number;
+};
+
+export const CANVAS_SLASH_COMMANDS: CanvasSlashCommand[] = [
+    { id: "four-grid", label: "四宫格分镜", description: "2×2 剧情推演 / 连贯分镜", rows: 2, cols: 2 },
+    { id: "nine-grid", label: "九宫格分镜", description: "3×3 多机位连贯分镜", rows: 3, cols: 3 },
+    { id: "twentyfive-grid", label: "25 宫格分镜", description: "5×5 连贯分镜", rows: 5, cols: 5 },
+];
+
 export type CanvasWorkflowTemplate = {
     id: string;
     name: string;
