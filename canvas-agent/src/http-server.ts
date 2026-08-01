@@ -4,6 +4,10 @@ import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, pipelineManager, saveC
 import { CanvasSession } from "./canvas-session.js";
 import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
+import { getStages } from "./pipeline/stages.js";
+import { runQualityChecks } from "./pipeline/quality.js";
+import type { StageOutput } from "./pipeline/types.js";
+import { withClientStages } from "./pipeline/stages.js";
 
 export function startHttpServer() {
     const config = loadConfig(true);
@@ -100,28 +104,42 @@ export function startHttpServer() {
         const mode = validateMode(req.body?.mode);
         const config = (req.body?.config || {}) as Record<string, unknown>;
         const state = pipelineManager.create(mode, config);
-        session.emitAll("pipeline_update", { pipelineId: state.id, state });
-        res.json({ ok: true, pipelineId: state.id, state });
+        const serialized = withClientStages(state);
+        session.emitAll("pipeline_update", { pipelineId: state.id, state: serialized });
+        res.json({ ok: true, pipelineId: state.id, state: serialized });
     }));
     app.get("/pipeline/:id", route(async (req, res) => {
         const id = routeParam(req.params.id);
         const state = pipelineManager.get(id);
         if (!state) return res.status(404).json({ ok: false, error: "pipeline not found" });
-        res.json({ ok: true, state });
+        res.json({ ok: true, state: withClientStages(state) });
     }));
     app.post("/pipeline/:id/advance", route(async (req, res) => {
         const id = routeParam(req.params.id);
+        const state = pipelineManager.get(id);
+        if (!state) return res.status(404).json({ ok: false, error: "pipeline not found" });
+        if (state.status === "completed" || state.status === "failed" || state.status === "paused") {
+            return res.status(400).json({ ok: false, error: `pipeline is ${state.status}` });
+        }
+        const stage = getStages(state.mode).find((s) => s.name === state.currentStage);
+        if (!stage) return res.status(400).json({ ok: false, error: `unknown stage: ${state.currentStage}` });
         const summary = String(req.body?.summary || "");
         const nodeIds = Array.isArray(req.body?.nodeIds) ? req.body.nodeIds : [];
-        const state = pipelineManager.advance(id, { stageName: "", summary, nodeIds });
-        if (!state) return res.status(404).json({ ok: false, error: "pipeline not found or already completed" });
-        session.emitAll("pipeline_update", { pipelineId: id, state });
-        res.json({ ok: true, state });
+        const output: StageOutput = { stageName: state.currentStage, summary, nodeIds };
+        const check = runQualityChecks(stage, output, state.assets);
+        if (!check.pass) {
+            const reason = check.reason || "质量门未通过";
+            return res.status(400).json({ ok: false, error: `quality gate failed: ${reason}`, reason });
+        }
+        const next = pipelineManager.advance(id, output);
+        const serialized = withClientStages(next);
+        session.emitAll("pipeline_update", { pipelineId: id, state: serialized });
+        res.json({ ok: true, state: serialized });
     }));
     app.use((_req, res) => res.status(404).json({ ok: false, error: "not found" }));
     app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => res.status(500).json({ ok: false, error: error.message }));
 
-    app.listen(port, "127.0.0.1", () => {
+    return app.listen(port, "127.0.0.1", () => {
         console.log("Infinite Canvas Agent");
         console.log(`Local URL: ${config.url}`);
         console.log(`Connect token: ${config.token}`);

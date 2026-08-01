@@ -48,6 +48,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import { updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import {
@@ -883,12 +884,31 @@ function LeaferCanvasPage() {
     const saveCanvasGenerationJobs = useCallback(
         async (jobs: ReadonlyMap<string, string>) => {
             if (!jobs.size) return;
+            const startedAt = Date.now();
             await new Promise<void>((resolve) => {
                 setNodes((prev) => {
                     const next = prev.map((node) => {
                         const generationJobId = jobs.get(node.id);
                         return generationJobId
-                            ? { ...node, metadata: { ...node.metadata, generationJobId, status: NODE_STATUS_LOADING, errorDetails: undefined } }
+                            ? {
+                                  ...node,
+                                  metadata: {
+                                      ...node.metadata,
+                                      generationJobId,
+                                      status: NODE_STATUS_LOADING,
+                                      errorDetails: undefined,
+                                      generationRuns: upsertCanvasGenerationRun(node.metadata?.generationRuns, {
+                                          id: generationJobId,
+                                          status: "running",
+                                          startedAt: node.metadata?.generationRuns?.find((run) => run.id === generationJobId)?.startedAt || startedAt,
+                                          updatedAt: startedAt,
+                                          prompt: node.metadata?.requestPrompt || node.metadata?.prompt || node.metadata?.composerContent,
+                                          model: node.metadata?.model,
+                                          mode: node.metadata?.generationMode,
+                                          errorDetails: undefined,
+                                      }),
+                                  },
+                              }
                             : node;
                     });
                     updateProject(projectId, { nodes: next });
@@ -907,6 +927,24 @@ function LeaferCanvasPage() {
         },
         [projectId, saveMode, token, updateProject],
     );
+
+    useEffect(() => {
+        setNodes((prev) => {
+            let changed = false;
+            const nextNodes = prev.map((node) => {
+                const activeRun = node.metadata?.generationRuns?.find((run) => run.status === "running");
+                if (!activeRun || node.metadata?.status === NODE_STATUS_LOADING) return node;
+                changed = true;
+                const status = node.metadata?.status === NODE_STATUS_ERROR
+                    ? "failed"
+                    : node.metadata?.status === NODE_STATUS_IDLE
+                      ? "cancelled"
+                      : "succeeded";
+                return { ...node, metadata: updateCanvasGenerationRun(node.metadata, activeRun.id, status, Date.now(), node.metadata?.errorDetails) };
+            });
+            return changed ? nextNodes : prev;
+        });
+    }, [nodes]);
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         const affectedNodeIds = new Set<string>();
@@ -4219,6 +4257,10 @@ function LeaferCanvasPage() {
                         setNodeImageSettingsOpen(open);
                         if (open) setToolbarNodeId(null);
                     }}
+                    onRetry={(nodeId) => {
+                        const retryNode = nodesRef.current.find((item) => item.id === nodeId);
+                        if (retryNode) void handleRetryNode(retryNode);
+                    }}
                 />
             ),
         [
@@ -4231,6 +4273,7 @@ function LeaferCanvasPage() {
             handleConfigNodeChange,
             handleGenerateNode,
             handleNodePromptChange,
+            handleRetryNode,
             mentionReferencesByNodeId,
             removeNodeReference,
             runningNodeId,

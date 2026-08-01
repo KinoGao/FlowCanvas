@@ -30,6 +30,17 @@ export enum CanvasNodeType {
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "comfyui";
 export type CanvasImageGenerationType = "generation" | "edit";
+export type CanvasGenerationRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+export type CanvasGenerationRun = {
+    id: string;
+    status: CanvasGenerationRunStatus;
+    startedAt: number;
+    updatedAt: number;
+    prompt?: string;
+    model?: string;
+    mode?: CanvasGenerationMode;
+    errorDetails?: string;
+};
 export type CanvasNodeActionIntent =
     | "text-to-video"
     | "text-to-audio"
@@ -94,6 +105,7 @@ export type CanvasGenerationMetadata = {
     videoTask?: { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
     videoTaskStartedAt?: number;
     generationJobId?: string;
+    generationRuns?: CanvasGenerationRun[];
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

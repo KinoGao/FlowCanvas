@@ -9,7 +9,7 @@ import { motion } from "motion/react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type PipelineInfo } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMode, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type PipelineInfo } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 
@@ -227,7 +227,7 @@ export function CanvasLocalAgentPanel({
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, pipelineId: useCanvasAgentStore.getState().pipelineId || undefined }),
+                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, pipelineId: shouldSendPipelineId(useCanvasAgentStore.getState().agentMode) ? useCanvasAgentStore.getState().pipelineId || undefined : undefined }),
             });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
@@ -607,7 +607,11 @@ export function CanvasLocalAgentPanel({
                             setAgentState({ agentMode: mode, storySkill: null, artSkill: null });
                             localStorage.removeItem("canvas-agent-story-skill");
                             localStorage.removeItem("canvas-agent-art-skill");
-                            if (mode !== "default") void createPipeline(mode);
+                            if (mode === "default") {
+                                setAgentState({ pipelineId: null, pipeline: null });
+                            } else {
+                                void createPipeline(mode);
+                            }
                         }}
                         onStorySkillChange={(skill) => {
                             localStorage.setItem("canvas-agent-story-skill", skill || "");
@@ -1264,6 +1268,14 @@ const ART_SKILL_OPTIONS = [
     { label: "真人现代都市", value: "realpeople_modern_city" },
     { label: "真人都市现代", value: "realpeople_urban_modern" },
 ];
+
+export function shouldResetPipeline(mode: AgentMode): boolean {
+    return mode === "default";
+}
+
+export function shouldSendPipelineId(mode: AgentMode): boolean {
+    return mode !== "default";
+}
 
 function AgentModeBar({
     mode,

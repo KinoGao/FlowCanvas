@@ -5,8 +5,12 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { AGENT_PROMPT, buildAgentPrompt, pipelineManager, VERSION, type AgentMode, type PromptBuildOptions } from "./config.js";
+import { AGENT_PROMPT, buildAgentPrompt, pipelineManager, VERSION } from "./config.js";
+import type { AgentMode, PromptBuildOptions } from "./prompts/builder.js";
 import type { AgentAttachment, AgentEmit } from "./types.js";
+import { detectStageComplete, runQualityChecks } from "./pipeline/quality.js";
+import { getStages, withClientStages } from "./pipeline/stages.js";
+import type { ConsistencyAssets, StageOutput } from "./pipeline/types.js";
 
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
@@ -41,23 +45,116 @@ async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: Age
         let fullPrompt = withAgentPrompt(prompt, options.mode, skillOptions);
         currentSystemPrompt = options.mode ? buildAgentPrompt(options.mode, skillOptions) : AGENT_PROMPT;
 
-        // 注入流水线上下文
+        // 注入流水线上下文（校验 turn 模式与流水线模式一致；不一致不注入，default 绝不被 pipeline 上下文污染）
         if (options.pipelineId) {
-            const pipelinePrompt = pipelineManager.buildPrompt(options.pipelineId);
-            if (pipelinePrompt) {
-                fullPrompt = `${pipelinePrompt}\n\n${fullPrompt}`;
+            const pipelineState = pipelineManager.get(options.pipelineId);
+            if (pipelineState && shouldInjectPipelineContext(options.mode, pipelineState.mode)) {
+                const pipelinePrompt = pipelineManager.buildPrompt(options.pipelineId);
+                if (pipelinePrompt) {
+                    fullPrompt = `${pipelinePrompt}\n\n${fullPrompt}`;
+                }
             }
         }
 
         files = await writeAttachmentFiles(attachments);
         codexApp ||= await CodexAppClient.start(emit);
         const threadId = await ensureCodexThread(codexApp, options);
-        await codexApp.startTurn(threadId, fullPrompt, files);
+        const result = await codexApp.startTurn(threadId, fullPrompt, files);
+        // 自动推进链路：turn 完成后聚合全文，检测 [STAGE_COMPLETE:xxx] 标记并推进流水线
+        await maybeAdvancePipeline(emit, options.pipelineId, result.replyText);
     } catch (error) {
         emit("agent_error", { message: errorMessage(error) });
     } finally {
         await Promise.all(files.map((file) => fs.unlink(file).catch(() => undefined)));
     }
+}
+
+/** turn 模式与流水线模式一致时才注入流水线上下文；default/未指定模式绝不被 pipeline 上下文污染 */
+export function shouldInjectPipelineContext(mode: AgentMode | undefined, pipelineMode: AgentMode | undefined): boolean {
+    if (!mode || !pipelineMode) return false;
+    return mode === pipelineMode;
+}
+
+/**
+ * 自动推进链路：Agent turn 完成后，聚合该 turn 的 agent_message 全文，
+ * 用 detectStageComplete 检测 [STAGE_COMPLETE:xxx] 标记；命中则提取产出，
+ * 经质量门校验后调用 pipelineManager.advance 推进，并通过 emit 推送 pipeline_update。
+ */
+export async function maybeAdvancePipeline(emit: AgentEmit, pipelineId: string | undefined, replyText: string): Promise<void> {
+    if (!pipelineId || !replyText.trim()) return;
+    const state = pipelineManager.get(pipelineId);
+    if (!state || state.status === "paused" || state.status === "completed" || state.status === "failed") return;
+    const stage = getStages(state.mode).find((s) => s.name === state.currentStage);
+    if (!stage) return;
+    if (!detectStageComplete(stage.name, replyText)) return;
+
+    const output = extractStageOutput(stage.name, replyText);
+    const check = runQualityChecks(stage, output, state.assets);
+    if (!check.pass) {
+        const reason = check.reason || "质量门未通过";
+        emit("pipeline_failed", { pipelineId, state, reason });
+        emit("agent_error", { message: `流水线阶段「${stage.name}」质量门未通过：${reason}，未推进。` });
+        return;
+    }
+    const next = pipelineManager.advance(pipelineId, output);
+    emit("pipeline_update", { pipelineId, state: withClientStages(next) });
+}
+
+/** 从回复文本提取阶段产出：支持 [STAGE_SUMMARY:...] / [STAGE_NODES:...] / [STAGE_ASSETS:{json}]，缺省用全文兜底。 */
+function extractStageOutput(stageName: string, replyText: string): StageOutput {
+    const summary = markerValue(replyText, "STAGE_SUMMARY") ?? replyText.trim();
+    const nodeIds = (markerValue(replyText, "STAGE_NODES") || "")
+        .split(/[,，\s]+/)
+        .map((id) => id.trim())
+        .filter(Boolean);
+    const assets = parseStageAssets(replyText);
+    return { stageName, summary, nodeIds, assets };
+}
+
+function markerValue(text: string, key: string): string | undefined {
+    const match = text.match(new RegExp(`\\[${key}:([^\\]]*)\\]`));
+    return match?.[1]?.trim() || undefined;
+}
+
+/**
+ * 从回复文本中提取 [STAGE_ASSETS:{...}] 的资产声明 JSON。
+ * 资产 JSON 内含嵌套数组（characters/scenes/props）与字符串转义，
+ * 不能用「直到第一个 ] 为止」的正则截取（会在数组结束符处截断导致 JSON.parse 失败），
+ * 这里按花括号深度 + 字符串状态扫描，取与起始 { 配对的完整 JSON 再解析。
+ */
+function parseStageAssets(raw: string | undefined): Partial<ConsistencyAssets> | undefined {
+    if (!raw) return undefined;
+    const marker = "[STAGE_ASSETS:";
+    const start = raw.indexOf(marker);
+    if (start < 0) return undefined;
+    const braceStart = start + marker.length;
+    if (raw[braceStart] !== "{") return undefined;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = braceStart; i < raw.length; i++) {
+        const ch = raw[i];
+        if (inString) {
+            if (escaped) { escaped = false; continue; }
+            if (ch === "\\") { escaped = true; continue; }
+            if (ch === '"') inString = false;
+            continue;
+        }
+        if (ch === '"') { inString = true; continue; }
+        if (ch === "{") { depth++; continue; }
+        if (ch === "}") {
+            depth--;
+            if (depth === 0) {
+                try {
+                    const value = JSON.parse(raw.slice(braceStart, i + 1)) as Partial<ConsistencyAssets>;
+                    return value && typeof value === "object" ? value : undefined;
+                } catch {
+                    return undefined;
+                }
+            }
+        }
+    }
+    return undefined;
 }
 
 export async function startCodexThread(emit: AgentEmit, cwd?: string) {
@@ -136,7 +233,8 @@ class CodexAppClient {
     private lastUsage: unknown = null;
     private pending = new Map<number, PendingRequest>();
     private activeTurns = new Map<string, PendingRequest>();
-    private completedTurns = new Map<string, Error | null>();
+    private completedTurns = new Map<string, { error: Error | null; replyText: string }>();
+    private turnItemIds = new Set<string>();
 
     private constructor(private child: ChildProcess, private emit: AgentEmit) {}
 
@@ -185,17 +283,19 @@ class CodexAppClient {
         return this.request("thread/archive", { threadId });
     }
 
-    async startTurn(threadId: string, prompt: string, images: string[]) {
+    async startTurn(threadId: string, prompt: string, images: string[]): Promise<{ replyText: string }> {
         const result = await this.request("turn/start", { threadId, input: codexInput(prompt, images), approvalPolicy: "never" });
         const turnId = String(field(field(result, "turn"), "id") || "");
         if (!turnId) throw new Error("Codex app-server 没有返回 turn id");
         const completed = this.completedTurns.get(turnId);
         if (this.completedTurns.has(turnId)) {
             this.completedTurns.delete(turnId);
-            if (completed) throw completed;
-            return;
+            if (completed?.error) throw completed.error;
+            return { replyText: completed?.replyText || "" };
         }
-        await new Promise((resolve, reject) => this.activeTurns.set(turnId, { resolve, reject }));
+        const value = await new Promise<unknown>((resolve, reject) => this.activeTurns.set(turnId, { resolve, reject }));
+        const replyText = value && typeof value === "object" ? String((value as { replyText?: unknown }).replyText || "") : "";
+        return { replyText };
     }
 
     private request(method: string, params: unknown) {
@@ -234,8 +334,14 @@ class CodexAppClient {
     }
 
     private handleNotification(method: string, params: Json) {
-        if (method === "item/agentMessage/delta") return this.emitDelta(params);
+        if (method === "item/agentMessage/delta") {
+            this.emitDelta(params);
+            const itemId = String(field(params, "itemId") || "");
+            if (itemId) this.turnItemIds.add(itemId);
+            return;
+        }
         if (method === "thread/tokenUsage/updated") this.lastUsage = normalizeUsage(params);
+        if (method === "turn/started") this.turnItemIds = new Set();
         const event = normalizeCodexNotification(method, params);
         if (!event) return;
         if (event.type === "turn.completed") event.usage = this.lastUsage;
@@ -244,16 +350,44 @@ class CodexAppClient {
             const turnId = String(field(params, "turnId") || field(field(params, "turn"), "id") || "");
             const pending = this.activeTurns.get(turnId);
             const error = field(field(params, "turn"), "error");
+            const replyText = this.turnReplyText(params);
+            this.pruneTurnTexts();
             if (pending) {
                 this.activeTurns.delete(turnId);
-                error ? pending.reject(new Error(String(field(error, "message") || "Codex turn failed"))) : pending.resolve(event);
+                if (error) pending.reject(new Error(String(field(error, "message") || "Codex turn failed")));
+                else pending.resolve({ replyText });
             } else if (turnId) {
-                this.completedTurns.set(turnId, error ? new Error(String(field(error, "message") || "Codex turn failed")) : null);
+                this.completedTurns.set(turnId, {
+                    error: error ? new Error(String(field(error, "message") || "Codex turn failed")) : null,
+                    replyText,
+                });
             }
             this.emit("agent_event", { agent: "codex", type: "stream.summary", delta_count: this.deltaCount });
             this.deltaCount = 0;
             this.emit("agent_done", { agent: "codex", usage: event.usage });
         }
+    }
+
+    /** 聚合当前 turn 的 agent_message 全文：优先 turn items，兜底 delta 聚合的 textByItem。 */
+    private turnReplyText(params: Json): string {
+        const turn = field(params, "turn") as Json | undefined;
+        const texts: string[] = [];
+        for (const item of arrayValue(field(turn, "items"))) {
+            if (String(field(item, "type") || "") === "agentMessage") {
+                const text = String(field(item, "text") || "").trim();
+                if (text) texts.push(text);
+            }
+        }
+        if (texts.length) return texts.join("\n");
+        return [...this.turnItemIds]
+            .map((id) => this.textByItem.get(id) || "")
+            .filter((text) => text.trim())
+            .join("\n");
+    }
+
+    private pruneTurnTexts() {
+        for (const id of this.turnItemIds) this.textByItem.delete(id);
+        this.turnItemIds = new Set();
     }
 
     private emitDelta(params: Json) {

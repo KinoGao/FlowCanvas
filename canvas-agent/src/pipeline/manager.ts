@@ -8,7 +8,8 @@ import {
   type ProjectConfig,
   type StageOutput,
 } from "./types.js";
-import { getStages, type PipelineStage } from "./stages.js";
+import { getStages } from "./stages.js";
+import type { PipelineStage } from "./types.js";
 import { emptyAssets, loadPipeline, savePipeline } from "./state.js";
 
 export class PipelineManager {
@@ -128,7 +129,8 @@ export class PipelineManager {
         ? `\n场景资产：\n${state.assets.scenes.map((s) => `  - ${s.name}：${s.description}`).join("\n")}`
         : "",
       "",
-      "完成后请在回复末尾添加 [STAGE_COMPLETE] 标记。",
+      "完成后请在回复末尾添加 [STAGE_COMPLETE:xxx] 标记，并用 [STAGE_NODES:节点ID,节点ID] 声明本阶段创建的画布节点，可用 [STAGE_SUMMARY:阶段摘要] 说明产出。",
+      '当本阶段产出提炼出角色/场景/道具等一致性资产时，请用 [STAGE_ASSETS:{"characters":[{"name":"角色名","description":"角色描述"}],"scenes":[{"name":"场景名","description":"场景描述","styleKeywords":["关键词"]}],"props":[{"name":"道具名","description":"道具描述"}],"storyContext":"故事背景","styleAnchor":"全局风格锚定词"}] 声明（JSON 格式，可只含实际产出的字段，无产出的字段可省略）。',
     ]
       .filter(Boolean)
       .join("\n");

@@ -1,4 +1,4 @@
-import type { PipelineStage } from "./types.js";
+import type { PipelineStage, PipelineState } from "./types.js";
 
 export const SCRIPT_STAGES: PipelineStage[] = [
   {
@@ -119,6 +119,27 @@ export function getStages(mode: string): PipelineStage[] {
   if (mode === "script") return SCRIPT_STAGES;
   if (mode === "production") return PRODUCTION_STAGES;
   return [];
+}
+
+/** 客户端进度条消费的阶段信息（含完成标记） */
+export type ClientStageInfo = {
+  name: string;
+  order: number;
+  completed: boolean;
+};
+
+/** 由 getStages(mode) 生成 {name, order, completed}，供前端 formatPipelineInfo 渲染进度条 */
+export function toClientStages(mode: string, completedStages: string[]): ClientStageInfo[] {
+  return getStages(mode).map((s) => ({
+    name: s.name,
+    order: s.order,
+    completed: completedStages.includes(s.name),
+  }));
+}
+
+/** 为 state 附加 stages 数组（保持原有字段不动），用于 HTTP 响应与 pipeline_update 推送 */
+export function withClientStages(state: PipelineState): PipelineState & { stages: ClientStageInfo[] } {
+  return { ...state, stages: toClientStages(state.mode, state.completedStages) };
 }
 
 export function getStage(mode: string, name: string): PipelineStage | undefined {

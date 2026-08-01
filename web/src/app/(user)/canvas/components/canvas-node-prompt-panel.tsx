@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, Clock3, FileText, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, Sparkles, Square, Tag, TriangleAlert, WandSparkles } from "lucide-react";
+import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, WandSparkles } from "lucide-react";
 import { App, Button, Popover, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -14,7 +14,7 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasReferenceStrip } from "./canvas-reference-strip";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasGenerationRun, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
@@ -34,12 +34,13 @@ type CanvasNodePromptPanelProps = {
     mentionReferences?: CanvasResourceReference[];
     onRemoveReference?: (nodeId: string, referenceNodeId: string) => void;
     onImageSettingsOpenChange?: (open: boolean) => void;
+    onRetry?: (nodeId: string) => void;
 };
 
 type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "mode" | "advanced" | null;
 type ImageComposerMenu = "style" | null;
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onImageSettingsOpenChange, onRetry }: CanvasNodePromptPanelProps) {
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -80,6 +81,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const videoPromptOptional = mode === "video"
         && selectedVideoMode !== "text-to-video"
         && activeReferenceCounts.image + activeReferenceCounts.video + activeReferenceCounts.audio > 0;
+    const generationRuns = node.metadata?.generationRuns || [];
     useEffect(() => {
         onPromptChangeRef.current = onPromptChange;
         onConfigChangeRef.current = onConfigChange;
@@ -192,6 +194,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 onMissingConfig={() => openConfigDialog(true)}
                 onGenerate={submit}
                 onStop={() => onStop(node.id)}
+                generationRuns={generationRuns}
+                onRetry={onRetry ? () => onRetry(node.id) : undefined}
             />
         );
     }
@@ -220,6 +224,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 }}
                 onGenerate={submit}
                 onStop={() => onStop(node.id)}
+                generationRuns={generationRuns}
+                onRetry={onRetry ? () => onRetry(node.id) : undefined}
             />
         );
     }
@@ -232,6 +238,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
+            <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry ? () => onRetry(node.id) : undefined} />
             <div className="relative">
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -318,6 +325,8 @@ type ImageComposerProps = {
     onSettingsOpenChange: (open: boolean) => void;
     onGenerate: () => void;
     onStop: () => void;
+    generationRuns: CanvasGenerationRun[];
+    onRetry?: () => void;
 };
 
 function ImageComposer({
@@ -339,6 +348,8 @@ function ImageComposer({
     onSettingsOpenChange,
     onGenerate,
     onStop,
+    generationRuns,
+    onRetry,
 }: ImageComposerProps) {
     const activeReferences = references.filter((reference) => reference.active);
     const selectedStyle = IMAGE_STYLE_PRESETS.find((item) => item.id === node.metadata?.imageStylePreset) || IMAGE_STYLE_PRESETS[0];
@@ -355,6 +366,7 @@ function ImageComposer({
                 if (!event.ctrlKey && !event.metaKey) event.stopPropagation();
             }}
         >
+            <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry} />
             <CanvasReferenceStrip
                 references={activeReferences}
                 variant="media"
@@ -483,6 +495,8 @@ type VideoComposerProps = {
     onMissingConfig: () => void;
     onGenerate: () => void;
     onStop: () => void;
+    generationRuns: CanvasGenerationRun[];
+    onRetry?: () => void;
 };
 
 function VideoComposer({
@@ -507,6 +521,8 @@ function VideoComposer({
     onMissingConfig,
     onGenerate,
     onStop,
+    generationRuns,
+    onRetry,
 }: VideoComposerProps) {
     const ratios = capability ? videoRatiosForMode(capability, selectedMode) : [];
     const currentRatio = ratios.includes(normalizeSeedanceRatio(config.size)) ? normalizeSeedanceRatio(config.size) : ratios[0];
@@ -536,6 +552,7 @@ function VideoComposer({
                 if (!event.ctrlKey && !event.metaKey) event.stopPropagation();
             }}
         >
+            <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry} />
             <CanvasReferenceStrip
                 references={activeReferences}
                 variant="media"
@@ -763,6 +780,71 @@ function ComposerPopover({ open, onOpenChange, content, children }: { open: bool
             <span className="inline-flex shrink-0">{children}</span>
         </Popover>
     );
+}
+
+function GenerationRunStrip({ runs, theme, onRetry }: { runs: CanvasGenerationRun[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onRetry?: () => void }) {
+    const latest = runs[0];
+    if (!latest) return null;
+
+    const statusLabel = latest.status === "running" ? "运行中" : latest.status === "succeeded" ? "已完成" : latest.status === "failed" ? "失败" : "已停止";
+    const statusIcon = latest.status === "running"
+        ? <LoaderCircle className="size-3.5 animate-spin" />
+        : latest.status === "succeeded"
+          ? <CircleCheck className="size-3.5" />
+          : latest.status === "failed"
+            ? <CircleX className="size-3.5" />
+            : <RotateCcw className="size-3.5" />;
+    const statusColor = latest.status === "failed" ? theme.ui.danger : latest.status === "succeeded" ? theme.ui.accent : theme.node.text;
+
+    return (
+        <div className="mb-2 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px]" style={{ background: theme.ui.controlFill, borderColor: theme.ui.hairline, color: theme.node.muted }}>
+            <span className="flex shrink-0 items-center gap-1.5" style={{ color: statusColor }}>
+                {statusIcon}
+                <span className="font-medium">{statusLabel}</span>
+            </span>
+            {latest.status === "running" ? <span className="truncate opacity-70">刷新页面后会继续处理</span> : latest.model ? <span className="min-w-0 truncate opacity-60">{latest.model}</span> : null}
+            <Popover
+                trigger="click"
+                placement="topLeft"
+                arrow={false}
+                content={
+                    <div className="w-[300px] max-w-[calc(100vw-32px)]" style={{ color: theme.node.text }}>
+                        <div className="mb-2 flex items-center justify-between px-1 text-xs font-semibold">
+                            <span>最近运行</span>
+                            <span className="font-normal opacity-50">{runs.length} 条</span>
+                        </div>
+                        <div className="grid gap-1">
+                            {runs.map((run) => (
+                                <div key={run.id} className="rounded-md border px-2.5 py-2" style={{ background: theme.ui.controlFill, borderColor: theme.ui.hairline }}>
+                                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                                        <span className="font-medium">{run.status === "running" ? "运行中" : run.status === "succeeded" ? "已完成" : run.status === "failed" ? "失败" : "已停止"}</span>
+                                        <time className="opacity-50">{formatGenerationRunTime(run.updatedAt)}</time>
+                                    </div>
+                                    {run.model ? <div className="mt-1 truncate text-[10px] opacity-55">{run.model}</div> : null}
+                                    {run.errorDetails ? <div className="mt-1 line-clamp-2 text-[10px] leading-4" style={{ color: theme.ui.danger }}>{run.errorDetails}</div> : null}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                }
+            >
+                <button type="button" className="ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 opacity-70 transition hover:opacity-100" style={{ color: theme.node.text }} aria-label="查看最近运行记录">
+                    <History className="size-3.5" />
+                    <span>{runs.length}</span>
+                </button>
+            </Popover>
+            {latest.status === "failed" && onRetry ? (
+                <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 font-medium transition hover:opacity-75" style={{ color: theme.ui.accent }} onClick={onRetry}>
+                    <RotateCcw className="size-3.5" />
+                    <span>重试</span>
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+function formatGenerationRunTime(timestamp: number) {
+    return new Date(timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 function ComposerToolbarButton({ icon, label, active, disabled, theme, compact = false }: { icon: ReactNode; label: string; active?: boolean; disabled?: boolean; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; compact?: boolean }) {

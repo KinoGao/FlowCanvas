@@ -593,7 +593,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
     if (isGenerationConfigNode(props.node.type) && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type] ?? UnknownNodeContent;
@@ -649,7 +649,7 @@ function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererPr
     );
 }
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
     return (
         <div
             role="status"
@@ -666,6 +666,10 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
             <div aria-hidden className="canvas-generation-loading-dots absolute inset-0" />
             <div aria-hidden className="canvas-generation-loading-dot-mask absolute inset-0" />
             <div aria-hidden className="canvas-generation-loading-shimmer absolute inset-0" />
+            <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center" style={{ color: theme.node.text }}>
+                <span className="text-xs font-medium tracking-wide">任务运行中</span>
+                {node.metadata?.generationJobId ? <span className="text-[10px] opacity-60">刷新页面后会继续处理</span> : null}
+            </div>
         </div>
     );
 }
@@ -1097,8 +1101,8 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     const hasMedia = props.node.metadata?.content || props.node.metadata?.storageKey;
     if (!hasMedia && props.isBatchRoot) {
         const content =
-            props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} />
+                props.node.metadata?.status === "loading" ? (
+                <LoadingContent node={props.node} theme={props.theme} />
             ) : props.node.metadata?.status === "error" ? (
                 <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (
