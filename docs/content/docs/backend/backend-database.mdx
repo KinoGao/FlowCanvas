@@ -125,6 +125,20 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `updated_at` | TIMESTAMP | 项目更新时间 |
 | `deleted_at` | TIMESTAMP nullable | 软删除时间；账号同步删除画布时写入，接口默认不返回已软删除项目 |
 
+### canvas_templates 表
+
+按用户保存画布工作流模板（前端 `CanvasWorkflowTemplate`：`{ id, name, createdAt, nodes, connections }`）。`nodes_json` 与 `connections_json` 分别保存节点数组（`CanvasNodeData[]`）与连线数组（`CanvasConnection[]`）的 JSON 序列化，后端不解析节点内部结构。接口：`GET /api/canvas-templates` 返回当前账号模板列表（按更新时间倒序），`POST /api/canvas-templates` 保存模板（校验 `name` 非空、`nodes`/`connections` 为合法 JSON 数组），`DELETE /api/canvas-templates/{id}` 仅删除当前账号自己的模板。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 模板 ID |
+| `user_id` | VARCHAR (FK) | 所属用户，接口按账号隔离 |
+| `name` | VARCHAR | 模板名称 |
+| `nodes_json` | TEXT | 节点数组 JSON |
+| `connections_json` | TEXT | 连线数组 JSON |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
+
 ### assets 表
 
 按用户保存素材库条目。素材文件本体通过 `user_files` 落盘，素材条目中的 `storageKey` 指向对应文件。

@@ -11,6 +11,7 @@ import type { CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 export function CanvasWorkflowToolbox({
     open,
     templates,
+    loading = false,
     selectedCount,
     onClose,
     onSaveSelection,
@@ -19,9 +20,10 @@ export function CanvasWorkflowToolbox({
 }: {
     open: boolean;
     templates: CanvasWorkflowTemplate[];
+    loading?: boolean;
     selectedCount: number;
     onClose: () => void;
-    onSaveSelection: (name: string) => CanvasWorkflowTemplate | null;
+    onSaveSelection: (name: string) => Promise<CanvasWorkflowTemplate | null>;
     onInsert: (template: CanvasWorkflowTemplate) => void;
     onDelete: (templateId: string) => void;
 }) {
@@ -37,9 +39,9 @@ export function CanvasWorkflowToolbox({
         }
     }, [open]);
 
-    const save = () => {
+    const save = async () => {
         if (!selectedCount) return;
-        const template = onSaveSelection(name || "");
+        const template = await onSaveSelection(name || "");
         if (template) setCreatedId(template.id);
     };
 
@@ -54,7 +56,7 @@ export function CanvasWorkflowToolbox({
             <div className="thin-scrollbar max-h-[320px] space-y-2 overflow-y-auto pr-1">
                 {!templates.length ? (
                     <div className="rounded-lg border border-dashed py-8 text-center text-xs opacity-55" style={{ borderColor: theme.toolbar.border }}>
-                        还没有模板。选中画布上的一组节点后，输入名称点「保存选中」。
+                        {loading ? "正在加载模板..." : "还没有模板。选中画布上的一组节点后，输入名称点「保存选中」。"}
                     </div>
                 ) : (
                     templates.map((template) => (

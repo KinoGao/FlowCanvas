@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/app/(user)/canvas/types";
+import type { CanvasConnection, CanvasNodeData, CanvasNodeType } from "@/app/(user)/canvas/types";
 import type { CanvasWorkflowTemplate } from "@/app/(user)/canvas/utils/canvas-workflow-template";
-import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "./canvas-templates";
+import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "@/services/api/canvas-templates";
 
 type FetchCall = { url: string; init?: RequestInit };
 
 function installFetchMock(handler: (call: FetchCall) => { status?: number; code?: number; data?: unknown; msg?: string }) {
     const calls: FetchCall[] = [];
     const originalFetch = globalThis.fetch;
-    // @ts-expect-error 测试桩替换全局 fetch
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const call: FetchCall = { url: String(input), init };
         calls.push(call);
@@ -34,7 +33,7 @@ function authHeader(init?: RequestInit): Record<string, string> {
 
 function templateFixture(): CanvasWorkflowTemplate {
     const nodes: CanvasNodeData[] = [
-        { id: "n1", type: CanvasNodeType.Text, title: "标题", position: { x: 0, y: 0 }, width: 160, height: 120 },
+        { id: "n1", type: "text" as CanvasNodeType, title: "标题", position: { x: 0, y: 0 }, width: 160, height: 120 },
     ];
     const connections: CanvasConnection[] = [{ id: "c1", fromNodeId: "n1", toNodeId: "n2" }];
     return { id: "tpl-1", name: "分镜模板", createdAt: "2026-01-01T00:00:00Z", nodes, connections };
@@ -52,7 +51,7 @@ test("listCanvasTemplates 发起 GET 并带 Bearer 鉴权头，返回模板数�
         assert.equal(items.length, 1);
         assert.equal(items[0].id, "tpl-1");
         assert.equal(items[0].name, "分镜模板");
-        assert.equal(items[0].nodes[0].type, CanvasNodeType.Text);
+        assert.equal(items[0].nodes[0].type, "text");
     } finally {
         mock.restore();
     }

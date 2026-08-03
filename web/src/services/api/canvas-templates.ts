@@ -1,7 +1,7 @@
 import { apiUrl } from "@/constant/env";
 import type { CanvasWorkflowTemplate } from "@/app/(user)/canvas/utils/canvas-workflow-template";
 import type { CanvasConnection, CanvasNodeData } from "@/app/(user)/canvas/types";
-import { ApiError, bearerHeaders } from "./auth";
+import { ApiError, bearerHeaders } from "@/services/api/auth";
 
 /**
  * 账号级画布工作流模板客户端。

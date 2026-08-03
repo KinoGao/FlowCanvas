@@ -11,6 +11,7 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask, type VideoGenerationTask } from "@/services/api/video";
 import { pushBackendProjects } from "@/services/api/backend-storage";
+import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "@/services/api/canvas-templates";
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -636,10 +637,26 @@ function LeaferCanvasPage() {
         const p = state.projects.find((project) => project.id === projectId);
         return p?.title || "";
     });
-    const workflowTemplates = useCanvasStore((state) => {
-        const p = state.projects.find((project) => project.id === projectId);
-        return p?.workflowTemplates ?? [];
-    });
+    const [workflowTemplates, setWorkflowTemplates] = useState<CanvasWorkflowTemplate[]>([]);
+    const [workflowTemplatesLoading, setWorkflowTemplatesLoading] = useState(false);
+    useEffect(() => {
+        if (!backendWorkspaceReady || !token) return;
+        let cancelled = false;
+        setWorkflowTemplatesLoading(true);
+        listCanvasTemplates(token)
+            .then((items) => {
+                if (!cancelled) setWorkflowTemplates(items);
+            })
+            .catch(() => {
+                if (!cancelled) message.error("加载模板列表失败，请稍后重试");
+            })
+            .finally(() => {
+                if (!cancelled) setWorkflowTemplatesLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [backendWorkspaceReady, token]);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     useEffect(() => {
@@ -1859,7 +1876,8 @@ function LeaferCanvasPage() {
     }, []);
 
     const saveSelectionAsTemplate = useCallback(
-        (name: string) => {
+        async (name: string) => {
+            if (!token) return null;
             const selectedIds = selectedNodeIdsRef.current;
             if (!selectedIds.size) return null;
             const templateNodes = nodesRef.current.filter((node) => selectedIds.has(node.id));
@@ -1875,19 +1893,21 @@ function LeaferCanvasPage() {
                 .filter((connection) => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId))
                 .map((connection) => ({ ...connection }));
 
-            const template: CanvasWorkflowTemplate = {
-                id: nanoid(),
-                name: name.trim() || `模板 ${workflowTemplates.length + 1}`,
-                createdAt: new Date().toISOString(),
-                nodes: normalizedNodes,
-                connections: templateConnections,
-            };
-            const nextTemplates = [...workflowTemplates, template];
-            updateProject(projectId, { workflowTemplates: nextTemplates });
-            message.success(`已保存模板「${template.name}」（${template.nodes.length} 个节点）`);
-            return template;
+            try {
+                const saved = await saveCanvasTemplate(token, {
+                    name: name.trim() || `模板 ${workflowTemplates.length + 1}`,
+                    nodes: normalizedNodes,
+                    connections: templateConnections,
+                });
+                setWorkflowTemplates((prev) => [...prev, saved]);
+                message.success(`已保存模板「${saved.name}」（${saved.nodes.length} 个节点）`);
+                return saved;
+            } catch {
+                message.error("保存模板失败，请稍后重试");
+                return null;
+            }
         },
-        [message, projectId, updateProject, workflowTemplates],
+        [message, token, workflowTemplates],
     );
 
     const insertWorkflowTemplate = useCallback(
@@ -1920,12 +1940,17 @@ function LeaferCanvasPage() {
     );
 
     const deleteWorkflowTemplate = useCallback(
-        (templateId: string) => {
-            const nextTemplates = workflowTemplates.filter((template) => template.id !== templateId);
-            updateProject(projectId, { workflowTemplates: nextTemplates });
-            message.success("已删除模板");
+        async (templateId: string) => {
+            if (!token) return;
+            try {
+                await deleteCanvasTemplate(token, templateId);
+                setWorkflowTemplates((prev) => prev.filter((template) => template.id !== templateId));
+                message.success("已删除模板");
+            } catch {
+                message.error("删除模板失败，请稍后重试");
+            }
         },
-        [message, projectId, updateProject, workflowTemplates],
+        [message, token],
     );
 
     const pasteCopiedNodes = useCallback(() => {
@@ -5057,6 +5082,7 @@ function LeaferCanvasPage() {
                 <CanvasWorkflowToolbox
                     open={workflowToolboxOpen}
                     templates={workflowTemplates}
+                    loading={workflowTemplatesLoading}
                     selectedCount={selectedNodeIds.size}
                     onClose={() => setWorkflowToolboxOpen(false)}
                     onSaveSelection={saveSelectionAsTemplate}
