@@ -131,22 +131,22 @@ description: LibTV / TapNow / Miro / FigJam / Canva / Notion 商业化成熟度�
 ## 5. P0/P1/P2 补全路线
 
 > 排序依据：商业化售卖底线（P0）→ 竞争力（P1）→ 锦上添花（P2）。工作量粗估按单人天（人日）。
+> 用户决策裁剪（2026-07 确认）：协作维度**不做实时协同**，以**版本历史**为核心；权限维度**不做角色体系**，只要分享链接；**导出**不在路线内。其余按序保留。
 
 ### P0 — 商业底线（不做不可售卖）
 
 | # | 做什么 | 为什么（对标） | 涉及文件（粗估） | 工作量 |
 | --- | --- | --- | --- | --- |
-| P0-1 | 导出补齐：PNG（选区/全画布）+ JSON 结构化导出，保留现有 zip | 用户数据可带走是商业化底线（Miro/FigJam 均支持） | canvas-export.ts 扩展 | 1-2 人日 |
-| P0-2 | 账号级模板持久化：工具箱模板升级为后端账号工作区存储 | 对标 TapNow 模板体系 + 已有 spec §6#2 | backend Workflow API + canvas-workflow-toolbox.tsx | 2-3 人日 |
-| P0-3 | 启用空间索引：canvas-spatial-index.ts 接线到渲染/命中检测 | 大画布性能是商业化命门（对标 Miro 千元素级） | leafer-canvas.tsx + canvas-spatial-index.ts | 1-2 人日 |
-| P0-4 | 自动保存状态可见 + 崩溃恢复提示 | 对标 Miro/Notion 稳定性标准 | canvas-client-page.tsx | 1 人日 |
+| P0-1 | 账号级模板持久化：工具箱模板升级为后端账号工作区存储 | 对标 TapNow 模板体系 + 已有 spec §6#2 | backend Workflow API + canvas-workflow-toolbox.tsx | 2-3 人日 |
+| P0-2 | 启用空间索引：canvas-spatial-index.ts 接线到渲染/命中检测 | 大画布性能是商业化命门（对标 Miro 千元素级） | leafer-canvas.tsx + canvas-spatial-index.ts | 1-2 人日 |
+| P0-3 | 自动保存状态可见 + 崩溃恢复提示 | 对标 Miro/Notion 稳定性标准 | canvas-client-page.tsx | 1 人日 |
 
 ### P1 — 竞争力（显著拉开差距）
 
 | # | 做什么 | 为什么（对标） | 涉及文件（粗估） | 工作量 |
 | --- | --- | --- | --- | --- |
-| P1-1 | 权限模型最小集：画布只读/可编辑分享链接（后端 token 校验） | 对标 FigJam 分享链接 | backend + canvas 路由 | 3-5 人日 |
-| P1-2 | 版本历史（画布快照 + 回滚入口） | 对标 Miro/Notion | backend + canvas 前端 | 3-5 人日 |
+| P1-1 | 分享链接访问：画布只读/可编辑分享链接（后端 token 校验，不含角色体系） | 对标 FigJam 分享链接 | backend + canvas 路由 | 3-5 人日 |
+| P1-2 | 版本历史：画布快照 + 回滚入口（协作核心，替代实时协同） | 对标 Miro/Notion | backend + canvas 前端 | 3-5 人日 |
 | P1-3 | 时间轴视频合成可视化（多片段拼接/裁切/排序/导出） | 对标 TapNow 播放列表（已有 spec §6#3） | canvas 时间轴组件 | 5-8 人日 |
 | P1-4 | 快捷分镜补全：镜头聚焦、焦点编辑、角色三视图、画面推演 | 对标 LibTV Slash（已有 spec §6#1） | canvas-node-generation.ts 扩展 | 3-5 人日 |
 
@@ -156,8 +156,7 @@ description: LibTV / TapNow / Miro / FigJam / Canva / Notion 商业化成熟度�
 | --- | --- | --- | --- | --- |
 | P2-1 | 评论/批注（锚定到节点） | 对标 Miro/FigJam 协作 | canvas 前端 | 5+ 人日 |
 | P2-2 | 模板市场/公共模板库 | 对标 Miro/Canva | backend + 前端 | 5+ 人日 |
-| P2-3 | 实时协同（游标 + OT/CRDT） | 对标 Miro/FigJam | 全链路 | 10+ 人日（重） |
-| P2-4 | 脚本富文本文档编辑 | 对标 LibTV 脚本节点（已有 spec §6#4） | canvas 脚本节点 | 3-5 人日 |
+| P2-3 | 脚本富文本文档编辑 | 对标 LibTV 脚本节点（已有 spec §6#4） | canvas 脚本节点 | 3-5 人日 |
 
 ## 6. 附录：全局审查发现的画布代码质量问题（与调研无关，供后续修复）
 
