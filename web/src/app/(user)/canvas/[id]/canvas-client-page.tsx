@@ -4862,6 +4862,7 @@ function LeaferCanvasPage() {
                     onDeleteProject={deleteCurrentProject}
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    saveState={saveState}
                 />
 
                 <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
@@ -5742,6 +5743,7 @@ function CanvasTopBar({
     onDeleteProject,
     agentOpen,
     onToggleAgent,
+    saveState,
 }: {
     title: string;
     titleDraft: string;
@@ -5756,6 +5758,7 @@ function CanvasTopBar({
     onDeleteProject: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
+    saveState: CanvasSaveState;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -5791,6 +5794,9 @@ function CanvasTopBar({
                     </button>
                 </Dropdown>
                 <span className="hidden text-[13px] font-semibold tracking-normal opacity-70 sm:block">FlowCanvas</span>
+                <span className="ml-1.5 hidden text-[11px] opacity-50 sm:block" style={{ color: theme.node.muted }}>
+                    {saveState === "saving" ? "保存中…" : saveState === "error" ? "保存失败" : saveState === "offline" ? "离线" : "已保存"}
+                </span>
             </div>
 
             <div ref={titleRef} className="pointer-events-auto absolute left-1/2 max-w-[44vw] -translate-x-1/2">
