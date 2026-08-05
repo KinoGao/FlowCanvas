@@ -317,9 +317,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     value={prompt}
                     references={mentionReferences}
                     placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
-                    onValueChange={updatePrompt}
-                    onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
-                    submitOnEnter={!isRunning}
+                    onChange={updatePrompt}
+                    mentionRequestNonce={mentionRequestNonce}
                     onSubmit={submit}
                 />
                 <button

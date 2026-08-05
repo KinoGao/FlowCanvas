@@ -271,6 +271,8 @@ const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+/** 画布保存状态：已保存 / 保存中 / 后端离线 / 保存失败。 */
+type CanvasSaveState = "saved" | "saving" | "offline" | "error";
 const EMPTY_INPUT_SUMMARY = { textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 };
 const DEFAULT_SCRIPT_BODY = `第一幕：主角进入一个陌生空间，发现关键道具。
 第二幕：角色做出选择，环境开始发生变化。
