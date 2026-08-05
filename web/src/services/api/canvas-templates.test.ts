@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import type { CanvasConnection, CanvasNodeData, CanvasNodeType } from "@/app/(user)/canvas/types";
 import type { CanvasWorkflowTemplate } from "@/app/(user)/canvas/utils/canvas-workflow-template";

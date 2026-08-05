@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
 import { CANVAS_SLASH_COMMANDS, canvasSelectionCenter, cloneCanvasSelection } from "./canvas-workflow-template";

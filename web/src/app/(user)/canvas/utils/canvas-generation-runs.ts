@@ -2,6 +2,16 @@ import type { CanvasGenerationRun, CanvasGenerationRunStatus, CanvasNodeData, Ca
 
 const MAX_GENERATION_RUNS = 6;
 
+export function generationRunSettlementKey(nodes: CanvasNodeData[]): string {
+    let key = "";
+    for (const node of nodes) {
+        const activeRun = node.metadata?.generationRuns?.find((run) => run.status === "running");
+        if (!activeRun || node.metadata?.status === "loading") continue;
+        key += `${node.id}:${activeRun.id}:${node.metadata?.status || "idle"}:${node.metadata?.errorDetails || ""};`;
+    }
+    return key;
+}
+
 /**
  * 兜底结算器：各生成完成路径只更新 metadata.status（终态）而不结算
  * generationRuns 中的 running 记录，本函数在 nodes 变化时把已结束但

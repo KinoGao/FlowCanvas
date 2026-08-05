@@ -1602,6 +1602,7 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
+    const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
     const visualClass = isSource ? "left-[18px]" : "right-[18px]";
     const plusVisibility = active
         ? "opacity-100 scale-125"
@@ -1613,19 +1614,34 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
     // 拖拽连线由 leafer-canvas 通过 data-handle 消费 pointerdown（preventDefault + setPointerCapture，
     // 会抑制 click 合成事件），故在此自行检测单击：window 冒泡阶段监听 pointerup，确保画布先完成
     // 连线清理（clearTempEdge / onConnectEnd），再触发宿主创建回调。
+    useEffect(() => () => {
+        const finish = finishRef.current;
+        if (!finish) return;
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+    }, []);
+
     const handlePointerDown = (event: React.PointerEvent) => {
         if (!onClickCreate) return;
+        const previousFinish = finishRef.current;
+        if (previousFinish) {
+            window.removeEventListener("pointerup", previousFinish);
+            window.removeEventListener("pointercancel", previousFinish);
+        }
         downRef.current = { x: event.clientX, y: event.clientY };
         const pointerId = event.pointerId;
         const finish = (upEvent: PointerEvent) => {
+            if (upEvent.pointerId !== pointerId) return;
             window.removeEventListener("pointerup", finish);
             window.removeEventListener("pointercancel", finish);
+            finishRef.current = null;
             const down = downRef.current;
             downRef.current = null;
-            if (down && Math.hypot(upEvent.clientX - down.x, upEvent.clientY - down.y) <= 5) {
+            if (upEvent.type === "pointerup" && down && Math.hypot(upEvent.clientX - down.x, upEvent.clientY - down.y) <= 5) {
                 onClickCreate();
             }
         };
+        finishRef.current = finish;
         window.addEventListener("pointerup", finish);
         window.addEventListener("pointercancel", finish);
     };

@@ -47,12 +47,12 @@ import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
-import { clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
+import { centerViewportOnRect, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
-import { updateCanvasGenerationRun, upsertCanvasGenerationRun, settleFinishedGenerationRuns } from "../utils/canvas-generation-runs";
+import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import {
@@ -983,9 +983,11 @@ function LeaferCanvasPage() {
     // 不结算 generationRuns 中的 running 记录；本 effect 在 nodes 变化时
     // 把已结束但未结算的 run 标记为终态。纯函数式 updater，无变化时返回原引用，
     // 不会产生重渲染环。
+    const generationSettlementKey = useMemo(() => generationRunSettlementKey(nodes), [nodes]);
     useEffect(() => {
+        if (!generationSettlementKey) return;
         setNodes((prev) => settleFinishedGenerationRuns(prev));
-    }, [nodes]);
+    }, [generationSettlementKey]);
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         const affectedNodeIds = new Set<string>();
@@ -4486,7 +4488,11 @@ function LeaferCanvasPage() {
             const width = rect && rect.width > 0 ? rect.width : size.width;
             const height = rect && rect.height > 0 ? rect.height : size.height;
             const targetK = Math.max(viewportRef.current.k, 0.9);
-            const next = { x: node.position.x + node.width / 2 - width / 2, y: node.position.y + node.height / 2 - height / 2, k: targetK };
+            const next = centerViewportOnRect(
+                { x: node.position.x, y: node.position.y, width: node.width, height: node.height },
+                { width, height },
+                targetK,
+            );
             viewportRef.current = next;
             setViewport(next);
             if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);

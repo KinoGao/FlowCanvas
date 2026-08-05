@@ -32,6 +32,19 @@ export function canvasToScreen(canvasX: number, canvasY: number, viewport: Leafe
     };
 }
 
+export function centerViewportOnRect(
+    rect: { x: number; y: number; width: number; height: number },
+    container: { width: number; height: number },
+    scale: number,
+): LeaferViewport {
+    const k = clampCanvasZoom(scale);
+    return {
+        x: container.width / 2 - (rect.x + rect.width / 2) * k,
+        y: container.height / 2 - (rect.y + rect.height / 2) * k,
+        k,
+    };
+}
+
 export function clampViewport(viewport: LeaferViewport, _containerWidth: number, _containerHeight: number): LeaferViewport {
     return {
         x: Number.isFinite(viewport.x) ? viewport.x : 0,

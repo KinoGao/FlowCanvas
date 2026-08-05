@@ -7,6 +7,7 @@
         "dev": "vite --host 0.0.0.0 --port 9800",
         "build": "tsc --noEmit && vite build",
         "typecheck": "tsc --noEmit",
+        "test": "vitest run",
         "start": "vite preview --host 0.0.0.0 --port 9800",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
@@ -46,6 +47,7 @@
         "three": "^0.185.1",
         "three-stdlib": "^2.36.1",
         "tw-animate-css": "^1.4.0",
+        "zod": "3.25.76",
         "zustand": "^5.0.12"
     },
     "devDependencies": {
@@ -58,6 +60,7 @@
         "@vitejs/plugin-react": "^5.1.2",
         "prettier": "^3.8.3",
         "typescript": "^5.9.3",
-        "vite": "^7.3.0"
+        "vite": "^7.3.0",
+        "vitest": "^4.1.10"
     }
 }

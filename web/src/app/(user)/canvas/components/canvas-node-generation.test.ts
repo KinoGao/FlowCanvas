@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import { buildComposerConfirmation, buildGenerationConfirmation, type NodeGenerationContext } from "./canvas-node-generation.ts";
 
