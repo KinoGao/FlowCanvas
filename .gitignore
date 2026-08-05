@@ -12,14 +12,16 @@ data/
 .claude/settings.local.json
 backend/target/
 backend/data/
+web/dist/
 
 # AI agent temp/planning files
 findings.md
 progress.md
 task_plan.md
 .qoder/
-_commit-msg.txt  
-_commit-msg.txt  
+.rivet/
+.codex-logs/
+_commit-msg.txt
 .gstack/
 nul
 verify-panel.mjs

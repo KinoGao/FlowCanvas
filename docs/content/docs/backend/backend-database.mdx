@@ -26,7 +26,7 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 ### 安全说明
 
 - `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境。
-- 旧 `/api/config` 等兼容接口仍可使用实例级 `AUTH_CODE`；新账号注册使用独立的 `REGISTRATION_CODE`，默认值为 `gycode`。
+- 旧 `/api/config` 等兼容接口仍可使用实例级 `AUTH_CODE`；新账号注册使用独立的 `REGISTRATION_CODE`，默认值为 `gycode`（内部部署硬编码，可通过环境变量覆盖）。
 - 管理后台不再直接使用共享 `AUTH_CODE` 作为身份，而是要求管理员账号、密码和 `ADMIN_CODE`（默认值为 `admincode`）换取带 `ADMIN` 角色的 Bearer 会话。
 
 ## platform_config 表

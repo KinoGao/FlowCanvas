@@ -90,6 +90,8 @@ public class AuthService {
     }
 
     private LoginResult createSession(User user) {
+        // 每次签发新会话时顺带清理过期会话，避免会话表无限增长（低频写操作，成本可忽略）。
+        sessions.deleteByExpiresAtBefore(Instant.now());
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String token = HexFormat.of().formatHex(bytes);

@@ -63,7 +63,6 @@ const EMPTY_ID_SET = new Set<string>();
 const CONNECTION_SNAP_RADIUS = 48;
 const CONNECTION_SNAP_RELEASE_RADIUS = 64;
 const CANVAS_NODE_RADIUS = 8;
-const EDITOR_STATE_COMMIT_INTERVAL_MS = 96;
 const CANVAS_READY_FALLBACK_MS = 4_000;
 
 type LeaferConnectionVisual = {
@@ -134,6 +133,7 @@ export function LeaferCanvas({
     const nodeLayoutSignatureRef = useRef(new Map<string, string>());
     const nodeTextSignatureRef = useRef(new Map<string, string>());
     const nodePaintSignatureRef = useRef(new Map<string, string>());
+    const nodeInteractionSignatureRef = useRef(new Map<string, string>());
     const nodeMediaUrlRef = useRef(new Map<string, string>());
     const connectionVisualMapRef = useRef(new Map<string, LeaferConnectionVisual>());
     const hoveredNodeIdRef = useRef<string | null>(null);
@@ -153,7 +153,7 @@ export function LeaferCanvas({
     const pendingViewportPresentationRef = useRef<{ viewport: ViewportTransform; syncLeafer: boolean } | null>(null);
     const editorTransformActiveRef = useRef(false);
     const editorTransformTypeRef = useRef<"move" | "scale" | null>(null);
-    const editorStateCommitAtRef = useRef(0);
+    const nodeElementMapRef = useRef(new Map<string, HTMLElement>());
     const syncingEditorSelectionRef = useRef(false);
     const wheelCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
@@ -338,24 +338,51 @@ export function LeaferCanvas({
         if (flowCount) ensureConnectionFlowAnimation();
     }, [ensureConnectionFlowAnimation]);
 
+    const getNodeElement = useCallback((nodeId: string) => {
+        const cached = nodeElementMapRef.current.get(nodeId);
+        if (cached?.isConnected) return cached;
+        const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (element) nodeElementMapRef.current.set(nodeId, element);
+        else nodeElementMapRef.current.delete(nodeId);
+        return element;
+    }, [containerRef]);
+
     const refreshNodeInteractionVisual = useCallback((nodeId: string) => {
         const rect = editorNodeMapRef.current.get(nodeId);
         if (!rect) return;
+        const selected = selectedNodeIdsRef.current.has(nodeId);
+        const related = relatedNodeIdsRef.current.has(nodeId);
+        const connectionTarget = connectionTargetNodeIdRef.current === nodeId;
+        const hovered = hoveredNodeIdRef.current === nodeId;
+        const dragging = draggingNodeIdsRef.current.has(nodeId);
+        const currentTheme = themeRef.current;
+        const signature = [
+            selected,
+            related,
+            connectionTarget,
+            hovered,
+            dragging,
+            currentTheme.canvas.background,
+            currentTheme.ui.accent,
+            currentTheme.ui.hairline,
+        ].join("|");
+        if (nodeInteractionSignatureRef.current.get(nodeId) === signature) return;
+        nodeInteractionSignatureRef.current.set(nodeId, signature);
         applyNodeInteractionVisual(rect, themeRef.current, {
-            selected: selectedNodeIdsRef.current.has(nodeId),
-            related: relatedNodeIdsRef.current.has(nodeId),
-            connectionTarget: connectionTargetNodeIdRef.current === nodeId,
-            hovered: hoveredNodeIdRef.current === nodeId,
-            dragging: draggingNodeIdsRef.current.has(nodeId),
+            selected,
+            related,
+            connectionTarget,
+            hovered,
+            dragging,
         });
-        const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        const element = getNodeElement(nodeId);
         if (element) {
             if (hoveredNodeIdRef.current === nodeId) element.dataset.nodeHovered = "true";
             else element.removeAttribute("data-node-hovered");
             if (draggingNodeIdsRef.current.has(nodeId)) element.dataset.nodeDragging = "true";
             else element.removeAttribute("data-node-dragging");
         }
-    }, [containerRef]);
+    }, [getNodeElement]);
 
     const visibleImagesSettled = useCallback(() => {
         const container = containerRef.current;
@@ -453,7 +480,7 @@ export function LeaferCanvas({
                 width: nodeRect.width ?? 0,
                 height: nodeRect.height ?? 0,
             };
-            const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+            const element = getNodeElement(id);
             if (element) {
                 element.style.transform = `translate(${update.position.x}px, ${update.position.y}px)`;
                 element.style.width = `${update.width}px`;
@@ -486,7 +513,7 @@ export function LeaferCanvas({
                         width: childRect.width ?? 0,
                         height: childRect.height ?? 0,
                     };
-                    const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(childId)}"]`);
+                    const element = getNodeElement(childId);
                     if (element) element.style.transform = `translate(${childUpdate.position.x}px, ${childUpdate.position.y}px)`;
                     nodeTextMapRef.current.get(childId)?.set({
                         x: childUpdate.position.x + 18,
@@ -529,12 +556,12 @@ export function LeaferCanvas({
                 visual.flow.forEach((flow) => (flow.path = path));
             });
         }
-        const now = performance.now();
-        if (updates.length && (forceStateCommit || now - editorStateCommitAtRef.current >= EDITOR_STATE_COMMIT_INTERVAL_MS)) {
-            editorStateCommitAtRef.current = now;
+        // Leafer keeps the live DOM, editor rectangles, text overlays, and connection paths in sync.
+        // React only needs the final snapshot; committing on every drag tick rerenders the whole canvas.
+        if (updates.length && forceStateCommit) {
             callbacksRef.current.onNodesTransform?.(updates);
         }
-    }, [containerRef]);
+    }, [getNodeElement]);
 
     const beginEditorTransform = useCallback((type: "move" | "scale") => {
         if (editorTransformActiveRef.current) return;
@@ -723,12 +750,16 @@ export function LeaferCanvas({
         window.addEventListener("pointerup", finishTransform);
         window.addEventListener("pointercancel", finishTransform);
         window.addEventListener("blur", finishTransform);
+        // 拖拽中关闭标签页时 pointerup/blur 不触发，pagehide 里提交拖拽位置，
+        // 使父组件 pagehide flush 能持久化最终坐标。
+        window.addEventListener("pagehide", finishTransform);
 
         return () => {
             resizeObserver.disconnect();
             window.removeEventListener("pointerup", finishTransform);
             window.removeEventListener("pointercancel", finishTransform);
             window.removeEventListener("blur", finishTransform);
+            window.removeEventListener("pagehide", finishTransform);
             if (connectionFlowFrameRef.current !== null) cancelAnimationFrame(connectionFlowFrameRef.current);
             connectionFlowFrameRef.current = null;
             if (readyFrameRef.current !== null) cancelAnimationFrame(readyFrameRef.current);
@@ -747,7 +778,9 @@ export function LeaferCanvas({
             nodeLayoutSignatureRef.current.clear();
             nodeTextSignatureRef.current.clear();
             nodePaintSignatureRef.current.clear();
+            nodeInteractionSignatureRef.current.clear();
             nodeMediaUrlRef.current.clear();
+            nodeElementMapRef.current.clear();
             connectionVisualMapRef.current.clear();
             backgroundCanvasRef.current = null;
             verticalGuideRef.current = null;
@@ -757,7 +790,7 @@ export function LeaferCanvas({
             leaferRef.current = null;
             editorRef.current = null;
         };
-    }, [beginEditorTransform, drawBackground, flushEditorTransform, presentLeaferViewport, refreshNodeInteractionVisual, reportCanvasReady, syncEditorViewport, syncSkyOverlays]);
+    }, [beginEditorTransform, drawBackground, flushEditorTransform, getNodeElement, presentLeaferViewport, refreshNodeInteractionVisual, reportCanvasReady, syncEditorViewport, syncSkyOverlays]);
 
     useEffect(() => {
         const app = leaferRef.current;
@@ -776,8 +809,10 @@ export function LeaferCanvas({
             nodeLayoutSignatureRef.current.delete(id);
             nodeTextSignatureRef.current.delete(id);
             nodePaintSignatureRef.current.delete(id);
+            nodeInteractionSignatureRef.current.delete(id);
             nodeMediaUrlRef.current.delete(id);
-            const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(id)}"]`);
+            nodeElementMapRef.current.delete(id);
+            const element = getNodeElement(id);
             element?.removeAttribute("data-leafer-image-ready");
         });
 
@@ -942,7 +977,7 @@ export function LeaferCanvas({
         });
         editor.update();
         reportCanvasReady();
-    }, [connectionTargetNodeId, containerRef, nodes, refreshNodeInteractionVisual, relatedNodeIds, reportCanvasReady, selectedNodeIds, theme]);
+    }, [connectionTargetNodeId, containerRef, getNodeElement, nodes, refreshNodeInteractionVisual, relatedNodeIds, reportCanvasReady, selectedNodeIds, theme]);
 
     useEffect(() => {
         let cancelled = false;

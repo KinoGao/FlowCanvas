@@ -53,6 +53,7 @@ public class PublicImageController {
         }
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(publicImageService.contentType(filename)))
+                .header("X-Content-Type-Options", "nosniff")
                 .body(resource);
     }
 }

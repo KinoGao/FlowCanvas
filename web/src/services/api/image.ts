@@ -248,6 +248,46 @@ function resolveRequestSize(resolution: string | undefined, size: string) {
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
 }
 
+const JUNLI_IMAGE_SIZE_TABLE: Record<string, Record<string, string>> = {
+    "1k": {
+        "1:1": "1024x1024",
+        "16:9": "1280x720",
+        "9:16": "720x1280",
+        "4:3": "1024x768",
+        "3:4": "768x1024",
+        "21:9": "1680x720",
+    },
+    "2k": {
+        "1:1": "2048x2048",
+        "16:9": "2048x1152",
+        "9:16": "1152x2048",
+        "4:3": "2048x1536",
+        "3:4": "1536x2048",
+        "21:9": "2520x1080",
+    },
+    "4k": {
+        "1:1": "4096x4096",
+        "16:9": "4096x2304",
+        "9:16": "2304x4096",
+        "4:3": "4096x3072",
+        "3:4": "3072x4096",
+        "21:9": "5040x2160",
+    },
+};
+
+function isJunliImageModel(model: string) {
+    const value = modelOptionName(model).toLowerCase();
+    return value.includes("junliimg") || value.includes("junliai");
+}
+
+function resolveImageRequestSize(model: string, resolution: string | undefined, size: string) {
+    if (!isJunliImageModel(model)) return resolveRequestSize(resolution, size);
+    const value = size.trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    if (!value.includes(":")) return resolveRequestSize(resolution, value);
+    return JUNLI_IMAGE_SIZE_TABLE[resolution || "2k"]?.[value] || resolveRequestSize(resolution, value);
+}
+
 function resolveImageDataUrl(item: Record<string, unknown>, useProxy?: boolean) {
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
@@ -606,13 +646,35 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
     const timeoutSignal = AbortSignal.timeout(STREAMING_CHAT_TIMEOUT_MS);
     const signal = options?.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
     const url = aiApiUrl(config, "/chat/completions");
-    const response = await fetch(url, {
+    const request = (stream: boolean) => fetch(url, {
         method: "POST",
-        headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId), Accept: "text/event-stream" },
-        body: JSON.stringify({ ...body, stream: true }),
+        headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId), Accept: stream ? "text/event-stream" : "application/json" },
+        body: JSON.stringify({ ...body, stream }),
         signal,
     });
-    if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
+    const response = await request(true);
+    if (!response.ok) {
+        const message = await readFetchError(response, "request failed");
+        // Some OpenAI-compatible gateways accept chat completions but reject SSE (often as 500).
+        // Retry once without streaming so vision/reverse-prompt models can still return JSON.
+        if (response.status < 500 || signal.aborted) throw new Error(message);
+        const fallbackResponse = await request(false);
+        if (!fallbackResponse.ok) throw new Error(await readFetchError(fallbackResponse, message));
+        return parseChatToolResponse((await fallbackResponse.json()) as ChatCompletionPayload);
+    }
+    const responseType = response.headers.get("content-type")?.toLowerCase() || "";
+    if (response.body && !responseType.includes("text/event-stream")) {
+        const text = await response.text();
+        try {
+            return parseChatToolResponse(JSON.parse(text) as ChatCompletionPayload);
+        } catch {
+            // 网关未声明 content-type 却返回了 SSE 报文：按流解析兜底。
+            const state: ChatStreamState = { buffer: "", text: "", toolCalls: [] };
+            consumeChatStreamText(state, text, onDelta, true);
+            if (state.error) throw new Error(state.error);
+            return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name) };
+        }
+    }
     if (!response.body) {
         return parseChatToolResponse((await response.json()) as ChatCompletionPayload);
     }
@@ -833,9 +895,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = requestQuality(config.quality, capability);
     const resolution = normalizeResolution(config.resolution || config.quality);
     const seedream = isSeedreamImageModel(requestConfig.model);
+    const junliImage = isJunliImageModel(selectedModel) || isJunliImageModel(requestConfig.model);
     const seedreamError = seedream ? seedreamGenerationError(requestConfig.model) : "";
     if (seedreamError) throw new Error(seedreamError);
-    const requestSize = seedream ? resolveSeedreamSize(requestConfig.model, resolution, config.size) : resolveRequestSize(resolution, config.size);
+    const requestSize = seedream ? resolveSeedreamSize(requestConfig.model, resolution, config.size) : resolveImageRequestSize(selectedModel, resolution, config.size);
     if (isAgnesImageModel(requestConfig.model)) {
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, prompt), [], n, requestSize, options);
     }
@@ -847,9 +910,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             {
                 model: requestConfig.model,
                 prompt: withSystemPrompt(requestConfig, prompt),
-                ...imageOutputCountPayload(capability, n),
+                ...(!junliImage ? imageOutputCountPayload(capability, n) : {}),
                 ...(capability ? { _flowcanvas_mode: "text-to-image" } : {}),
-                ...(!seedream && quality ? { quality } : {}),
+                ...(!junliImage && !seedream && quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 ...(responseFormat ? { response_format: responseFormat } : {}),
                 ...(responseFormat === "b64_json" && seedreamSupportsOutputFormat(requestConfig.model) ? { output_format: IMAGE_OUTPUT_FORMAT } : {}),
@@ -876,6 +939,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const generationMode = resolveImageEditMode(capability, Boolean(mask));
     validateImageCapability(capability, generationMode, references.length, n);
     const seedream = isSeedreamImageModel(requestConfig.model);
+    const junliImage = isJunliImageModel(selectedModel) || isJunliImageModel(requestConfig.model);
+    if (mask && junliImage) throw new Error("Junli 图片编辑接口不支持蒙版参数，请改用普通图片编辑");
     if (seedream) {
         if (mask) throw new Error("当前 Seedream/SeedEdit 接入暂不支持蒙版编辑");
         const seedreamError = seedreamEditError(requestConfig.model, references.length);
@@ -892,7 +957,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const quality = requestQuality(config.quality, capability);
     const resolution = normalizeResolution(config.resolution || config.quality);
-    const requestSize = resolveRequestSize(resolution, config.size);
+    const requestSize = resolveImageRequestSize(selectedModel, resolution, config.size);
     if (isAgnesImageModel(requestConfig.model)) {
         if (mask) throw new Error("Agnes 图像接口暂不支持蒙版编辑");
         return requestAgnesImages(requestConfig, withSystemPrompt(requestConfig, requestPrompt), references, n, requestSize, options);
@@ -901,9 +966,9 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("n", String(n));
+    if (!junliImage) formData.set("n", String(n));
     if (responseFormat) formData.set("response_format", responseFormat);
-    if (!seedream && quality) {
+    if (!junliImage && !seedream && quality) {
         formData.set("quality", quality);
     }
     if (requestSize) {

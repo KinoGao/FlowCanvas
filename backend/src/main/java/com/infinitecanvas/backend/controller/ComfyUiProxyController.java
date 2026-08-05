@@ -56,9 +56,10 @@ public class ComfyUiProxyController {
     private final WebClient webClient = WebClient.builder()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(COMFY_PROXY_MAX_IN_MEMORY_SIZE))
             .build();
+    // 不跟随重定向：代理目标的重定向可能指向内网任意地址（SSRF 绕过）。
     private final HttpClient mediaClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     public ComfyUiProxyController(PlatformConfigService platformConfigService, GenerationJobService generationJobService) {
@@ -75,7 +76,11 @@ public class ComfyUiProxyController {
     ) throws IOException {
         URI target;
         try {
-            target = buildTargetUrl(baseUrl, path);
+            // 未登录的 /view 媒体读取是公开路径（<img> 加载 ComfyUI 输出），
+            // 必须使用配置的 ComfyUI 地址，不允许客户端传入 baseUrl，防止 SSRF。
+            boolean publicMediaRead = "/view".equals(requestPath(path))
+                    && request.getAttribute(UserRequestContext.USER_ATTR) == null;
+            target = buildTargetUrl(publicMediaRead ? "" : baseUrl, path);
         } catch (IllegalArgumentException e) {
             writeJsonError(response, HttpStatus.BAD_REQUEST.value(), e.getMessage());
             return;

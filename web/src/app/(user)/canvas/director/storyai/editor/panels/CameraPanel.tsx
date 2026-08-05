@@ -49,9 +49,10 @@ export function CameraPanel() {
   const addCameraCaptures = useDirectorStore((state) => state.addCameraCaptures);
   const updateCamera = useDirectorStore((state) => state.updateCamera);
 
-  if (!camera) return null;
-  const currentCamera = camera;
-  const captures = useMemo(() => currentCamera.captures ?? [], [currentCamera.captures]);
+  // 注意：这里不允许在 hooks 之前条件 return（activeCameraId 失效时
+  // 会导致 hooks 数量变化，React 抛 "Rendered more hooks" 崩溃）。
+  // 所有 hooks 结束后才统一 return null。
+  const captures = useMemo(() => camera?.captures ?? [], [camera?.captures]);
   const cameraCaptureGroups = useMemo(
     () =>
       cameras.map((item) => ({
@@ -62,10 +63,6 @@ export function CameraPanel() {
   );
   const hasAnyCameraCapture = cameraCaptureGroups.some((group) => group.captures.length > 0);
   const focusableObjects = useMemo(() => objects.filter(isCameraFocusableObject), [objects]);
-  const targetSelectValue =
-    currentCamera.targetMode === "object" && currentCamera.targetObjectId
-      ? `object:${currentCamera.targetObjectId}`
-      : "manual";
 
   useEffect(() => {
     if (!viewerCapture) {
@@ -177,6 +174,15 @@ export function CameraPanel() {
       });
     }
   }, [cameraCaptureGroups, sendCaptures]);
+
+  // 所有 hooks 已执行完毕，此处才允许条件渲染。
+  if (!camera) return null;
+  const currentCamera = camera;
+  const targetSelectValue =
+    currentCamera.targetMode === "object" && currentCamera.targetObjectId
+      ? `object:${currentCamera.targetObjectId}`
+      : "manual";
+
   async function handleCameraCapture() {
     try {
       setCaptureError(null);

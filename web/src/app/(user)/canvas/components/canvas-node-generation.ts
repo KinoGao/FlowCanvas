@@ -1,9 +1,9 @@
 import type { AiTextMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { seedanceReferenceLabel } from "@/lib/seedance-video";
+import { normalizeSeedanceRatio, seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import { getGenerationResourceNodes, type CanvasResourceGraph } from "../utils/canvas-resource-references";
 
 export type NodeGenerationContext = {
@@ -318,4 +318,100 @@ function readReferenceAudio(node: CanvasNodeData): ReferenceAudio | null {
         storageKey: node.metadata.storageKey,
         durationMs: node.metadata.durationMs,
     };
+}
+
+export type GenerationReferenceSummary = {
+    nodeId: string;
+    kind: NodeGenerationInput["type"];
+    label: string;
+    title: string;
+};
+
+export type GenerationConfirmation = {
+    prompt: string;
+    modelLabel: string;
+    count: number;
+    mediaSpec: string;
+    references: GenerationReferenceSummary[];
+};
+
+export type GenerationConfirmationOptions = {
+    modelLabel: string;
+    count: number;
+    aspectRatio?: string;
+    durationSeconds?: number;
+};
+
+export function buildGenerationConfirmation(context: NodeGenerationContext, options: GenerationConfirmationOptions): GenerationConfirmation {
+    const specParts = [
+        options.aspectRatio ? `比例 ${options.aspectRatio}` : null,
+        options.durationSeconds ? `时长 ${options.durationSeconds} 秒` : null,
+    ].filter((part): part is string => Boolean(part));
+    const counts: Record<NodeGenerationInput["type"], number> = { text: 0, image: 0, video: 0, audio: 0 };
+    const references = context.inputs.map((input) => {
+        const index = counts[input.type]++;
+        const label = generationLabel(input.type, index);
+        return { nodeId: input.nodeId, kind: input.type, label, title: input.title || label };
+    });
+    return {
+        prompt: context.prompt,
+        modelLabel: options.modelLabel,
+        count: Math.max(1, Math.min(15, Math.floor(Math.abs(Number(options.count)) || 1))),
+        mediaSpec: specParts.join(" · "),
+        references,
+    };
+}
+
+export type ComposerConfirmSource = {
+    modelLabel: string;
+    count: string | number;
+    size?: string;
+    videoSeconds?: string | number;
+};
+
+export type ComposerConfirmReference = {
+    nodeId: string;
+    kind: NodeGenerationInput["type"];
+    title: string;
+    active: boolean;
+};
+
+/**
+ * 从 Composer 面板的实时配置组装手动确认卡片的展示数据。
+ * 只消费面板已有的字段，不触碰生成执行本身——确认拦截发生在调用之前。
+ */
+export function buildComposerConfirmation(
+    mode: CanvasGenerationMode,
+    prompt: string,
+    source: ComposerConfirmSource,
+    references: ComposerConfirmReference[],
+): GenerationConfirmation {
+    const inputs: NodeGenerationInput[] = references
+        .filter((reference) => reference.active)
+        .map((reference) => ({
+            nodeId: reference.nodeId,
+            type: reference.kind,
+            title: reference.title,
+        }));
+    const isVideo = mode === "video";
+    const isImage = mode === "image";
+    const aspectRatio = isVideo || isImage ? (isVideo ? normalizeSeedanceRatio(source.size || "") : source.size) : undefined;
+    const durationSeconds = isVideo ? Number(source.videoSeconds) || undefined : undefined;
+    const context: NodeGenerationContext = {
+        prompt,
+        inputs,
+        referenceImages: [],
+        referenceVideos: [],
+        referenceAudios: [],
+        textCount: 0,
+        imageCount: 0,
+        videoCount: 0,
+        audioCount: 0,
+    };
+    return buildGenerationConfirmation(context, {
+        modelLabel: source.modelLabel,
+        count: Number(source.count) || 1,
+        aspectRatio,
+        durationSeconds,
+    });
 }

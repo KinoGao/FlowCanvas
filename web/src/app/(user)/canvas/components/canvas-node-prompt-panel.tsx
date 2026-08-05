@@ -6,7 +6,7 @@ import { App, Button, Popover, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
-import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -16,6 +16,8 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasGenerationRun, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { CanvasConfirmCard } from "./canvas-confirm-card";
+import { buildComposerConfirmation, type ComposerConfirmSource, type GenerationConfirmation } from "./canvas-node-generation";
 import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
@@ -40,6 +42,38 @@ type CanvasNodePromptPanelProps = {
 type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "mode" | "advanced" | null;
 type ImageComposerMenu = "style" | null;
 
+const COMPOSER_QUICK_PROMPTS = {
+    text: ["写一段更有画面感的描述", "把这段内容整理成分镜脚本", "提炼出适合生成图片的提示词"],
+    image: ["保持主体不变，换成电影感光影", "把画面扩展成一张完整海报", "生成三种不同构图方案"],
+    imageEdit: ["保留主体，替换背景环境", "提升细节与光影质感", "把画面改成商业广告风格"],
+    video: ["镜头缓慢向前推进，保持主体一致", "让主体自然地走向镜头", "增加有层次的电影感运镜"],
+    audio: ["生成一段氛围感电影配乐", "为这段内容设计情绪化音效", "生成适合短片的背景音乐"],
+} as const;
+
+function ComposerQuickPrompts({ items, theme, onSelect }: { items: readonly string[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (prompt: string) => void }) {
+    return (
+        <div className="canvas-composer-quick-prompts mb-2 flex min-w-0 items-center gap-1.5 overflow-x-auto" data-canvas-no-zoom>
+            <span className="shrink-0 px-1 text-[11px] font-medium opacity-45">尝试</span>
+            {items.map((item) => (
+                <button
+                    key={item}
+                    type="button"
+                    className="canvas-composer-quick-prompt shrink-0 rounded-full border px-2.5 py-1 text-[11px] transition"
+                    style={{ borderColor: theme.ui.hairline, background: theme.ui.controlFill, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect(item);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    {item}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onImageSettingsOpenChange, onRetry }: CanvasNodePromptPanelProps) {
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
@@ -47,6 +81,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const [confirmMode, setConfirmMode] = useState<"auto" | "manual">("auto");
+    const [pendingConfirmation, setPendingConfirmation] = useState<GenerationConfirmation | null>(null);
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
     const { capability: videoCapability, isLoading: isVideoCapabilityLoading, isFetching: isVideoCapabilityFetching } = useVideoModelCapability(config.model);
@@ -166,12 +202,42 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             : mode === "image"
                 ? enrichImagePrompt(text, node.metadata?.imageStylePreset)
                 : text;
+        if (confirmMode === "manual" && mode !== "comfyui") {
+            const source: ComposerConfirmSource = {
+                modelLabel: modelOptionLabel(config, config.model),
+                count: config.count,
+                size: config.size || "",
+                videoSeconds: config.videoSeconds,
+            };
+            const references = stableMentionReferences.map((reference) => ({
+                nodeId: reference.nodeId,
+                kind: reference.kind,
+                label: reference.label,
+                title: reference.title,
+                active: reference.active,
+            }));
+            setPendingConfirmation(buildComposerConfirmation(mode, enrichedPrompt, source, references));
+            return;
+        }
         onGenerate(node.id, mode, enrichedPrompt);
         setPrompt("");
     };
 
+    const confirmCard = pendingConfirmation ? (
+        <CanvasConfirmCard
+            confirmation={pendingConfirmation}
+            onCancel={() => setPendingConfirmation(null)}
+            onConfirm={() => {
+                const confirmation = pendingConfirmation;
+                setPendingConfirmation(null);
+                if (confirmation) onGenerate(node.id, mode, confirmation.prompt);
+            }}
+        />
+    ) : null;
+
     if (mode === "video") {
         return (
+            <>
             <VideoComposer
                 node={node}
                 config={config}
@@ -197,11 +263,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 generationRuns={generationRuns}
                 onRetry={onRetry ? () => onRetry(node.id) : undefined}
             />
+            {confirmCard}
+            </>
         );
     }
 
     if (mode === "image") {
         return (
+            <>
             <ImageComposer
                 node={node}
                 config={config}
@@ -227,10 +296,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 generationRuns={generationRuns}
                 onRetry={onRetry ? () => onRetry(node.id) : undefined}
             />
+            {confirmCard}
+            </>
         );
     }
 
     return (
+        <>
         <div
             className="creative-os-composer min-w-0 overflow-hidden border px-4 py-3"
             style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
@@ -244,11 +316,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     ref={textareaRef}
                     value={prompt}
                     references={mentionReferences}
-                    onChange={updatePrompt}
-                    onSubmit={submit}
-                    className="h-[92px] w-full resize-none border-0 bg-transparent px-0 pb-3 pr-8 pt-0 text-[14px] leading-6 outline-none placeholder:opacity-35"
-                    style={{ color: theme.node.text }}
                     placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
+                    onValueChange={updatePrompt}
+                    onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
+                    submitOnEnter={!isRunning}
+                    onSubmit={submit}
                 />
                 <button
                     type="button"
@@ -260,6 +332,15 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <Maximize2 className="size-4" />
                 </button>
             </div>
+            {!prompt.trim() ? (
+                // video / image 模式各自有专属 Composer 快捷提示词，主面板仅剩
+                // text / audio / comfyui；comfyui 节点复用文本类提示词。
+                <ComposerQuickPrompts
+                    items={mode === "audio" ? COMPOSER_QUICK_PROMPTS.audio : COMPOSER_QUICK_PROMPTS.text}
+                    theme={theme}
+                    onSelect={updatePrompt}
+                />
+            ) : null}
             <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
 
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
@@ -286,8 +367,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className="creative-os-primary-action !h-9 !min-w-9 shrink-0 !rounded-full !px-0"
                     danger={isRunning}
                     disabled={!isRunning && !prompt.trim()}
-                    onClick={() => (isRunning ? onStop(node.id) : submit())}
-                    aria-label={isRunning ? "停止生成" : "生成"}
+                    onClick={isRunning ? () => onStop(node.id) : submit}
                 >
                     <span className="flex items-center gap-1.5">
                         {isRunning ? (
@@ -303,6 +383,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 </Button>
             </div>
         </div>
+            {confirmCard}
+        </>
     );
 }
 
@@ -393,6 +475,13 @@ function ImageComposer({
                     </button>
                 </Tooltip>
             </div>
+            {!prompt.trim() ? (
+                <ComposerQuickPrompts
+                    items={hasImageContent ? COMPOSER_QUICK_PROMPTS.imageEdit : COMPOSER_QUICK_PROMPTS.image}
+                    theme={theme}
+                    onSelect={onPromptChange}
+                />
+            ) : null}
 
             <div className="image-composer-toolbar flex h-11 min-w-0 items-center gap-1 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
@@ -579,6 +668,7 @@ function VideoComposer({
                     </button>
                 </Tooltip>
             </div>
+            {!prompt.trim() ? <ComposerQuickPrompts items={COMPOSER_QUICK_PROMPTS.video} theme={theme} onSelect={onPromptChange} /> : null}
 
             {capabilityPending || capabilityUnavailable ? (
                 <ComposerNotice

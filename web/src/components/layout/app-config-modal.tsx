@@ -1,28 +1,13 @@
 "use client";
 
-import { App, Alert, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { Cloud, LogIn, LogOut, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { App, Alert, Button, Form, Input, Modal, Segmented, Select, Tabs } from "antd";
+import { LogIn, LogOut, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { loginUser, logoutUser, registerUser } from "@/services/api/auth";
-import { syncAppDataToWebdav, type AppSyncDomainKey } from "@/services/app-sync";
-import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { useConfigStore, type ImageResponseFormatPolicy } from "@/stores/use-config-store";
-import { useUserStore, type SaveMode } from "@/stores/use-user-store";
-
-type WebdavDomainProgress = {
-    label: string;
-    stage: string;
-    current?: number;
-    total?: number;
-    status?: "active" | "success" | "exception";
-};
-
-const saveModeOptions: Array<{ label: string; value: SaveMode }> = [
-    { label: "后端账号", value: "backend" },
-    { label: "WebDAV 云端", value: "webdav" },
-];
+import { useUserStore } from "@/stores/use-user-store";
 
 const imageResponseFormatOptions: Array<{ label: string; value: ImageResponseFormatPolicy }> = [
     { label: "自动", value: "auto" },
@@ -30,51 +15,24 @@ const imageResponseFormatOptions: Array<{ label: string; value: ImageResponseFor
     { label: "URL", value: "url" },
 ];
 
-const webdavDomainKeys: AppSyncDomainKey[] = ["config", "canvas", "assets", "image-workbench", "video-workbench"];
-const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
-    config: "配置",
-    canvas: "画布",
-    assets: "素材",
-    "image-workbench": "生图工作台",
-    "video-workbench": "视频创作台",
-};
-
-function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProgress> {
-    return webdavDomainKeys.reduce(
-        (progress, key) => ({
-            ...progress,
-            [key]: { label: webdavDomainLabels[key], stage: "等待同步" },
-        }),
-        {} as Record<AppSyncDomainKey, WebdavDomainProgress>,
-    );
-}
-
 export function AppConfigModal() {
     const { message } = App.useApp();
     const [activeTab, setActiveTab] = useState("account");
     const [authMode, setAuthMode] = useState<"login" | "register">("login");
     const [authLoading, setAuthLoading] = useState(false);
     const [authForm, setAuthForm] = useState({ username: "", password: "", displayName: "", authCode: "" });
-    const [testingWebdav, setTestingWebdav] = useState(false);
-    const [syncingWebdav, setSyncingWebdav] = useState(false);
-    const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
-    const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
 
     const config = useConfigStore((state) => state.config);
-    const webdav = useConfigStore((state) => state.webdav);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
 
     const user = useUserStore((state) => state.user);
     const token = useUserStore((state) => state.token);
-    const saveMode = useUserStore((state) => state.saveMode);
     const setSession = useUserStore((state) => state.setSession);
     const clearSession = useUserStore((state) => state.clearSession);
-    const setSaveMode = useUserStore((state) => state.setSaveMode);
 
     useEffect(() => {
         if (isConfigOpen && !token) setActiveTab("account");
@@ -83,19 +41,6 @@ export function AppConfigModal() {
     const closeModal = () => {
         clearPromptContinue();
         setConfigDialogOpen(false);
-    };
-
-    const changeSaveMode = (mode: SaveMode) => {
-        if (mode === "backend" && !token) {
-            setActiveTab("account");
-            message.warning("请先登录后端账号");
-            return;
-        }
-        if (mode === "webdav" && !webdav.url.trim()) {
-            setActiveTab("webdav");
-            message.info("请先填写 WebDAV 地址");
-        }
-        setSaveMode(mode);
     };
 
     const submitAuth = async () => {
@@ -135,47 +80,6 @@ export function AppConfigModal() {
         message.success("已退出登录");
     };
 
-    const testWebdav = async () => {
-        setTestingWebdav(true);
-        try {
-            await testWebdavConnection(webdav);
-            message.success("WebDAV 连接正常");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "WebDAV 连接失败");
-        } finally {
-            setTestingWebdav(false);
-        }
-    };
-
-    const syncWebdav = async () => {
-        setSyncingWebdav(true);
-        setWebdavSyncStatus("开始同步...");
-        setWebdavDomainProgress(createWebdavDomainProgress());
-        try {
-            const result = await syncAppDataToWebdav(webdav, (event) => {
-                if (event.domain) {
-                    const domain = event.domain as AppSyncDomainKey;
-                    setWebdavDomainProgress((progress) => ({
-                        ...progress,
-                        [domain]: {
-                            ...progress[domain],
-                            ...event,
-                            label: event.label || progress[domain].label,
-                        },
-                    }));
-                }
-                setWebdavSyncStatus(event.stage);
-            });
-            updateWebdavConfig("lastSyncedAt", result.syncedAt);
-            message.success("同步完成：" + result.projects + " 个画布，" + result.assets + " 个素材，" + result.uploadedFiles + " 个新文件");
-        } catch (error) {
-            setWebdavSyncStatus("同步失败");
-            message.error(error instanceof Error ? error.message : "WebDAV 同步失败");
-        } finally {
-            setSyncingWebdav(false);
-        }
-    };
-
     return (
         <Modal title="设置" open={isConfigOpen} onCancel={closeModal} footer={null} width={780} destroyOnHidden className="creative-config-modal">
             {shouldPromptContinue ? (
@@ -200,12 +104,9 @@ export function AppConfigModal() {
                                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                                         <div>
                                             <div className="font-medium">保存位置</div>
-                                            <div className="text-xs text-gray-500">后端账号是默认工作区；WebDAV 作为独立的云端保存通道保留。</div>
+                                            <div className="text-xs text-gray-500">数据按后端账号隔离保存与同步。</div>
                                         </div>
-                                        <Segmented value={saveMode} options={saveModeOptions} onChange={(value) => changeSaveMode(value as SaveMode)} />
-                                    </div>
-                                    <div className="rounded-xl bg-black/[0.04] px-3 py-2 text-sm text-gray-600 dark:bg-white/[0.06] dark:text-white/70">
-                                        当前模式：{saveModeOptions.find((item) => item.value === saveMode)?.label || saveMode}
+                                        <span className="rounded-full border border-black/10 px-3 py-1 text-xs text-gray-600 dark:border-white/10 dark:text-white/70">后端账号</span>
                                     </div>
                                 </section>
 
@@ -289,39 +190,6 @@ export function AppConfigModal() {
                             </Form>
                         ),
                     },
-                    {
-                        key: "webdav",
-                        label: <span className="inline-flex items-center gap-2"><Cloud className="size-4" />WebDAV</span>,
-                        children: (
-                            <div className="space-y-4">
-                                <Alert type="info" showIcon message="云端 WebDAV 保存/同步" description={"会同步画布、素材、配置和工作台记录，清单文件为 " + WEBDAV_MANIFEST_FILE_NAME + "。"} />
-                                <Form layout="vertical" className="grid gap-2 md:grid-cols-2">
-                                    <Form.Item label="连接方式" className="mb-2">
-                                        <Segmented block value={webdav.proxyMode} options={[{ label: "直连", value: "direct" }, { label: "后端代理", value: "backend" }]} onChange={(value) => updateWebdavConfig("proxyMode", value as typeof webdav.proxyMode)} />
-                                    </Form.Item>
-                                    <Form.Item label="远端目录" className="mb-2">
-                                        <Input value={webdav.directory} onChange={(event) => updateWebdavConfig("directory", event.target.value)} />
-                                    </Form.Item>
-                                    <Form.Item label="WebDAV 地址" className="mb-2 md:col-span-2">
-                                        <Input value={webdav.url} placeholder="https://example.com/dav" onChange={(event) => updateWebdavConfig("url", event.target.value)} />
-                                    </Form.Item>
-                                    <Form.Item label="用户名" className="mb-2">
-                                        <Input value={webdav.username} onChange={(event) => updateWebdavConfig("username", event.target.value)} />
-                                    </Form.Item>
-                                    <Form.Item label="密码 / 应用密码" className="mb-2">
-                                        <Input.Password value={webdav.password} onChange={(event) => updateWebdavConfig("password", event.target.value)} />
-                                    </Form.Item>
-                                </Form>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <Button loading={testingWebdav} onClick={testWebdav}>测试连接</Button>
-                                    <Button type="primary" loading={syncingWebdav} onClick={syncWebdav}>立即同步</Button>
-                                    {webdav.lastSyncedAt ? <span className="text-xs text-gray-500">上次同步：{formatWebdavTime(webdav.lastSyncedAt)}</span> : null}
-                                </div>
-                                {webdavSyncStatus ? <div className="text-xs text-gray-500">{webdavSyncStatus}</div> : null}
-                                <WebdavProgressGrid progress={webdavDomainProgress} />
-                            </div>
-                        ),
-                    },
                 ]}
             />
         </Modal>
@@ -330,49 +198,4 @@ export function AppConfigModal() {
 
 function normalizeImageCount(value: string) {
     return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 1))));
-}
-
-function formatWebdavTime(value: string) {
-    return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
-
-function WebdavProgressGrid({ progress }: { progress: Record<AppSyncDomainKey, WebdavDomainProgress> }) {
-    return (
-        <div className="grid gap-2">
-            {webdavDomainKeys.map((key) => {
-                const item = progress[key];
-                const count = item.total ? String(item.current || 0) + "/" + item.total : "";
-                return (
-                    <div key={key} className="rounded-xl border border-black/10 px-3 py-2 dark:border-white/10">
-                        <div className="mb-1 flex min-w-0 items-center justify-between gap-3 text-xs">
-                            <span className="shrink-0 font-medium">{item.label}</span>
-                            <span className="min-w-0 truncate text-right text-gray-500">
-                                {item.stage}
-                                {count ? " · " + count : ""}
-                            </span>
-                        </div>
-                        <Progress percent={getWebdavProgressPercent(item)} size="small" status={getWebdavProgressStatus(item)} showInfo={false} />
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-function getWebdavProgressPercent(item: WebdavDomainProgress) {
-    if (item.status === "success") return 100;
-    if (item.total) return Math.min(100, Math.round(((item.current || 0) / item.total) * 100));
-    if (item.status === "exception") return 100;
-    if (item.stage === "等待同步") return 0;
-    if (item.stage.includes("读取")) return 20;
-    if (item.stage.includes("下载")) return 40;
-    if (item.stage.includes("写入")) return 60;
-    if (item.stage.includes("上传")) return 80;
-    if (item.stage.includes("完成")) return 100;
-    return item.status === "active" ? 30 : 0;
-}
-
-function getWebdavProgressStatus(item: WebdavDomainProgress): "normal" | "active" | "success" | "exception" {
-    if (item.status === "success" || item.status === "exception") return item.status;
-    return item.status === "active" ? "active" : "normal";
 }

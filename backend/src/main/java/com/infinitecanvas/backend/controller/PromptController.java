@@ -9,6 +9,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -26,7 +27,8 @@ public class PromptController {
     private static final long CACHE_TTL_MS = 1000L * 60L * 60L;
 
     private final WebClient webClient = WebClient.builder().build();
-    private Cache cache;
+    private volatile Cache cache;
+    private boolean refreshing = false;
 
     @GetMapping
     public Map<String, Object> list(
@@ -53,9 +55,41 @@ public class PromptController {
         );
     }
 
-    private synchronized List<Prompt> getPrompts() {
+    private List<Prompt> getPrompts() {
         long now = System.currentTimeMillis();
-        if (cache != null && now - cache.fetchedAt < CACHE_TTL_MS) return cache.items;
+        Cache current = cache;
+        // 未过期：直接返回缓存。
+        if (current != null && now - current.fetchedAt < CACHE_TTL_MS) return current.items;
+        // 已过期但有旧数据：触发后台重建，先返回旧数据（不阻塞任何请求）。
+        if (current != null) {
+            triggerRefresh();
+            return current.items;
+        }
+        // 首次加载：阻塞等待全量抓取。
+        return refreshBlocking();
+    }
+
+    private void triggerRefresh() {
+        synchronized (this) {
+            if (refreshing) return;
+            refreshing = true;
+        }
+        // 网络抓取是阻塞 IO，使用虚拟线程执行，避免占用公共线程池。
+        Thread.ofVirtual().start(() -> {
+            try {
+                refreshBlocking();
+            } finally {
+                synchronized (this) {
+                    refreshing = false;
+                }
+            }
+        });
+    }
+
+    private synchronized List<Prompt> refreshBlocking() {
+        long now = System.currentTimeMillis();
+        Cache current = cache;
+        if (current != null && now - current.fetchedAt < CACHE_TTL_MS) return current.items;
         List<Prompt> items = new ArrayList<>();
         buildSafely(items, "gpt-image-2-prompts", this::buildGptImage2Prompts);
         buildSafely(items, "awesome-gpt-image", this::buildAwesomeGptImagePrompts);
@@ -76,7 +110,8 @@ public class PromptController {
 
     private List<Prompt> buildGptImage2Prompts() {
         String json = fetchText(GPT_IMAGE_2_RAW_BASE, "data/ingested_tweets.json");
-        Map<String, String> cases = new HashMap<>();
+        // parallelStream 并发写入，必须使用并发映射。
+        Map<String, String> cases = new ConcurrentHashMap<>();
         GPT_IMAGE_2_CASE_FILES.parallelStream().map(file -> fetchText(GPT_IMAGE_2_RAW_BASE, file)).forEach(markdown -> collectGptImage2Cases(cases, markdown));
         List<Prompt> result = new ArrayList<>();
         Matcher matcher = Pattern.compile("\\{[^{}]*?\"title\"\\s*:\\s*\"([^\"]*)\"[^{}]*?\"tweet_url\"\\s*:\\s*\"([^\"]*)\"[^{}]*?\"image_dir\"\\s*:\\s*\"([^\"]*)\"[^{}]*?(?:\"category\"\\s*:\\s*\"([^\"]*)\")?[^{}]*?(?:\"added_at\"\\s*:\\s*\"([^\"]*)\")?[^{}]*?\\}").matcher(json);

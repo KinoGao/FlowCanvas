@@ -1041,13 +1041,20 @@ export const useDirectorStore = create<DirectorStore>((set, get) => {
     options: { trackUndo?: boolean; persist?: boolean } = {}
   ) {
     const { trackUndo = true, persist = true } = options;
+    // updater 内不执行任何副作用（StrictMode 下会被双调用）：
+    // 持久化写入移到 set() 之后，且 batch 进行中跳过（由 endUndoBatch 统一落盘）。
+    const inBatchBeforeSet = (get() as DirectorRuntimeState).undoBatchDepth > 0;
 
     set((state) => {
       const currentState = state as DirectorRuntimeState;
-      const previousSnapshot = createUndoStackEntry(currentState);
+      // batch 中且已有快照时，拖拽/滑块每帧无需再创建 undo 快照与全量比较
+      //（batch 结束由 endUndoBatch 统一比较入栈），这是拖拽卡顿的主要来源。
+      const skipSnapshotWork =
+        currentState.undoBatchDepth > 0 && currentState.undoBatchSnapshot !== null;
+      const previousSnapshot = skipSnapshotWork ? null : createUndoStackEntry(currentState);
       const nextState = updater(currentState);
       const nextSnapshot = extractPersistedDirectorState(nextState);
-      const didChange = !isSameDirectorState(previousSnapshot, nextSnapshot);
+      const didChange = skipSnapshotWork || !isSameDirectorState(previousSnapshot!, nextSnapshot);
 
       if (!didChange) {
         return {
@@ -1061,24 +1068,24 @@ export const useDirectorStore = create<DirectorStore>((set, get) => {
 
       const shouldCaptureUndoBatchSnapshot =
         trackUndo && currentState.undoBatchDepth > 0 && currentState.undoBatchSnapshot === null;
+      // previousSnapshot 为 null 仅发生在 batch 已有快照时；此分支 undoBatchDepth === 0
+      // 或 undoBatchSnapshot === null，二者都不满足 skipSnapshotWork，故非空。
       const nextUndoStack =
         trackUndo && currentState.undoBatchDepth === 0
-          ? trimUndoStack([...currentState.undoStack, previousSnapshot])
+          ? trimUndoStack([...currentState.undoStack, previousSnapshot!])
           : nextState.undoStack;
-      const runtimeState: DirectorRuntimeState = {
+      return {
         ...nextState,
         undoStack: nextUndoStack,
-        undoBatchSnapshot: shouldCaptureUndoBatchSnapshot ? previousSnapshot : nextState.undoBatchSnapshot,
+        undoBatchSnapshot: shouldCaptureUndoBatchSnapshot ? previousSnapshot! : nextState.undoBatchSnapshot,
         undoBatchHasTrackedChanges:
           trackUndo && currentState.undoBatchDepth > 0 ? true : nextState.undoBatchHasTrackedChanges,
       };
-
-      if (persist) {
-        writePersistedDirectorState(extractPersistedDirectorState(runtimeState));
-      }
-
-      return runtimeState;
     });
+
+    if (persist && !inBatchBeforeSet) {
+      writePersistedDirectorState(extractPersistedDirectorState(get() as DirectorRuntimeState));
+    }
   }
 
   function commitUiMutation(updater: (state: DirectorRuntimeState) => DirectorRuntimeState) {
@@ -1128,6 +1135,8 @@ export const useDirectorStore = create<DirectorStore>((set, get) => {
           undoBatchHasTrackedChanges: false,
         };
       });
+      // batch 期间 commitMutation 跳过了持久化写入，结束时统一落盘一次。
+      writePersistedDirectorState(extractPersistedDirectorState(get() as DirectorRuntimeState));
     },
     setTransformMode: (mode) =>
       commitUiMutation((state) => ({

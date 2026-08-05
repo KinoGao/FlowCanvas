@@ -2,6 +2,8 @@ package com.infinitecanvas.backend.service;
 
 import com.infinitecanvas.backend.entity.User;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 public final class UserRequestContext {
     public static final String USER_ATTR = "infiniteCanvasUser";
@@ -12,7 +14,7 @@ public final class UserRequestContext {
     public static User requireUser(HttpServletRequest request) {
         User user = currentUser(request);
         if (user != null) return user;
-        throw new IllegalArgumentException("登录状态无效");
+        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "登录状态无效");
     }
 
     public static User currentUser(HttpServletRequest request) {

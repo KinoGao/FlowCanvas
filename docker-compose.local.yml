@@ -18,5 +18,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - AUTH_CODE=${AUTH_CODE:-}
+      # 内部部署默认使用硬编码凭证（gycode / admincode），可通过环境变量覆盖。
+      - AUTH_CODE=${AUTH_CODE:-gycode}
+      - ADMIN_CODE=${ADMIN_CODE:-admincode}
+      - MEDIA_SIGNING_SECRET=${MEDIA_SIGNING_SECRET:-admincode}
       - DB_PATH=/app/data/app.db

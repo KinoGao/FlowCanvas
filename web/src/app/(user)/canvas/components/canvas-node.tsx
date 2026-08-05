@@ -16,6 +16,7 @@ import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/fi
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { getPinColor, getPinColorLabel, getPinColorValue } from "../utils/canvas-pin-utils";
 import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -105,6 +106,8 @@ export type CanvasNodeProps = {
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onViewImage?: (node: CanvasNodeData) => void;
     onGroupAction?: (node: CanvasNodeData, action: "storyboard" | "ungroup") => void;
+    /** TapNow: 点击节点右侧 + 连接点，请求宿主创建下游节点并自动连线。 */
+    onClickCreate?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -202,6 +205,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onCaptureVideoFrame,
     onViewImage,
     onGroupAction,
+    onClickCreate,
     onContextMenu,
 }: CanvasNodeProps) {
     const scaleRef = useCanvasScaleRef();
@@ -551,6 +555,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 
                 {!isGroup ? <NodeTitleBadge node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
+                {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
                 {!shouldUseOverview && !editorManaged ? (
@@ -564,7 +569,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             </Card>
 
             {!isGroup ? <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && !isGenerationConfigNode(data.type) && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} /> : null}
+            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && !isGenerationConfigNode(data.type) && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
 
             {showPanel && renderPanel ? (
                 <div
@@ -1051,9 +1056,8 @@ function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof ca
 
     return (
         <div className="relative flex h-full w-full overflow-hidden rounded-[inherit] p-4 text-left" style={{ background: `linear-gradient(145deg, ${theme.node.panel}, ${theme.node.fill})` }}>
-            <span aria-hidden className="pointer-events-none absolute -right-20 -top-24 size-56 rounded-full blur-3xl" style={{ background: theme.ui.accentSoft }} />
             <div className="relative z-10 flex h-full w-full flex-col">
-                <div className="flex items-start gap-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
                     <span className="grid size-10 shrink-0 place-items-center rounded-lg border" style={{ background: theme.toolbar.activeBg, borderColor: theme.ui.accentSoft, color: theme.ui.accent }}>
                         <NodeIcon className="size-[18px]" />
                     </span>
@@ -1061,6 +1065,7 @@ function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof ca
                         <div className="text-[11px] font-semibold" style={{ color: theme.node.text }}>{visual.label}</div>
                         <p className="mt-1 text-[10px] leading-4" style={{ color: theme.node.muted }}>{visual.description}</p>
                     </div>
+                    <span className="ml-auto shrink-0 text-[10px] font-medium opacity-45">尝试</span>
                 </div>
                 <div className="mt-auto grid gap-1.5 pt-4">
                     {actions.map((action, index) => {
@@ -1580,15 +1585,50 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
     );
 }
 
-function ConnectionHandleDot({ side, visible, active }: { side: "left" | "right"; visible: boolean; active: boolean }) {
+function NodePinIndicator({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const pin = getPinColor(node);
+    const color = pin ? getPinColorValue(pin) : undefined;
+    if (!color) return null;
+    return (
+        <span
+            title={getPinColorLabel(pin) ?? pin}
+            className="pointer-events-none absolute right-2 top-2 z-30 size-2.5 rounded-full"
+            style={{ background: color, boxShadow: `0 0 0 2px ${theme.node.panel}` }}
+        />
+    );
+}
+
+function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "left" | "right"; visible: boolean; active: boolean; onClickCreate?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isSource = side === "right";
+    const downRef = useRef<{ x: number; y: number } | null>(null);
     const visualClass = isSource ? "left-[18px]" : "right-[18px]";
     const plusVisibility = active
         ? "opacity-100 scale-125"
         : visible
           ? "opacity-100 scale-100"
           : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
+
+    // TapNow 右侧 +：单击（按下-抬起位移 ≤5px）触发创建下游节点。
+    // 拖拽连线由 leafer-canvas 通过 data-handle 消费 pointerdown（preventDefault + setPointerCapture，
+    // 会抑制 click 合成事件），故在此自行检测单击：window 冒泡阶段监听 pointerup，确保画布先完成
+    // 连线清理（clearTempEdge / onConnectEnd），再触发宿主创建回调。
+    const handlePointerDown = (event: React.PointerEvent) => {
+        if (!onClickCreate) return;
+        downRef.current = { x: event.clientX, y: event.clientY };
+        const pointerId = event.pointerId;
+        const finish = (upEvent: PointerEvent) => {
+            window.removeEventListener("pointerup", finish);
+            window.removeEventListener("pointercancel", finish);
+            const down = downRef.current;
+            downRef.current = null;
+            if (down && Math.hypot(upEvent.clientX - down.x, upEvent.clientY - down.y) <= 5) {
+                onClickCreate();
+            }
+        };
+        window.addEventListener("pointerup", finish);
+        window.addEventListener("pointercancel", finish);
+    };
 
     return (
         <div
@@ -1597,7 +1637,7 @@ function ConnectionHandleDot({ side, visible, active }: { side: "left" | "right"
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
             style={{ [side]: "-22px", width: "44px" }}
         >
-            <span className={`pointer-events-auto absolute top-1/2 flex size-9 -translate-y-1/2 cursor-crosshair items-center justify-center ${visualClass}`}>
+            <span onPointerDown={handlePointerDown} className={`pointer-events-auto absolute top-1/2 flex size-9 -translate-y-1/2 cursor-crosshair items-center justify-center ${visualClass}`}>
                 <span
                     className={`pointer-events-none relative grid size-5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                     style={{

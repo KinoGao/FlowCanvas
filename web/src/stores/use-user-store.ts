@@ -3,7 +3,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type SaveMode = "backend" | "webdav";
+// WebDAV 保存通道已移除，saveMode 仅保留后端账号一值（字段保留供
+// 既有 `saveMode !== "backend"` 判断与 restoreKey 迁移兼容）。
+export type SaveMode = "backend";
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
 
 export type LocalUser = {
@@ -26,7 +28,6 @@ type UserStore = {
     setSession: (user: LocalUser, token: string) => void;
     updateUser: (user: LocalUser) => void;
     clearSession: () => void;
-    setSaveMode: (saveMode: SaveMode) => void;
     setWorkspaceState: (workspaceStatus: WorkspaceStatus, workspaceError?: string) => void;
     markBackendImported: (userId: string) => void;
 };
@@ -45,7 +46,6 @@ export const useUserStore = create<UserStore>()(
             setSession: (user, token) => set({ user, token, saveMode: "backend", workspaceStatus: "loading", workspaceError: "" }),
             updateUser: (user) => set({ user }),
             clearSession: () => set({ user: null, token: "", saveMode: "backend", workspaceStatus: "idle", workspaceError: "" }),
-            setSaveMode: (saveMode) => set({ saveMode }),
             setWorkspaceState: (workspaceStatus, workspaceError = "") => set({ workspaceStatus, workspaceError }),
             markBackendImported: (userId) =>
                 set((state) => ({
@@ -68,7 +68,8 @@ export const useUserStore = create<UserStore>()(
                 return {
                     ...current,
                     ...saved,
-                    saveMode: saved.saveMode === "webdav" ? "webdav" : "backend",
+                    // 旧的 WebDAV 保存模式持久值一律迁移回后端账号。
+                    saveMode: "backend",
                     workspaceStatus: "idle",
                     workspaceError: "",
                 };

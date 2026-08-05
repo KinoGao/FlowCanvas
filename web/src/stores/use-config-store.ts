@@ -59,15 +59,6 @@ export type AiConfig = {
 
 export type ProxyMode = "direct" | "backend";
 
-export type WebdavSyncConfig = {
-    proxyMode: ProxyMode;
-    url: string;
-    username: string;
-    password: string;
-    directory: string;
-    lastSyncedAt: string;
-};
-
 export type ComfyUiConfig = {
     proxyMode: ProxyMode;
     baseUrl: string;
@@ -126,15 +117,6 @@ export const defaultConfig: AiConfig = {
     canvasImageCount: "1",
 };
 
-export const defaultWebdavSyncConfig: WebdavSyncConfig = {
-    proxyMode: "direct",
-    url: "",
-    username: "",
-    password: "",
-    directory: "infinite-canvas",
-    lastSyncedAt: "",
-};
-
 export const defaultComfyUiConfig: ComfyUiConfig = {
     proxyMode: "backend",
     baseUrl: "http://127.0.0.1:8188",
@@ -146,13 +128,11 @@ export const defaultComfyUiConfig: ComfyUiConfig = {
 
 type ConfigStore = {
     config: AiConfig;
-    webdav: WebdavSyncConfig;
     comfyui: ComfyUiConfig;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     replaceConfig: (config: AiConfig) => void;
-    updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     updateComfyUiConfig: <K extends keyof ComfyUiConfig>(key: K, value: ComfyUiConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
@@ -225,7 +205,6 @@ export const useConfigStore = create<ConfigStore>()(
     persist(
         (set, get) => ({
             config: defaultConfig,
-            webdav: defaultWebdavSyncConfig,
             comfyui: defaultComfyUiConfig,
             isConfigOpen: false,
             shouldPromptContinue: false,
@@ -237,13 +216,6 @@ export const useConfigStore = create<ConfigStore>()(
                     },
                 })),
             replaceConfig: (config) => set({ config }),
-            updateWebdavConfig: (key, value) =>
-                set((state) => ({
-                    webdav: {
-                        ...state.webdav,
-                        [key]: value,
-                    },
-                })),
             updateComfyUiConfig: (key, value) =>
                 set((state) => ({
                     comfyui: {
@@ -257,25 +229,13 @@ export const useConfigStore = create<ConfigStore>()(
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),
         {
+            // WebDAV 同步已移除；保留 persist 包装仅为兼容 legacy-workspace-storage 的旧键迁移。
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ webdav: state.webdav }),
-            merge: (persisted, current) => {
-                const persistedState = (persisted || {}) as Partial<ConfigStore>;
-                const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                return {
-                    ...current,
-                    config: defaultConfig,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav, proxyMode: normalizeProxyMode(persistedWebdav.proxyMode) },
-                    comfyui: defaultComfyUiConfig,
-                };
-            },
+            partialize: () => ({}),
+            merge: (persisted, current) => current,
         },
     ),
 );
-
-function normalizeProxyMode(value: unknown): ProxyMode {
-    return value === "backend" || value === "nextjs" ? "backend" : "direct";
-}
 
 function normalizeModelList(models: string[], channels: ModelChannel[]) {
     const allModelOptions = channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model)));

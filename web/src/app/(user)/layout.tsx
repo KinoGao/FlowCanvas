@@ -8,9 +8,8 @@ export default function UserLayout() {
     const hydrated = useUserStore((state) => state.hydrated);
     const user = useUserStore((state) => state.user);
     const token = useUserStore((state) => state.token);
-    const saveMode = useUserStore((state) => state.saveMode);
     const workspaceStatus = useUserStore((state) => state.workspaceStatus);
-    const workspaceReady = saveMode === "webdav" || (hydrated && Boolean(user && token) && workspaceStatus === "ready");
+    const workspaceReady = hydrated && Boolean(user && token) && workspaceStatus === "ready";
 
     return (
         <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">

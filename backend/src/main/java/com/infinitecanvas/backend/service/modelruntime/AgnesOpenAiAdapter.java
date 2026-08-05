@@ -58,7 +58,7 @@ public class AgnesOpenAiAdapter implements ModelRequestAdapter {
             @Value("${app.public-base-url:}") String publicBaseUrl
     ) {
         this(objectMapper, publicImageService, publicBaseUrl,
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NORMAL).build(),
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NEVER).build(),
                 delay -> Thread.sleep(delay.toMillis()));
     }
 

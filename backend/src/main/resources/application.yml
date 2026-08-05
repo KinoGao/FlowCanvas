@@ -5,7 +5,7 @@ spring:
       - optional:file:./backend/backend-config.yml
       - optional:file:./data/backend-config.yml
   datasource:
-    url: jdbc:sqlite:${DB_PATH:./data/app.db}
+    url: jdbc:sqlite:${DB_PATH:./data/app.db}?busy_timeout=5000&journal_mode=WAL
     driver-class-name: org.sqlite.JDBC
   jpa:
     database-platform: org.hibernate.community.dialect.SQLiteDialect
@@ -24,6 +24,11 @@ server:
     max-swallow-size: ${USER_REQUEST_MAX_SIZE:512MB}
 
 app:
+  # 内部部署硬编码默认值（可通过环境变量覆盖）：
+  # - AUTH_CODE / REGISTRATION_CODE 默认 gycode
+  # - ADMIN_CODE 默认 admincode
+  # - MEDIA_SIGNING_SECRET 默认继承 ADMIN_CODE
+  # 公网部署请务必通过环境变量显式设置以上三项。
   auth-code: ${AUTH_CODE:gycode}
   registration-code: ${REGISTRATION_CODE:${AUTH_CODE:gycode}}
   admin-code: ${ADMIN_CODE:admincode}

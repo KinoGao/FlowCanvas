@@ -103,7 +103,15 @@ docker compose up -d
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-前端服务默认运行在 `9800`，后端服务默认运行在 `9801`。生产部署前请根据自己的域名与网络环境配置 `AUTH_CODE`、数据库卷和后端公网媒体访问地址。
+Compose 默认使用内部硬编码凭证（注册码 `gycode`、管理员授权码 `admincode`），可通过环境变量覆盖：
+
+```bash
+export AUTH_CODE=你的注册码
+export ADMIN_CODE=你的管理员授权码
+export MEDIA_SIGNING_SECRET=随机媒体签名密钥
+```
+
+前端服务默认运行在 `9800`，后端服务默认运行在 `9801`。生产部署前请根据自己的域名与网络环境配置数据库卷和后端公网媒体访问地址。
 
 ## 模型与媒体配置说明
 

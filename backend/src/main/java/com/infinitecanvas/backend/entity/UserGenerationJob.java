@@ -1,6 +1,8 @@
 package com.infinitecanvas.backend.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -33,8 +35,10 @@ public class UserGenerationJob {
     @Column(name = "response_headers_json", columnDefinition = "TEXT")
     private String responseHeadersJson;
 
-    @Lob
-    @Column(name = "response_body")
+    // SQLite's JDBC driver does not implement ResultSet#getBlob. Keep the
+    // payload binary, but force Hibernate to use the byte[] VARBINARY path.
+    @JdbcTypeCode(SqlTypes.VARBINARY)
+    @Column(name = "response_body", columnDefinition = "BLOB")
     private byte[] responseBody;
 
     @Column(name = "error_message", columnDefinition = "TEXT")

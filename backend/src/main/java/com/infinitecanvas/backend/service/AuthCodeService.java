@@ -14,6 +14,7 @@ public class AuthCodeService {
             @Value("${app.registration-code:${app.auth-code:gycode}}") String registrationCode,
             @Value("${app.admin-code:admincode}") String adminCode
     ) {
+        // 内部部署默认硬编码 gycode / admincode，可通过环境变量覆盖。
         this.registrationCode = registrationCode == null || registrationCode.isBlank()
                 ? UUID.randomUUID().toString().replace("-", "") : registrationCode;
         this.adminCode = adminCode == null ? "" : adminCode;

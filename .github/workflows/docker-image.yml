@@ -10,7 +10,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/basketikun/infinite-canvas
+  FRONTEND_IMAGE: ghcr.io/basketikun/infinite-canvas
+  BACKEND_IMAGE: ghcr.io/basketikun/infinite-canvas-backend
 
 jobs:
   meta:
@@ -22,7 +23,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.FRONTEND_IMAGE }}
+            ${{ env.BACKEND_IMAGE }}
           tags: |
             type=ref,event=tag
             type=sha,prefix=
@@ -34,11 +37,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux/amd64
-            arch: amd64
+          - image: ghcr.io/basketikun/infinite-canvas
+            dockerfile: Dockerfile
+            platform: linux/amd64
+            arch: frontend-amd64
             runner: ubuntu-latest
-          - platform: linux/arm64
-            arch: arm64
+          - image: ghcr.io/basketikun/infinite-canvas
+            dockerfile: Dockerfile
+            platform: linux/arm64
+            arch: frontend-arm64
+            runner: ubuntu-24.04-arm
+          - image: ghcr.io/basketikun/infinite-canvas-backend
+            dockerfile: backend/Dockerfile
+            platform: linux/amd64
+            arch: backend-amd64
+            runner: ubuntu-latest
+          - image: ghcr.io/basketikun/infinite-canvas-backend
+            dockerfile: backend/Dockerfile
+            platform: linux/arm64
+            arch: backend-arm64
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -55,23 +72,24 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           labels: ${{ needs.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=app-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=app-${{ matrix.arch }}
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Export digest
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/digests"
+          mkdir -p "$RUNNER_TEMP/digests-${{ matrix.arch }}"
           digest="${{ steps.build.outputs.digest }}"
-          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+          touch "$RUNNER_TEMP/digests-${{ matrix.arch }}/${digest#sha256:}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: digests-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
+          path: ${{ runner.temp }}/digests-${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 1
 
@@ -95,21 +113,37 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
-      - name: Create multi-arch manifest
+      - name: Create multi-arch manifests
         shell: bash
         env:
           TAGS: ${{ needs.meta.outputs.tags }}
         run: |
-          tag_args=()
+          frontend_tags=()
+          backend_tags=()
           while IFS= read -r tag; do
-            if [ -n "$tag" ]; then
-              tag_args+=("-t" "$tag")
+            if [ -z "$tag" ]; then
+              continue
             fi
+            case "$tag" in
+              "$FRONTEND_IMAGE:"*) frontend_tags+=("-t" "$tag") ;;
+              "$BACKEND_IMAGE:"*) backend_tags+=("-t" "$tag") ;;
+            esac
           done <<< "$TAGS"
 
-          digest_args=()
+          frontend_digests=()
+          backend_digests=()
           while IFS= read -r digest_file; do
-            digest_args+=("${IMAGE_NAME}@sha256:${digest_file}")
-          done < <(find "$RUNNER_TEMP/digests" -type f -printf '%f\n' | sort)
+            digest="${digest_file##*/}"
+            if [[ "$digest_file" == *backend-* ]]; then
+              backend_digests+=("${BACKEND_IMAGE}@sha256:${digest}")
+            else
+              frontend_digests+=("${FRONTEND_IMAGE}@sha256:${digest}")
+            fi
+          done < <(find "$RUNNER_TEMP/digests" -type f -printf '%p\n' | sort)
 
-          docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
+          if [ "${#frontend_tags[@]}" -gt 0 ] && [ "${#frontend_digests[@]}" -gt 0 ]; then
+            docker buildx imagetools create "${frontend_tags[@]}" "${frontend_digests[@]}"
+          fi
+          if [ "${#backend_tags[@]}" -gt 0 ] && [ "${#backend_digests[@]}" -gt 0 ]; then
+            docker buildx imagetools create "${backend_tags[@]}" "${backend_digests[@]}"
+          fi

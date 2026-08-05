@@ -9,6 +9,7 @@ import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -79,10 +80,40 @@ public class UserFileController {
         UserFile file = fileService.findByOwnerId(userId, storageKey);
         Resource resource = file == null ? null : fileService.loadByOwnerId(userId, storageKey);
         if (file == null || resource == null) return ResponseEntity.notFound().build();
+        // contentType 来自客户端上传，不可信：白名单外一律按二进制附件返回，
+        // 并始终加 nosniff，防止存储型 XSS（伪造 text/html 在源站执行）。
+        MediaType mediaType = safeMediaType(file.getContentType());
+        boolean inline = isInlineMedia(mediaType);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(Duration.ofHours(1)).cachePrivate())
-                .contentType(MediaType.parseMediaType(file.getContentType()))
+                .contentType(mediaType)
+                .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CONTENT_DISPOSITION, inline ? "inline" : "attachment")
                 .body(resource);
+    }
+
+    private MediaType safeMediaType(String contentType) {
+        if (contentType != null) {
+            try {
+                MediaType parsed = MediaType.parseMediaType(contentType);
+                if (isInlineMedia(parsed)) return parsed;
+            } catch (Exception ignored) {
+            }
+        }
+        return MediaType.APPLICATION_OCTET_STREAM;
+    }
+
+    private boolean isInlineMedia(MediaType type) {
+        String value = type.getType() + "/" + type.getSubtype();
+        return value.startsWith("image/")
+                || value.startsWith("video/")
+                || value.startsWith("audio/")
+                || value.equals("application/pdf")
+                || value.equals("application/json")
+                || value.equals("application/octet-stream")
+                || value.equals("text/plain")
+                || value.equals("text/markdown")
+                || value.equals("text/csv");
     }
 
     private Map<String, Object> toUploadResponse(User user, UserFile saved) {

@@ -41,6 +41,15 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
             colorLinkHover: color.primaryHover,
             colorLinkActive: color.primary,
             colorTextLightSolid: color.primaryText,
+            borderRadius: 8,
+            controlHeight: 32,
+            colorBorder: dark ? "rgba(255, 255, 255, 0.14)" : "rgba(0, 0, 0, 0.12)",
+            colorBorderSecondary: dark ? "rgba(255, 255, 255, 0.09)" : "rgba(0, 0, 0, 0.08)",
+            colorBgContainer: dark ? "#1f1f1f" : "#ffffff",
+            colorBgElevated: dark ? "#262626" : "#ffffff",
+            boxShadowSecondary: dark
+                ? "0 8px 24px rgba(0, 0, 0, 0.45)"
+                : "0 6px 20px rgba(0, 0, 0, 0.08)",
         },
         components: {
             Button: {

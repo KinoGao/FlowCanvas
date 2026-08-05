@@ -157,7 +157,7 @@ export async function uploadComfyFile(config: ComfyUiConfig, blob: Blob, filenam
     let response: Response;
     if (config.proxyMode === "backend") {
         formData.append("baseUrl", normalizeComfyBaseUrl(config.baseUrl));
-        response = await fetch(apiUrl("/api/comfyui-proxy"), { method: "POST", body: formData, signal });
+        response = await fetch(apiUrl("/api/comfyui-proxy"), { method: "POST", headers: durableGenerationHeaders(apiUrl("/api/comfyui-proxy")), body: formData, signal });
     } else {
         const baseUrl = normalizeComfyBaseUrl(config.baseUrl);
         response = await fetch(`${baseUrl}/upload/image`, { method: "POST", body: formData, signal });

@@ -20,7 +20,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class GenerationJobService {
-    private static final Map<String, Object> LOCKS = new ConcurrentHashMap<>();
+    /**
+     * 每个 userId:jobKey 一个锁对象，带引用计数。
+     * 引用计数防止同 key 并发时旧锁被 remove 后新请求拿到新锁对象
+     * 而绕过去重（历史 bug：finally 中直接 remove 导致并行执行）。
+     */
+    private static final Map<String, LockEntry> LOCKS = new ConcurrentHashMap<>();
+
+    private static final class LockEntry {
+        final Object lock = new Object();
+        int refs;
+    }
 
     private final UserGenerationJobRepository repository;
     private final ObjectMapper objectMapper;
@@ -35,9 +45,13 @@ public class GenerationJobService {
         if (jobKey.length() > 96) return ResponseEntity.badRequest().body("任务 ID 过长");
 
         String lockKey = user.getId() + ":" + jobKey;
-        Object lock = LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        LockEntry entry = LOCKS.compute(lockKey, (key, current) -> {
+            LockEntry next = current != null ? current : new LockEntry();
+            next.refs++;
+            return next;
+        });
         try {
-            synchronized (lock) {
+            synchronized (entry.lock) {
                 UserGenerationJob existing = repository.findByUserIdAndJobKey(user.getId(), jobKey).orElse(null);
                 if (existing != null && "COMPLETED".equals(existing.getStatus())) return restore(existing);
                 if (existing != null && "FAILED".equals(existing.getStatus())) {
@@ -55,7 +69,10 @@ public class GenerationJobService {
                 }
             }
         } finally {
-            LOCKS.remove(lockKey, lock);
+            LOCKS.compute(lockKey, (key, current) -> {
+                if (current != null && --current.refs <= 0) return null;
+                return current;
+            });
         }
     }
 

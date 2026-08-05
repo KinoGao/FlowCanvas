@@ -53,8 +53,12 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(HttpServletRequest request) {
+        // 同时支持 Authorization Bearer 与 X-FlowCanvas-Session（生成任务 / ComfyUI 代理使用）。
+        String token = null;
         String authorization = request.getHeader("Authorization");
-        if (authorization != null && authorization.startsWith("Bearer ")) authService.logout(authorization.substring(7));
+        if (authorization != null && authorization.startsWith("Bearer ")) token = authorization.substring(7);
+        if (token == null || token.isBlank()) token = request.getHeader("X-FlowCanvas-Session");
+        if (token != null && !token.isBlank()) authService.logout(token);
         return ApiResponse.ok();
     }
 

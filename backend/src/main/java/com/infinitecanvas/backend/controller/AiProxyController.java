@@ -1,5 +1,7 @@
 package com.infinitecanvas.backend.controller;
 
+import com.infinitecanvas.backend.security.ProxyTargetGuard;
+import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -36,6 +38,16 @@ public class AiProxyController {
             return ResponseEntity.badRequest().body("Unsupported target protocol");
         }
 
+        // SSRF 防护：未登录请求（浏览器媒体加载）拒绝解析到内网 / 环回 /
+        // 链路本地 / 组播等地址的目标；已登录用户允许内网目标（本地模型服务等）。
+        if (request.getAttribute(UserRequestContext.USER_ATTR) == null) {
+            try {
+                ProxyTargetGuard.assertPublicTarget(uri);
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(e.getMessage());
+            }
+        }
+
         String method = request.getMethod().toUpperCase();
         byte[] body = ("GET".equals(method) || "HEAD".equals(method)) ? new byte[0] : request.getInputStream().readAllBytes();
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(PROXY_TIMEOUT);
@@ -55,7 +67,8 @@ public class AiProxyController {
         } catch (java.net.http.HttpTimeoutException e) {
             return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body("AI proxy timeout");
         } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(e.getMessage());
+            // 不向客户端透出网络细节（主机 / 端口 / 内网地址等）。
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body("上游请求失败");
         }
     }
 

@@ -25,3 +25,4 @@ export const useCanvasUiStore = create<CanvasUiStore>((set) => ({
     setDeleteProjectIds: (deleteProjectIds) => set({ deleteProjectIds }),
     removeSelectedProjectIds: (ids) => set((state) => ({ selectedProjectIds: state.selectedProjectIds.filter((id) => !ids.includes(id)) })),
 }));
+// write probe OK

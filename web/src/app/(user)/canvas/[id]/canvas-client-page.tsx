@@ -39,7 +39,10 @@ import type { CanvasImageSplitParams } from "../components/canvas-node-split-dia
 import type { CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { LeaferCanvas } from "../components/leafer-canvas";
-import { CanvasNode } from "../components/canvas-node";
+import { CanvasLeftToolbar } from "../components/canvas-left-toolbar";
+import { CanvasColorGroupBar } from "../components/canvas-color-group-bar";
+import { CanvasSearchPanel } from "../components/canvas-search-panel";
+import { CanvasNode, type CanvasNodeProps } from "../components/canvas-node";
 import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
@@ -49,7 +52,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
-import { updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
+import { updateCanvasGenerationRun, upsertCanvasGenerationRun, settleFinishedGenerationRuns } from "../utils/canvas-generation-runs";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import {
@@ -400,18 +403,40 @@ function resolveNodeAlignment(
 
 function resolveComposerOverlayPosition({
     rawLeft,
+    nodeTop,
     nodeBottom,
     composerHeight,
+    composerWidth,
+    canvasWidth,
+    canvasHeight,
 }: {
     rawLeft: number;
+    nodeTop: number;
     nodeBottom: number;
     composerHeight: number;
+    composerWidth: number;
+    canvasWidth: number;
+    canvasHeight: number;
 }) {
+    const edge = 12;
     const gap = 12;
+    const safeWidth = Math.max(1, canvasWidth);
+    const safeHeight = Math.max(1, canvasHeight);
+    const minPanelHeight = Math.min(180, Math.max(120, safeHeight - edge * 2));
+    const maxPanelHeight = Math.max(minPanelHeight, safeHeight - edge * 2);
+    const panelHeight = Math.min(Math.max(minPanelHeight, composerHeight), maxPanelHeight);
+    const belowTop = nodeBottom + gap;
+    const belowAvailable = safeHeight - belowTop - edge;
+    const aboveTop = nodeTop - gap - panelHeight;
+    const aboveAvailable = nodeTop - gap - edge;
+    const preferredTop = belowAvailable >= minPanelHeight || belowAvailable >= aboveAvailable ? belowTop : aboveTop;
+    const top = Math.min(Math.max(edge, preferredTop), Math.max(edge, safeHeight - panelHeight - edge));
+    const halfWidth = Math.max(0, composerWidth / 2);
+    const left = Math.min(Math.max(halfWidth + edge, rawLeft), Math.max(halfWidth + edge, safeWidth - halfWidth - edge));
     return {
-        left: rawLeft,
-        top: nodeBottom + gap,
-        maxHeight: Math.max(180, composerHeight),
+        left,
+        top,
+        maxHeight: panelHeight,
     };
 }
 
@@ -592,6 +617,7 @@ function LeaferCanvasPage() {
     const dialogNodeRef = useRef<CanvasNodeData | null>(null);
     const composerWidthRef = useRef(0);
     const composerHeightRef = useRef(360);
+    const composerScrollRestoreRef = useRef<number | null>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
@@ -686,6 +712,9 @@ function LeaferCanvasPage() {
     const [connectingParams, setConnectingParams] = useState<ConnectionHandle | null>(null);
     const [connectionTargetNodeId, setConnectionTargetNodeId] = useState<string | null>(null);
     const [pendingConnectionCreate, setPendingConnectionCreate] = useState<PendingConnectionCreate | null>(null);
+    const [searchOpen, setSearchOpen] = useState(false);
+    const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
+    const highlightTimerRef = useRef<number | null>(null);
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
@@ -721,6 +750,7 @@ function LeaferCanvasPage() {
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [assistantClosing, setAssistantClosing] = useState(false);
+    const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
     const [agentMode, setAgentMode] = useState<CanvasAgentMode>("online");
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [titleEditing, setTitleEditing] = useState(false);
@@ -878,14 +908,15 @@ function LeaferCanvasPage() {
 
     const saveCanvasVideoTask = useCallback(
         async (nodeId: string, task: VideoGenerationTask, startedAt: number) => {
-            await new Promise<void>((resolve) => {
-                setNodes((prev) => {
-                    const next = prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, videoTask: task, videoTaskStartedAt: startedAt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node));
-                    updateProject(projectId, { nodes: next });
-                    resolve();
-                    return next;
-                });
+            const applyVideoTask = (nodes: CanvasNodeData[]) =>
+                nodes.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, videoTask: task, videoTaskStartedAt: startedAt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node));
+            setNodes((prev) => {
+                const next = applyVideoTask(prev);
+                nodesRef.current = next;
+                return next;
             });
+            nodesRef.current = applyVideoTask(nodesRef.current);
+            updateProject(projectId, { nodes: nodesRef.current });
             if (saveMode === "backend" && token) {
                 try {
                     const latest = useCanvasStore.getState();
@@ -902,37 +933,38 @@ function LeaferCanvasPage() {
         async (jobs: ReadonlyMap<string, string>) => {
             if (!jobs.size) return;
             const startedAt = Date.now();
-            await new Promise<void>((resolve) => {
-                setNodes((prev) => {
-                    const next = prev.map((node) => {
-                        const generationJobId = jobs.get(node.id);
-                        return generationJobId
-                            ? {
-                                  ...node,
-                                  metadata: {
-                                      ...node.metadata,
-                                      generationJobId,
-                                      status: NODE_STATUS_LOADING,
+            const applyGenerationJobs = (nodes: CanvasNodeData[]) =>
+                nodes.map((node) => {
+                    const generationJobId = jobs.get(node.id);
+                    return generationJobId
+                        ? {
+                              ...node,
+                              metadata: {
+                                  ...node.metadata,
+                                  generationJobId,
+                                  status: NODE_STATUS_LOADING,
+                                  errorDetails: undefined,
+                                  generationRuns: upsertCanvasGenerationRun(node.metadata?.generationRuns, {
+                                      id: generationJobId,
+                                      status: "running",
+                                      startedAt: node.metadata?.generationRuns?.find((run) => run.id === generationJobId)?.startedAt || startedAt,
+                                      updatedAt: startedAt,
+                                      prompt: node.metadata?.requestPrompt || node.metadata?.prompt || node.metadata?.composerContent,
+                                      model: node.metadata?.model,
+                                      mode: node.metadata?.generationMode,
                                       errorDetails: undefined,
-                                      generationRuns: upsertCanvasGenerationRun(node.metadata?.generationRuns, {
-                                          id: generationJobId,
-                                          status: "running",
-                                          startedAt: node.metadata?.generationRuns?.find((run) => run.id === generationJobId)?.startedAt || startedAt,
-                                          updatedAt: startedAt,
-                                          prompt: node.metadata?.requestPrompt || node.metadata?.prompt || node.metadata?.composerContent,
-                                          model: node.metadata?.model,
-                                          mode: node.metadata?.generationMode,
-                                          errorDetails: undefined,
-                                      }),
-                                  },
-                              }
-                            : node;
-                    });
-                    updateProject(projectId, { nodes: next });
-                    resolve();
-                    return next;
+                                  }),
+                              },
+                          }
+                        : node;
                 });
+            setNodes((prev) => {
+                const next = applyGenerationJobs(prev);
+                nodesRef.current = next;
+                return next;
             });
+            nodesRef.current = applyGenerationJobs(nodesRef.current);
+            updateProject(projectId, { nodes: nodesRef.current });
             if (saveMode === "backend" && token) {
                 try {
                     const latest = useCanvasStore.getState();
@@ -945,22 +977,12 @@ function LeaferCanvasPage() {
         [projectId, saveMode, token, updateProject],
     );
 
+    // 兜底结算器：各生成完成路径只更新 node.metadata.status（终态），
+    // 不结算 generationRuns 中的 running 记录；本 effect 在 nodes 变化时
+    // 把已结束但未结算的 run 标记为终态。纯函数式 updater，无变化时返回原引用，
+    // 不会产生重渲染环。
     useEffect(() => {
-        setNodes((prev) => {
-            let changed = false;
-            const nextNodes = prev.map((node) => {
-                const activeRun = node.metadata?.generationRuns?.find((run) => run.status === "running");
-                if (!activeRun || node.metadata?.status === NODE_STATUS_LOADING) return node;
-                changed = true;
-                const status = node.metadata?.status === NODE_STATUS_ERROR
-                    ? "failed"
-                    : node.metadata?.status === NODE_STATUS_IDLE
-                      ? "cancelled"
-                      : "succeeded";
-                return { ...node, metadata: updateCanvasGenerationRun(node.metadata, activeRun.id, status, Date.now(), node.metadata?.errorDetails) };
-            });
-            return changed ? nextNodes : prev;
-        });
+        setNodes((prev) => settleFinishedGenerationRuns(prev));
     }, [nodes]);
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
@@ -1123,10 +1145,12 @@ function LeaferCanvasPage() {
 
     useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
+        setSaveState("saving");
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
             updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo });
+            setSaveState("saved");
         }, 300);
         return () => {
             if (projectSaveTimerRef.current) {
@@ -1135,6 +1159,28 @@ function LeaferCanvasPage() {
             }
         };
     }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, snapToGrid, updateProject]);
+
+    // 后端工作区不可用时标记「离线」，恢复后回到已保存态。
+    useEffect(() => {
+        if (workspaceStatus === "error") setSaveState("offline");
+        else setSaveState((current) => (current === "offline" ? "saved" : current));
+    }, [workspaceStatus]);
+
+    const retrySave = useCallback(async () => {
+        setSaveState("saving");
+        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo });
+        if (saveMode === "backend" && token) {
+            try {
+                const latest = useCanvasStore.getState();
+                await pushBackendProjects(token, latest.projects, latest.projectTombstones);
+                setSaveState("saved");
+            } catch {
+                setSaveState("error");
+            }
+        } else {
+            setSaveState("saved");
+        }
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showImageInfo, snapToGrid, token, updateProject]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -2221,6 +2267,28 @@ function LeaferCanvasPage() {
         if (createTextNodeFromClipboard(text)) message.success("已从剪切板添加文本");
     }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message]);
 
+    // 定义在 ⌘J 快捷键 useEffect 之前——依赖数组引用这两个函数，const 声明在后会触发 TDZ
+    const openAgent = (mode: CanvasAgentMode = agentMode) => {
+        if (agentCloseTimerRef.current) {
+            clearTimeout(agentCloseTimerRef.current);
+            agentCloseTimerRef.current = null;
+        }
+        setAgentMode(mode);
+        setAssistantMounted(true);
+        setAssistantClosing(false);
+        setAssistantCollapsed(false);
+    };
+    const closeAgent = () => {
+        if (!assistantMounted || assistantClosing) return;
+        setAssistantCollapsed(true);
+        setAssistantClosing(true);
+        agentCloseTimerRef.current = setTimeout(() => {
+            agentCloseTimerRef.current = null;
+            setAssistantMounted(false);
+            setAssistantClosing(false);
+        }, CANVAS_AGENT_PANEL_MOTION_MS);
+    };
+
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
@@ -2297,6 +2365,21 @@ function LeaferCanvasPage() {
                 return;
             }
 
+            // ⌘J / Ctrl+J 唤起或收起创作 Agent（与 TapNow 一致）
+            if (isModifierShortcut && !event.altKey && key === "j") {
+                event.preventDefault();
+                if (assistantMounted && !assistantCollapsed) closeAgent();
+                else openAgent();
+                return;
+            }
+
+            // ⌘F / Ctrl+F 唤起搜索面板（TapNow：搜索后自动定位+高亮）
+            if (isModifierShortcut && !event.altKey && key === "f") {
+                event.preventDefault();
+                setSearchOpen(true);
+                return;
+            }
+
             if ((isModifierShortcut || event.altKey) && key === "g") {
                 event.preventDefault();
                 if (event.shiftKey) {
@@ -2337,12 +2420,13 @@ function LeaferCanvasPage() {
                 setCropNodeId(null);
                 setMaskEditNodeId(null);
                 setPendingConnectionCreate(null);
+                setSearchOpen(false);
             }
         };
 
         window.addEventListener("keydown", handleKeyDown, { capture: true });
         return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-    }, [copySelectedNodes, createGroupFromSelection, deleteConnection, deleteSelectedNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
+    }, [assistantCollapsed, assistantMounted, closeAgent, copySelectedNodes, createGroupFromSelection, deleteConnection, deleteSelectedNodes, openAgent, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
 
     const handleConnectStart = useCallback(
         (nodeId: string, handleType: "source" | "target") => {
@@ -2412,11 +2496,16 @@ function LeaferCanvasPage() {
         });
     }, []);
 
+    // 节点写入路径统一为「函数式 updater + 双同步 nodesRef」：
+    // - updater 基于 store 最新状态原子合并，与拖拽提交、视频任务保存等并发写互不覆盖；
+    // - updater 内同步 nodesRef，使渲染后的 ref 与 store 恒一致；
+    // - 函数外再用当前 ref 立即同步一次（React 批处理尚未 flush 时），
+    //   保证 pagehide/blur 等同步事件流能立即读到最终坐标。
     const handleLeaferNodesTransform = useCallback((updates: Array<{ id: string; position: Position; width: number; height: number }>) => {
         const updatesById = new Map(updates.map((update) => [update.id, update]));
-        setNodes((prev) => {
+        const applyUpdates = (nodes: CanvasNodeData[]) => {
             let changed = false;
-            const next = prev.map((node) => {
+            const next = nodes.map((node) => {
                 const update = updatesById.get(node.id);
                 if (!update) return node;
                 if (
@@ -2428,12 +2517,23 @@ function LeaferCanvasPage() {
                 changed = true;
                 return { ...node, position: update.position, width: update.width, height: update.height };
             });
-            return changed ? next : prev;
+            return changed ? next : nodes;
+        };
+        setNodes((prev) => {
+            const next = applyUpdates(prev);
+            if (next !== prev) nodesRef.current = next;
+            return next;
         });
+        nodesRef.current = applyUpdates(nodesRef.current);
     }, []);
 
     const handleLeaferNodesTransformEnd = useCallback(() => {
-        setNodes((prev) => reconcileGroupMembership(prev));
+        setNodes((prev) => {
+            const next = reconcileGroupMembership(prev);
+            nodesRef.current = next;
+            return next;
+        });
+        nodesRef.current = reconcileGroupMembership(nodesRef.current);
         multiNodeDragStartRef.current = null;
         setAlignmentGuides(null);
         historyPausedRef.current = false;
@@ -4330,26 +4430,6 @@ function LeaferCanvasPage() {
 
     const pendingConnectionCreatePosition = pendingConnectionCreate ? canvasToScreen(pendingConnectionCreate.position) : null;
     const assistantOpen = assistantMounted && !assistantCollapsed;
-    const openAgent = (mode: CanvasAgentMode = agentMode) => {
-        if (agentCloseTimerRef.current) {
-            clearTimeout(agentCloseTimerRef.current);
-            agentCloseTimerRef.current = null;
-        }
-        setAgentMode(mode);
-        setAssistantMounted(true);
-        setAssistantClosing(false);
-        setAssistantCollapsed(false);
-    };
-    const closeAgent = () => {
-        if (!assistantMounted || assistantClosing) return;
-        setAssistantCollapsed(true);
-        setAssistantClosing(true);
-        agentCloseTimerRef.current = setTimeout(() => {
-            agentCloseTimerRef.current = null;
-            setAssistantMounted(false);
-            setAssistantClosing(false);
-        }, CANVAS_AGENT_PANEL_MOTION_MS);
-    };
 
     const viewportRafRef = useRef<number>(0);
     const pendingViewportRef = useRef<ViewportTransform | null>(null);
@@ -4391,6 +4471,35 @@ function LeaferCanvasPage() {
         },
         [selectOnlyNode],
     );
+
+    /** 定位节点：选中 + 视口居中 + 短暂高亮（TapNow：搜索/分组定位后自动定位+高亮）。 */
+    const locateNode = useCallback(
+        (nodeId: string) => {
+            const node = nodeById.get(nodeId);
+            if (!node) return;
+            selectOnlyNode(nodeId);
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            const rect = containerRef.current?.getBoundingClientRect();
+            const width = rect && rect.width > 0 ? rect.width : size.width;
+            const height = rect && rect.height > 0 ? rect.height : size.height;
+            const targetK = Math.max(viewportRef.current.k, 0.9);
+            const next = { x: node.position.x + node.width / 2 - width / 2, y: node.position.y + node.height / 2 - height / 2, k: targetK };
+            viewportRef.current = next;
+            setViewport(next);
+            if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
+            setHighlightNodeId(nodeId);
+            highlightTimerRef.current = window.setTimeout(() => setHighlightNodeId(null), 1400);
+        },
+        [nodeById, selectOnlyNode, size.height, size.width],
+    );
+
+    /** 节点右侧 + → 弹出 ConnectionCreateMenu（复用建连函数），选择类型后创建下游节点并自动连线。 */
+    const handleNodeQuickCreate = useCallback((node: CanvasNodeData) => {
+        const position = { x: node.position.x + node.width + 48, y: node.position.y + node.height / 2 };
+        setMouseWorld(position);
+        setPendingConnectionCreate({ connection: { nodeId: node.id, handleType: "source" }, position });
+    }, []);
 
     const handleRetryNodeAction = useCallback((node: CanvasNodeData) => void handleRetryNode(node), [handleRetryNode]);
     const handleViewNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
@@ -4602,7 +4711,12 @@ function LeaferCanvasPage() {
             frame = requestAnimationFrame(() => {
                 const nextHeight = Math.max(180, panel.scrollHeight);
                 composerHeightRef.current = nextHeight;
-                setComposerContentHeight((current) => (Math.abs(current - nextHeight) < 1 ? current : nextHeight));
+                setComposerContentHeight((current) => {
+                    // 滞回：忽略 < 6px 的抖动，避免运行状态切换等瞬时内容变化
+                    // 触发 maxHeight 微调导致面板内部滚动位置被 clamp（突然滚动）。
+                    if (Math.abs(current - nextHeight) < 6) return current;
+                    return nextHeight;
+                });
             });
         };
         measure();
@@ -4613,6 +4727,22 @@ function LeaferCanvasPage() {
             observer.disconnect();
         };
     }, [composerWidth, dialogNode?.id]);
+
+    // 运行状态切换瞬间面板内容会变化（按钮/指示器），maxHeight 变化会把
+    // 滚动位置 clamp 掉导致"突然滚动"。记录运行前的滚动位置，在高度更新
+    // 落定后恢复，保证内容不跳动。
+    useEffect(() => {
+        const panel = composerPanelRef.current;
+        if (panel && dialogNodeId) composerScrollRestoreRef.current = panel.scrollTop;
+    }, [runningNodeId, dialogNodeId]);
+
+    useLayoutEffect(() => {
+        const panel = composerPanelRef.current;
+        if (!panel || composerScrollRestoreRef.current === null) return;
+        const restore = composerScrollRestoreRef.current;
+        composerScrollRestoreRef.current = null;
+        panel.scrollTop = restore;
+    }, [composerContentHeight]);
     const composerPosition = dialogNode
         ? (() => {
               const shellRect = canvasShellRef.current?.getBoundingClientRect();
@@ -4623,11 +4753,16 @@ function LeaferCanvasPage() {
               const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
               const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
               const rawLeft = nodeRect ? nodeRect.left - shellOffsetX + nodeRect.width / 2 : containerOffsetX + (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
+              const nodeTop = nodeRect ? nodeRect.top - shellOffsetY : containerOffsetY + dialogNode.position.y * viewport.k + viewport.y;
               const nodeBottom = nodeRect ? nodeRect.bottom - shellOffsetY : containerOffsetY + (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y;
               return resolveComposerOverlayPosition({
                   rawLeft,
+                  nodeTop,
                   nodeBottom,
                   composerHeight: composerContentHeight,
+                  composerWidth,
+                  canvasWidth: shellRect?.width || containerRect?.width || size.width,
+                  canvasHeight: shellRect?.height || containerRect?.height || size.height,
               });
           })()
         : null;
@@ -4645,11 +4780,16 @@ function LeaferCanvasPage() {
         const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
         const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
         const rawLeft = containerOffsetX + (node.position.x + node.width / 2) * next.k + next.x;
+        const nodeTop = containerOffsetY + node.position.y * next.k + next.y;
         const nodeBottom = containerOffsetY + (node.position.y + node.height) * next.k + next.y;
         const position = resolveComposerOverlayPosition({
             rawLeft,
+            nodeTop,
             nodeBottom,
             composerHeight: composerHeightRef.current,
+            composerWidth: composerWidthRef.current,
+            canvasWidth: shellRect?.width || containerRect?.width || size.width,
+            canvasHeight: shellRect?.height || containerRect?.height || size.height,
         });
 
         overlay.style.left = `${position.left - composerWidthRef.current / 2}px`;
@@ -4681,6 +4821,22 @@ function LeaferCanvasPage() {
             }
         >
             <CanvasRestoreCover ready={projectLoaded && canvasVisualReady} />
+            {projectLoaded ? (
+                <CanvasLeftToolbar
+                    onAddText={() => createNode(CanvasNodeType.Text)}
+                    onAddImage={() => createNode(CanvasNodeType.Image)}
+                    onAddVideo={() => createNode(CanvasNodeType.Video)}
+                    onAddAudio={() => createNode(CanvasNodeType.Audio)}
+                    onUpload={() => handleUploadRequest()}
+                    onOpenHistory={() => setGenerationHistoryOpen(true)}
+                    onOpenSearch={() => setSearchOpen(true)}
+                    onOpenAssets={() => {
+                        setCanvasAssetPanelInitialTab("assets");
+                        setCanvasAssetPanelOpen(true);
+                    }}
+                    onOpenTemplates={() => setWorkflowToolboxOpen(true)}
+                />
+            ) : null}
             <section ref={canvasShellRef} className="creative-os-canvas relative min-w-0 flex-1 overflow-hidden">
                 {projectLoaded ? (
                     <>
@@ -4699,6 +4855,9 @@ function LeaferCanvasPage() {
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
                 />
+
+                <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
+                <CanvasSearchPanel open={searchOpen} nodes={nodes} onClose={() => setSearchOpen(false)} onLocateNode={locateNode} />
 
                 <LeaferCanvas
                     containerRef={containerRef}
@@ -4744,6 +4903,8 @@ function LeaferCanvasPage() {
                             if (mode === 'toggle' && next.has(nodeId)) next.delete(nodeId);
                             else next.add(nodeId);
                         }
+                        // 内容未变时跳过 setState，避免 Leafer 重复派发选择事件导致的重渲染风暴。
+                        if (setsEqual(next, selectedNodeIdsRef.current)) return;
                         resetImageTapGesture();
                         selectedNodeIdsRef.current = next;
                         setSelectedNodeIds(next);
@@ -4769,6 +4930,7 @@ function LeaferCanvasPage() {
                         return (
                             <CanvasNode
                                 key={node.id}
+                                onClickCreate={handleNodeQuickCreate}
                                 data={node}
                                 isSelected={isSelected}
                                 isRelated={relatedHighlight.nodeIds.has(node.id)}
@@ -4813,7 +4975,7 @@ function LeaferCanvasPage() {
                     })}
                 </LeaferCanvas>
 
-                {dialogNode && composerPosition ? (
+                {dialogNode && composerPosition && !isNodeDragging ? (
                     <div
                         ref={composerOverlayRef}
                         data-canvas-no-zoom

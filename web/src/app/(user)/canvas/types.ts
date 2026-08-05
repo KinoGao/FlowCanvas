@@ -149,6 +149,8 @@ export type CanvasNodeData = {
     width: number;
     height: number;
     metadata?: CanvasNodeMetadata;
+    /** TapNow: 节点 Pin 颜色标记（右上角色点），值为 canvas-pin-utils 色板内 id。 */
+    pinColor?: string;
 };
 
 export type CanvasConnection = {

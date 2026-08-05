@@ -6,11 +6,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
 import com.infinitecanvas.backend.service.PlatformConfigService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.Part;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -50,7 +52,8 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            // 不跟随重定向：上游 3xx 可能指向内网任意地址（重定向型 SSRF）。
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     public GenericOpenAiAdapter(ObjectMapper objectMapper) {
@@ -84,6 +87,21 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         byte[] body = ("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod()))
                 ? new byte[0] : request.getInputStream().readAllBytes();
         String contentType = request.getContentType();
+        boolean isMultipart = contentType != null && contentType.toLowerCase(Locale.ROOT).contains("multipart/form-data");
+
+        // Spring Boot's StandardMultipartHttpServletRequest may have already
+        // parsed the multipart body on first access, consuming the raw input
+        // stream. When the body returns empty but the Content-Type declares
+        // multipart, rebuild the raw bytes from the parsed parts so downstream
+        // validation and rewriting keep working.
+        if (body.length == 0 && isMultipart) {
+            try {
+                body = rebuildMultipartBody(request.getParts(), contentType);
+            } catch (Exception ignored) {
+                // Parts not available — propagate the empty body as-is (the
+                // upstream gateway will reject it, preserving the error).
+            }
+        }
         try {
             if (body.length > 0 && contentType != null && contentType.toLowerCase(Locale.ROOT).contains("application/json")) {
                 body = validateAndRewriteJson(body, suffix, runtime.model(), gemini);
@@ -113,7 +131,8 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         } catch (java.net.http.HttpTimeoutException error) {
             return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body("上游模型请求超时");
         } catch (IOException error) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error.getMessage());
+            // 不向客户端透出网络细节（主机 / 端口 / 内网地址等）。
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body("上游模型请求失败");
         }
     }
 
@@ -529,5 +548,51 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
     private void copyHeader(HttpServletRequest request, HttpRequest.Builder builder, String name) {
         String value = request.getHeader(name);
         if (value != null && !value.isBlank()) builder.header(name, value);
+    }
+
+    /**
+     * Rebuild the raw multipart body from already-parsed servlet parts.
+     * Called as a fallback when Spring's MultipartResolver has consumed the
+     * original input stream.
+     */
+    private byte[] rebuildMultipartBody(java.util.Collection<Part> parts, String contentType) throws IOException {
+        String boundary = extractMultipartBoundary(contentType);
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        byte[] crlf = "\r\n".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] dashes = "--".getBytes(StandardCharsets.ISO_8859_1);
+        for (Part part : parts) {
+            os.write(dashes);
+            os.write(boundary.getBytes(StandardCharsets.ISO_8859_1));
+            os.write(crlf);
+            StringBuilder disposition = new StringBuilder("Content-Disposition: form-data; name=\"")
+                    .append(part.getName()).append('"');
+            String filename = part.getSubmittedFileName();
+            if (filename != null) disposition.append("; filename=\"").append(filename).append('"');
+            os.write(disposition.toString().getBytes(StandardCharsets.ISO_8859_1));
+            os.write(crlf);
+            String partContentType = part.getContentType();
+            if (partContentType != null && !partContentType.isBlank()) {
+                os.write(("Content-Type: " + partContentType).getBytes(StandardCharsets.ISO_8859_1));
+                os.write(crlf);
+            }
+            os.write(crlf);
+            part.getInputStream().transferTo(os);
+            os.write(crlf);
+        }
+        os.write(dashes);
+        os.write(boundary.getBytes(StandardCharsets.ISO_8859_1));
+        os.write(dashes);
+        os.write(crlf);
+        return os.toByteArray();
+    }
+
+    private String extractMultipartBoundary(String contentType) {
+        for (String segment : contentType.split(";")) {
+            String trimmed = segment.trim();
+            if (trimmed.toLowerCase(Locale.ROOT).startsWith("boundary=")) {
+                return trimmed.substring("boundary=".length());
+            }
+        }
+        throw new IllegalArgumentException("multipart Content-Type missing boundary");
     }
 }

@@ -1,0 +1,30 @@
+fix: 安全加固与画布 UI 工作台化（全量检查修复）
+
+后端安全：
+- ComfyUI 代理未认证 SSRF 修复（/view 公开路径强制使用配置地址）
+- 模型运行时代理仅 GET 公开，POST 模型调用必须登录
+- 默认凭证恢复硬编码（gycode/admincode，内部部署），移除随机化逻辑
+- 任务去重锁改引用计数（同 key 并发不再绕过去重）
+- 模型适配器关闭重定向跟随；异常消息脱敏 + 全局 500 兜底
+- 401 响应移除反射 Origin；媒体下载 contentType 白名单 + nosniff
+- 会话过期清理、logout 支持会话头；PromptController 缓存后台刷新
+- 删除 /api/config 死代码链（后端 4 文件 + 前端 authCode 遗留函数）
+
+鉴权兼容：
+- 生成通道占位 Authorization 无效时回退 X-FlowCanvas-Session
+  （修复画布生成报"登录状态无效"）
+
+前端：
+- CameraPanel hooks 违规崩溃修复；选择同步 setsEqual 守卫
+- directorStore 拖拽持久化性能优化（batch 内零克隆零写入）
+- composer 运行瞬间滚动抖动修复（高度滞回 + 滚动位置保持）
+
+UI 工作台化（对标 TapNow 黑白风格）：
+- 主题变量中性灰阶重做（深浅双主题、8px 圆角、细滚动条）
+- 顶部导航 56px 紧凑化；登录 gate 卡片化；列表页背景统一
+
+部署与文档：
+- docker-image.yml 扩展为前后端双镜像构建；compose 凭证默认值
+- backend-config.yml 移除个人内网穿透地址
+- README / backend-database / pending-test 同步
+- AGENTS.md 新增第 13 节提交规范（每次修改必须中文 git commit）
