@@ -5002,7 +5002,7 @@ function LeaferCanvasPage() {
                     })}
                 </LeaferCanvas>
 
-                {projectLoaded && nodes.length === 0 ? (
+                {projectLoaded && canvasVisualReady && nodes.length === 0 ? (
                     <div className="pointer-events-none absolute inset-0 z-[40] flex flex-col items-center justify-center gap-5">
                         <div className="text-[13px] opacity-60" style={{ color: theme.node.muted }}>
                             双击画布自由创作，或从下方快速开始
