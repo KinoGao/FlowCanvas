@@ -1457,6 +1457,24 @@ function LeaferCanvasPage() {
         setConnecting(null);
     }, [setConnecting]);
 
+    const quickCreateFromEmpty = useCallback(
+        (type: CanvasNodeType) => {
+            const shellRect = canvasShellRef.current?.getBoundingClientRect();
+            const width = shellRect?.width ?? 800;
+            const height = shellRect?.height ?? 600;
+            const center = {
+                x: (width / 2 - viewport.x) / viewport.k - 120,
+                y: (height / 2 - viewport.y) / viewport.k - 80,
+            };
+            const node = createCanvasNode(type, center);
+            setNodes((prev) => [...prev, node]);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(node.id);
+        },
+        [createCanvasNode, viewport],
+    );
+
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
     const maskEditNode = maskEditNodeId ? nodeById.get(maskEditNodeId) || null : null;
@@ -4983,6 +5001,52 @@ function LeaferCanvasPage() {
                         );
                     })}
                 </LeaferCanvas>
+
+                {projectLoaded && nodes.length === 0 ? (
+                    <div className="pointer-events-none absolute inset-0 z-[40] flex flex-col items-center justify-center gap-5">
+                        <div className="text-[13px] opacity-60" style={{ color: theme.node.muted }}>
+                            双击画布自由创作，或从下方快速开始
+                        </div>
+                        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5">
+                            <button
+                                type="button"
+                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                style={{ color: theme.toolbar.item }}
+                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Image)}
+                            >
+                                <ImageIcon className="size-4" />
+                                文生图
+                            </button>
+                            <button
+                                type="button"
+                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                style={{ color: theme.toolbar.item }}
+                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Video)}
+                            >
+                                <Video className="size-4" />
+                                文生视频
+                            </button>
+                            <button
+                                type="button"
+                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                style={{ color: theme.toolbar.item }}
+                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Text)}
+                            >
+                                <FileText className="size-4" />
+                                文本
+                            </button>
+                            <button
+                                type="button"
+                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                style={{ color: theme.toolbar.item }}
+                                onClick={() => setWorkflowToolboxOpen(true)}
+                            >
+                                <Workflow className="size-4" />
+                                模板
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
 
                 {dialogNode && composerPosition && !isNodeDragging ? (
                     <div
