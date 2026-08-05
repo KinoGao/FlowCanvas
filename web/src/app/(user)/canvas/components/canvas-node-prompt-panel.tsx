@@ -482,7 +482,7 @@ function ImageComposer({
                 />
             ) : null}
 
-            <div className="image-composer-toolbar flex h-11 min-w-0 items-center gap-1 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
+            <div className="image-composer-toolbar sticky bottom-0 -mx-4 flex h-11 min-w-0 items-center gap-1 border-t px-4 pt-2" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}>
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
                     <CanvasPromptLibrary onSelect={onPromptChange} icon={<Plus className="size-4" />} tooltip="添加提示词" />
 
@@ -678,7 +678,7 @@ function VideoComposer({
             ) : null}
             {validationMessage ? <ComposerNotice icon={<TriangleAlert className="size-3.5" />} text={validationMessage} theme={theme} danger /> : null}
 
-            <div className="video-composer-toolbar flex h-11 min-w-0 items-center gap-1 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
+            <div className="video-composer-toolbar sticky bottom-0 -mx-4 flex h-11 min-w-0 items-center gap-1 border-t px-4 pt-2" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}>
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
                     <CanvasPromptLibrary onSelect={onPromptChange} icon={<Plus className="size-4" />} tooltip="添加提示词" />
                     <div className="w-[190px] shrink-0">
