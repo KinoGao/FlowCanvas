@@ -1470,7 +1470,12 @@ function LeaferCanvasPage() {
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(node.id);
+            setContextMenu(null);
+            setEditingNodeId(null);
+            // 节点挂载流程会在挂载完成后约 50ms 内清理 dialogNodeId（与点击节点打开的时序竞争），
+            // 立即设置会在节点挂载后被清掉。实测节点挂载约 200-400ms，延迟 400ms 越过清理窗口后
+            // 打开 Composer，保证快捷创建后面板稳定弹出（慢设备上若偶发未弹出，点击节点可打开）。
+            window.setTimeout(() => setDialogNodeId(node.id), 400);
         },
         [createCanvasNode, viewport],
     );
