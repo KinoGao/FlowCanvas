@@ -616,6 +616,7 @@ const nodeContentRenderers = {
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isStoryboard = node.metadata?.groupVariant === "storyboard";
     const actions: Array<{ key: "storyboard" | "ungroup"; label: string; disabled?: boolean }> = [
         { key: "storyboard", label: isStoryboard ? "已设为分镜组" : "设为分镜组", disabled: isStoryboard },
@@ -627,7 +628,8 @@ function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererPr
             {isSelected ? (
                 <div
                     data-canvas-no-zoom
-                    className="pointer-events-auto absolute left-2 top-2 z-[60] flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border border-white/10 bg-[#1f1f1f]/95 px-1.5 py-1 text-xs text-white/75 shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur"
+                    className="pointer-events-auto absolute left-2 top-2 z-[60] flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border px-1.5 py-1 text-xs shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur"
+                    style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
@@ -637,7 +639,7 @@ function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererPr
                             key={action.key}
                             type="button"
                             disabled={action.disabled}
-                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-45"
+                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:opacity-75 disabled:cursor-default disabled:opacity-45"
                             onClick={(event) => {
                                 event.stopPropagation();
                                 onGroupAction?.(node, action.key);

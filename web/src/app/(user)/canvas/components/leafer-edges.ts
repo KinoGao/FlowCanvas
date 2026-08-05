@@ -2,12 +2,17 @@
 
 import * as LUI from "leafer-ui";
 import type { CanvasConnection, CanvasNodeData } from "../types";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import { buildConnectionPolyline, getConnectionPoints } from "../utils/canvas-connection-geometry";
 
-const EDGE_COLOR = "#78716c";
-const EDGE_ACTIVE_COLOR = "#67e8f9";
-const EDGE_WIDTH = 3.2;
-const EDGE_ACTIVE_WIDTH = 4.4;
+const FALLBACK_CONNECTION = {
+    color: "#78716c",
+    activeColor: "#67e8f9",
+    width: 3.2,
+    activeWidth: 4.4,
+    tempWidth: 2.5,
+    dash: [8, 4] as const,
+};
 
 type EdgeRenderData = {
     connection: CanvasConnection;
@@ -19,9 +24,11 @@ export class LeaferEdgeLayer {
     private app: LUI.Leafer;
     private nodeMap: Map<string, CanvasNodeData> = new Map();
     private edges: Map<string, EdgeRenderData> = new Map();
+    private conn: { color: string; activeColor: string; width: number; activeWidth: number; tempWidth: number; dash: readonly number[] };
 
-    constructor(app: LUI.Leafer) {
+    constructor(app: LUI.Leafer, conn?: Partial<CanvasTheme["connection"]>) {
         this.app = app;
+        this.conn = { ...FALLBACK_CONNECTION, ...conn };
     }
 
     setNodeMap(nodes: CanvasNodeData[]) {
@@ -46,8 +53,8 @@ export class LeaferEdgeLayer {
 
             const existing = this.edges.get(conn.id);
             const isActive = conn.id === (activeConnectionId ?? selectedId);
-            const color = isActive ? EDGE_ACTIVE_COLOR : EDGE_COLOR;
-            const width = isActive ? EDGE_ACTIVE_WIDTH : EDGE_WIDTH;
+            const color = isActive ? this.conn.activeColor : this.conn.color;
+            const width = isActive ? this.conn.activeWidth : this.conn.width;
 
             if (existing) {
                 // Update position
@@ -77,10 +84,10 @@ export class LeaferEdgeLayer {
         }
         const newLine = new LUI.Line({
             points,
-            stroke: EDGE_ACTIVE_COLOR,
-            strokeWidth: 2.5,
+            stroke: this.conn.activeColor,
+            strokeWidth: this.conn.tempWidth,
             strokeCap: "round",
-            dashPattern: [8, 4],
+            dashPattern: [...this.conn.dash],
         });
         newLine.hittable = false;
         this.app.add(newLine);

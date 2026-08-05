@@ -304,7 +304,7 @@ export function LeaferCanvas({
         if (visual.styleSignature === styleSignature) return;
         visual.styleSignature = styleSignature;
         visual.line.set({
-            stroke: selected ? "#e0e4e8" : related ? "#67e8f9" : visual.hovered ? "#a5f3fc" : "#86909c",
+            stroke: selected ? theme.connection.activeColor : related ? theme.connection.activeColor : visual.hovered ? theme.connection.activeColor : theme.connection.color,
             strokeWidth: selected ? 3 : visual.hovered ? 3.2 : 2.4,
             opacity: selected ? 1 : related ? 0.88 : visual.hovered ? 0.96 : 0.78,
             dashPattern: undefined,
@@ -315,7 +315,7 @@ export function LeaferCanvas({
             const flow = new LUI.Path({
                 path: visual.path,
                 fill: "",
-                stroke: "#e0f2fe",
+                stroke: theme.connection.activeColor,
                 strokeWidth: 3.6,
                 strokeCap: "round",
                 dashPattern: [10, 34],
@@ -329,14 +329,14 @@ export function LeaferCanvas({
             flow.set({
                 path: visual.path,
                 visible: index < flowCount,
-                stroke: selected ? "#e0f2fe" : related ? "#67e8f9" : "#a5f3fc",
+                stroke: theme.connection.activeColor,
                 strokeWidth: selected || related ? 3.6 : 3.2,
                 dashPattern: selected || related ? [10, 34] : [8, 42],
                 opacity: selected ? 1 : related ? 0.9 : 0.96,
             });
         });
         if (flowCount) ensureConnectionFlowAnimation();
-    }, [ensureConnectionFlowAnimation]);
+    }, [ensureConnectionFlowAnimation, theme]);
 
     const getNodeElement = useCallback((nodeId: string) => {
         const cached = nodeElementMapRef.current.get(nodeId);
@@ -703,7 +703,7 @@ export function LeaferCanvas({
             path: "",
             visible: false,
             fill: "",
-            stroke: "#a5f3fc",
+            stroke: themeRef.current.connection.activeColor,
             strokeWidth: 3.5,
             strokeCap: "round",
             dashPattern: [10, 18],
@@ -1065,7 +1065,7 @@ export function LeaferCanvas({
                 const line = new LUI.Path({
                     path,
                     fill: "",
-                    stroke: "#86909c",
+                    stroke: themeRef.current.connection.color,
                     strokeWidth: 2.4,
                     strokeCap: "round",
                     opacity: 0.78,

@@ -39,6 +39,14 @@ export const canvasThemes = {
             controlFill: "rgba(118,118,128,.12)",
             danger: "#ff3b30",
         },
+        connection: {
+            color: "rgba(60,60,67,.35)",
+            activeColor: "#0a84ff",
+            width: 3.2,
+            activeWidth: 4.4,
+            tempWidth: 2.5,
+            dash: [8, 4] as const,
+        },
     },
     dark: {
         canvas: {
@@ -76,6 +84,14 @@ export const canvasThemes = {
             accentSoft: "rgba(10,132,255,.22)",
             controlFill: "rgba(255,255,255,.10)",
             danger: "#ff453a",
+        },
+        connection: {
+            color: "rgba(255,255,255,.28)",
+            activeColor: "#67e8f9",
+            width: 3.2,
+            activeWidth: 4.4,
+            tempWidth: 2.5,
+            dash: [8, 4] as const,
         },
     },
 } as const;
