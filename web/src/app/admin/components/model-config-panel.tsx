@@ -38,6 +38,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
     const [protocols, setProtocols] = useState<ModelProtocol[]>(FALLBACK_PROTOCOLS);
     const [discovering, setDiscovering] = useState("");
     const [verifying, setVerifying] = useState("");
+    const [categoryFilter, setCategoryFilter] = useState<"all" | ModelCategory>("all");
 
     useEffect(() => {
         let cancelled = false;
@@ -124,7 +125,8 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
         })}
 
         <AdminCard title="已配置模型" description="模型完成能力配置和厂商认证验证后，由管理员明确发布。只有已验证且已发布的模型会进入画布。" action={<Button type="primary" icon={<Plus className="size-4" />} disabled={!config.providers.length} onClick={() => editModel()}>手动添加模型</Button>}>
-            <Table rowKey="id" dataSource={config.models} pagination={{ pageSize: 10, hideOnSinglePage: true }} columns={[
+            <div className="mb-3"><Segmented options={[{ value: "all", label: "全部" }, { value: "text", label: "文本 / 多模态" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" }]} value={categoryFilter} onChange={(value) => setCategoryFilter(value as "all" | ModelCategory)} /></div>
+            <Table rowKey="id" dataSource={config.models.filter((item) => categoryFilter === "all" || item.category === categoryFilter)} pagination={{ pageSize: 10, hideOnSinglePage: true }} columns={[
                 { title: "模型", render: (_, item) => <div><div className="font-medium">{item.displayName}</div><div className="text-xs text-gray-400">{item.id}</div></div> },
                 { title: "分类", dataIndex: "category", width: 90, render: (value: ModelCategory) => <Tag color="blue">{CATEGORY_LABELS[value]}</Tag> },
                 { title: "实际请求模型", dataIndex: "requestModel", ellipsis: true },
