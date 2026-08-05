@@ -104,7 +104,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
         <AdminCard title="模型厂商" description="先配置厂商地址、API Key 和协议，再通过后端认证拉取当前账号真实可用的模型。密钥不会下发到创作端。" action={<Button icon={<Plus className="size-4" />} onClick={() => editProvider()}>添加厂商</Button>}>
             <Table rowKey="id" pagination={false} dataSource={config.providers} columns={[
                 { title: "厂商", render: (_, item) => <div><div className="font-medium">{item.name}</div><div className="text-xs text-gray-400">{item.id}</div></div> },
-                { title: "协议", dataIndex: "apiFormat", width: 100, render: (value) => <Tag>{String(value).toUpperCase()}</Tag> },
+                { title: "协议", dataIndex: "apiFormat", width: 140, render: (value) => { const protocol = protocols.find((item) => item.id === value); return <Tag title={protocol?.description}>{protocol?.name || String(value).toUpperCase()}</Tag>; } },
                 { title: "接口地址", dataIndex: "baseUrl", ellipsis: true },
                 { title: "状态", dataIndex: "enabled", width: 90, render: (value) => value ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
                 { title: "操作", width: 260, render: (_, item) => <Space><Button size="small" icon={<RefreshCw className="size-3.5" />} loading={discovering === item.id} onClick={() => void discover(item)}>认证并拉取</Button><Button size="small" title="编辑厂商" icon={<Pencil className="size-3.5" />} onClick={() => editProvider(item)} /><Button size="small" danger title="删除厂商" icon={<Trash2 className="size-3.5" />} onClick={() => removeProvider(item)} /></Space> },
@@ -145,13 +145,14 @@ function ProviderDrawer(props: { draft: PlatformProvider | null; onChange: (valu
     return <Drawer size="default" title="模型厂商" open={Boolean(props.draft)} onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}>{props.draft ? <Form layout="vertical">
         <Form.Item label="厂商 ID" required><Input value={props.draft.id} placeholder="例如 volcengine" onChange={(event) => update({ id: event.target.value })} /></Form.Item>
         <Form.Item label="厂商名称" required><Input value={props.draft.name} placeholder="例如 火山方舟" onChange={(event) => update({ name: event.target.value })} /></Form.Item>
-        <Form.Item label="接口地址" required><Input value={props.draft.baseUrl} placeholder="https://ark.cn-beijing.volces.com/api/v3" onChange={(event) => update({ baseUrl: event.target.value })} /></Form.Item>
+        <Form.Item label="接口地址" required><Input value={props.draft.baseUrl} placeholder={props.draft.apiFormat === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1 或火山方舟 https://ark.cn-beijing.volces.com/api/v3"} onChange={(event) => update({ baseUrl: event.target.value })} /></Form.Item>
         <Form.Item label="API Key" required><Input.Password value={props.draft.apiKey} onChange={(event) => update({ apiKey: event.target.value })} /></Form.Item>
         <div className="grid gap-x-4 sm:grid-cols-2"><Form.Item label="协议"><Select value={props.draft.apiFormat} options={[{ value: "openai", label: "OpenAI Compatible" }, { value: "gemini", label: "Gemini" }]} onChange={(apiFormat) => {
             const currentDefault = props.draft?.apiFormat === "gemini" ? "/v1beta/models" : "/models";
             const nextDefault = apiFormat === "gemini" ? "/v1beta/models" : "/models";
             update({ apiFormat, modelsPath: !props.draft?.modelsPath || props.draft.modelsPath === currentDefault ? nextDefault : props.draft.modelsPath });
         }} /></Form.Item><Form.Item label="模型列表路径"><Input value={props.draft.modelsPath} placeholder={props.draft.apiFormat === "gemini" ? "/v1beta/models" : "/models"} onChange={(event) => update({ modelsPath: event.target.value })} /></Form.Item></div>
+        <div className="-mt-2 mb-3 text-xs leading-5 text-gray-500">厂商级协议用于拉取模型列表（OpenAI 兼容或 Gemini 原生）。每个模型的调用协议（OpenAI 直连 / Seedance 方舟任务 / Agnes 异步等）在「已配置模型」的模型抽屉中按模型单独选择。</div>
         <Toggle label="启用该厂商" checked={props.draft.enabled} onChange={(enabled) => update({ enabled })} />
     </Form> : null}</Drawer>;
 }
