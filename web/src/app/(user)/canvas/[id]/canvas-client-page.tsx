@@ -2689,7 +2689,11 @@ function LeaferCanvasPage() {
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+        setNodes((prev) => {
+            const next = prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node));
+            nodesRef.current = next;
+            return next;
+        });
     }, []);
 
     const handleConfigNodeHeightChange = useCallback((nodeId: string, height: number) => {
@@ -3256,7 +3260,7 @@ function LeaferCanvasPage() {
     }, [projectId, renameProject, titleDraft]);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, comfyWorkflowId?: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             const isComfyMode = mode === "comfyui";
@@ -3296,10 +3300,10 @@ function LeaferCanvasPage() {
                         sourceNode?.metadata?.status === NODE_STATUS_LOADING && sourceNode.metadata.generationJobId
                             ? sourceNode.metadata.generationJobId
                             : nanoid();
-                    await saveCanvasGenerationJobs(new Map([[nodeId, generationJobId]]));
-                    const workflowId = sourceNode?.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId;
+                    const workflowId = comfyWorkflowId || sourceNode?.metadata?.comfyWorkflowId || comfyui.defaultWorkflowId;
                     const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
                     if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
+                    await saveCanvasGenerationJobs(new Map([[nodeId, generationJobId]]));
                     const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, effectivePrompt);
                     resolveComfyTextFields(comfyWorkflow, values, generationContext);
                     await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
@@ -4445,10 +4449,10 @@ function LeaferCanvasPage() {
                 onHeightChange={handleConfigNodeHeightChange}
                 onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
                 onStop={confirmStopGeneration}
-                onGenerate={(nodeId) => {
+                onGenerate={(nodeId, comfyWorkflowId) => {
                     const target = nodesRef.current.find((item) => item.id === nodeId);
                     const mode = target?.metadata?.generationMode || defaultGenerationMode(target?.type);
-                    void handleGenerateNode(nodeId, mode, target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                    void handleGenerateNode(nodeId, mode, target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "", comfyWorkflowId);
                 }}
             />
         ),

@@ -32,7 +32,7 @@ type CanvasConfigNodePanelProps = {
     mentionReferences?: CanvasResourceReference[];
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onHeightChange?: (nodeId: string, height: number) => void;
-    onGenerate: (nodeId: string) => void;
+    onGenerate: (nodeId: string, comfyWorkflowId?: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle: () => void;
 };
@@ -237,7 +237,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputs, inputSummary, m
             onComposerToggle();
             return;
         }
-        onGenerate(node.id);
+        onGenerate(node.id, mode === "comfyui" ? selectedWorkflow?.id : undefined);
     };
 
     return (
