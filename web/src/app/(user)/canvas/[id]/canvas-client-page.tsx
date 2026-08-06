@@ -4751,8 +4751,12 @@ function LeaferCanvasPage() {
             });
         };
         measure();
-        const observer = new ResizeObserver(measure);
-        observer.observe(panel);
+        // 滚动容器尺寸被 maxHeight 钉住，内容变高时 ResizeObserver 不会触发，
+        // 导致面板不跟随内容展开（进入滚动模式）。改用 MutationObserver 观察
+        // 面板子树的结构与 class/style 变化（展开输入框、运行条出现等），
+        // 触发重测后 maxHeight 跟随更新。measure 内部已有 rAF 节流。
+        const observer = new MutationObserver(measure);
+        observer.observe(panel, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
         return () => {
             cancelAnimationFrame(frame);
             observer.disconnect();
