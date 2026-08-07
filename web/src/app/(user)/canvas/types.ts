@@ -102,6 +102,10 @@ export type CanvasGenerationMetadata = {
     videoStylePreset?: string;
     videoCameraPreset?: string;
     imageStylePreset?: string;
+    imageCameraBody?: string;
+    imageCameraLens?: string;
+    imageCameraFocalLength?: string;
+    imageCameraAperture?: string;
     videoTask?: { id: string; provider: "openai" | "seedance" | "agnes"; model: string };
     videoTaskStartedAt?: number;
     generationJobId?: string;

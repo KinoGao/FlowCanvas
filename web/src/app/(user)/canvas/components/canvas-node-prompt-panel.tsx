@@ -23,6 +23,7 @@ import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
+import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -40,7 +41,7 @@ type CanvasNodePromptPanelProps = {
 };
 
 type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "mode" | "advanced" | null;
-type ImageComposerMenu = "style" | null;
+type ImageComposerMenu = "style" | "camera" | null;
 
 const COMPOSER_QUICK_PROMPTS = {
     text: ["写一段更有画面感的描述", "把这段内容整理成分镜脚本", "提炼出适合生成图片的提示词"],
@@ -200,7 +201,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         const enrichedPrompt = mode === "video"
             ? enrichVideoPrompt(text, node.metadata?.videoStylePreset, node.metadata?.videoCameraPreset)
             : mode === "image"
-                ? enrichImagePrompt(text, node.metadata?.imageStylePreset)
+                ? enrichImagePrompt(text, node.metadata?.imageStylePreset, readImageCameraSettings(node))
                 : text;
         if (confirmMode === "manual" && mode !== "comfyui") {
             const source: ComposerConfirmSource = {
@@ -434,6 +435,7 @@ function ImageComposer({
 }: ImageComposerProps) {
     const activeReferences = references.filter((reference) => reference.active);
     const selectedStyle = IMAGE_STYLE_PRESETS.find((item) => item.id === node.metadata?.imageStylePreset) || IMAGE_STYLE_PRESETS[0];
+    const cameraSettings = readImageCameraSettings(node);
     const [expanded, setExpanded] = useState(false);
 
     return (
@@ -516,6 +518,20 @@ function ImageComposer({
                         }
                     >
                         <ComposerToolbarButton icon={<Palette className="size-3.5" />} label={selectedStyle.shortLabel} active={openMenu === "style"} theme={theme} />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={openMenu === "camera"}
+                        onOpenChange={(open) => onMenuChange(open ? "camera" : null)}
+                        content={
+                            <ImageCameraSettingsPanel
+                                settings={cameraSettings}
+                                theme={theme}
+                                onChange={(patch) => onConfigChange(patch)}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Camera className="size-3.5" />} label={imageCameraSummaryLabel(cameraSettings)} active={openMenu === "camera"} theme={theme} />
                     </ComposerPopover>
 
                     <div className="w-[210px] shrink-0">
@@ -617,7 +633,7 @@ function VideoComposer({
     const durations = capability?.durations || [];
     const currentDuration = durations.includes(Number(config.videoSeconds)) ? Number(config.videoSeconds) : durations[0];
     const selectedStyle = VIDEO_STYLE_PRESETS.find((item) => item.id === node.metadata?.videoStylePreset) || VIDEO_STYLE_PRESETS[0];
-    const selectedCamera = VIDEO_CAMERA_PRESETS.find((item) => item.id === node.metadata?.videoCameraPreset) || VIDEO_CAMERA_PRESETS[0];
+    const selectedCamera = CANVAS_VIDEO_CAMERA_PRESETS.find((item) => item.id === node.metadata?.videoCameraPreset) || CANVAS_VIDEO_CAMERA_PRESETS[0];
     const activeReferences = references.filter((reference) => reference.active);
     const disabled = capabilityPending || capabilityUnavailable;
     const canGenerate = Boolean(prompt.trim() || (selectedMode !== "text-to-video" && activeReferences.some((reference) => reference.kind !== "text")));
@@ -800,7 +816,7 @@ function VideoComposer({
                         content={
                             <PresetGrid
                                 title="运镜库"
-                                items={VIDEO_CAMERA_PRESETS}
+                                items={CANVAS_VIDEO_CAMERA_PRESETS}
                                 value={selectedCamera.id}
                                 theme={theme}
                                 onChange={(id) => {
@@ -1018,7 +1034,7 @@ function PresetGrid({ title, items, value, theme, onChange }: { title: string; i
     return (
         <div className="w-[430px] max-w-[calc(100vw-32px)] p-2" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <div className="px-1 pb-2 text-sm font-semibold">{title}</div>
-            <div className="grid grid-cols-3 gap-2 max-[480px]:grid-cols-2">
+            <div className="grid max-h-[340px] grid-cols-3 gap-2 overflow-y-auto max-[480px]:grid-cols-2">
                 {items.map((item) => (
                     <button
                         key={item.id || "default"}
@@ -1033,6 +1049,42 @@ function PresetGrid({ title, items, value, theme, onChange }: { title: string; i
                     </button>
                 ))}
             </div>
+        </div>
+    );
+}
+
+function ImageCameraSettingsPanel({ settings, theme, onChange }: { settings: CanvasImageCameraSettings; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange: (patch: Partial<CanvasNodeData["metadata"]>) => void }) {
+    const groups: { title: string; options: { id: string; label: string }[]; value: string; onSelect: (id: string) => void }[] = [
+        { title: "相机型号", options: CAMERA_BODY_OPTIONS, value: settings.body || "", onSelect: (id) => onChange({ imageCameraBody: id || undefined }) },
+        { title: "镜头类型", options: CAMERA_LENS_OPTIONS, value: settings.lens || "", onSelect: (id) => onChange({ imageCameraLens: id || undefined }) },
+        { title: "焦距", options: CAMERA_FOCAL_LENGTHS.map((value) => ({ id: value, label: value ? `${value}mm` : "不限" })), value: settings.focalLength || "", onSelect: (id) => onChange({ imageCameraFocalLength: id || undefined }) },
+        { title: "光圈", options: CAMERA_APERTURES.map((value) => ({ id: value, label: value || "不限" })), value: settings.aperture || "", onSelect: (id) => onChange({ imageCameraAperture: id || undefined }) },
+    ];
+    return (
+        <div className="w-[400px] max-w-[calc(100vw-32px)] p-2" style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <div className="px-1 pb-1 text-sm font-semibold">摄像机控制</div>
+            {groups.map((group) => (
+                <div key={group.title} className="px-1 pt-2">
+                    <div className="pb-1.5 text-xs font-medium" style={{ color: theme.node.muted }}>{group.title}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {group.options.map((option) => {
+                            const selected = group.value === option.id;
+                            return (
+                                <button
+                                    key={option.id || "default"}
+                                    type="button"
+                                    className="rounded-full border px-2.5 py-1 text-[11px] transition hover:opacity-80"
+                                    style={{ borderColor: selected ? theme.ui.accent : theme.ui.hairline, background: selected ? theme.ui.controlFill : "transparent", color: theme.node.text }}
+                                    onClick={() => group.onSelect(option.id)}
+                                >
+                                    {option.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+            <div className="px-1 pb-1 pt-2.5 text-[10px] leading-4" style={{ color: theme.node.muted }}>摄影参数会作为提示词片段在生成时追加，不影响原始提示词。</div>
         </div>
     );
 }
@@ -1116,15 +1168,6 @@ const IMAGE_STYLE_PRESETS: VideoPreset[] = [
     { id: "retro", label: "复古胶片", shortLabel: "复古胶片", description: "柔和颗粒、低饱和与胶片色彩", prompt: "vintage film photography, subtle grain, muted colors, analog texture", tone: "rgba(137,91,64,.16)" },
 ];
 
-const VIDEO_CAMERA_PRESETS: VideoPreset[] = [
-    { id: "", label: "自动运镜", shortLabel: "运镜", description: "由模型根据场景自动安排镜头", prompt: "", tone: "rgba(127,127,127,.08)" },
-    { id: "fixed", label: "固定镜头", shortLabel: "固定镜头", description: "机位固定，突出主体动作", prompt: "locked camera, fixed shot", tone: "rgba(82,115,132,.16)" },
-    { id: "dolly-in", label: "镜头推进", shortLabel: "镜头推进", description: "平滑向主体靠近，增强聚焦", prompt: "smooth dolly in toward the subject", tone: "rgba(80,105,151,.16)" },
-    { id: "dolly-out", label: "镜头后移", shortLabel: "镜头后移", description: "逐步拉远，展示环境关系", prompt: "smooth dolly out revealing the environment", tone: "rgba(91,126,107,.16)" },
-    { id: "orbit", label: "环绕拍摄", shortLabel: "环绕拍摄", description: "围绕主体平稳运动", prompt: "smooth orbit camera around the subject", tone: "rgba(129,91,144,.16)" },
-    { id: "handheld", label: "手持跟拍", shortLabel: "手持跟拍", description: "轻微手持感，紧跟主体运动", prompt: "subtle handheld tracking shot following the subject", tone: "rgba(147,103,74,.16)" },
-];
-
 function videoRatioLabel(value: string) {
     if (value === "adaptive" || value === "auto") return "自动";
     if (value === "16:9") return "16:9（横屏）";
@@ -1139,13 +1182,23 @@ function videoDurationLabel(value?: number) {
 
 function enrichVideoPrompt(prompt: string, styleId?: string, cameraId?: string) {
     const style = VIDEO_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
-    const camera = VIDEO_CAMERA_PRESETS.find((item) => item.id === cameraId)?.prompt;
+    const camera = videoCameraPresetPrompt(cameraId);
     return [prompt, style, camera].filter(Boolean).join(", ");
 }
 
-function enrichImagePrompt(prompt: string, styleId?: string) {
+function enrichImagePrompt(prompt: string, styleId?: string, cameraSettings?: CanvasImageCameraSettings) {
     const style = IMAGE_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
-    return [prompt, style].filter(Boolean).join(", ");
+    const camera = buildImageCameraPrompt(cameraSettings);
+    return [prompt, style, camera].filter(Boolean).join(", ");
+}
+
+function readImageCameraSettings(node: CanvasNodeData): CanvasImageCameraSettings {
+    return {
+        body: node.metadata?.imageCameraBody || undefined,
+        lens: node.metadata?.imageCameraLens || undefined,
+        focalLength: node.metadata?.imageCameraFocalLength || undefined,
+        aperture: node.metadata?.imageCameraAperture || undefined,
+    };
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
