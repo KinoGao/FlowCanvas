@@ -39,7 +39,6 @@ import type { CanvasImageSplitParams } from "../components/canvas-node-split-dia
 import type { CanvasImageUpscaleParams } from "../components/canvas-node-upscale-dialog";
 import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationContext, type NodeGenerationInput } from "../components/canvas-node-generation";
 import { LeaferCanvas } from "../components/leafer-canvas";
-import { CanvasLeftToolbar } from "../components/canvas-left-toolbar";
 import { CanvasColorGroupBar } from "../components/canvas-color-group-bar";
 import { CanvasSearchPanel } from "../components/canvas-search-panel";
 import { CanvasNode, type CanvasNodeProps } from "../components/canvas-node";
@@ -4905,22 +4904,6 @@ function LeaferCanvasPage() {
             }
         >
             <CanvasRestoreCover ready={projectLoaded && canvasVisualReady} />
-            {projectLoaded ? (
-                <CanvasLeftToolbar
-                    onAddText={() => createNode(CanvasNodeType.Text)}
-                    onAddImage={() => createNode(CanvasNodeType.Image)}
-                    onAddVideo={() => createNode(CanvasNodeType.Video)}
-                    onAddAudio={() => createNode(CanvasNodeType.Audio)}
-                    onUpload={() => handleUploadRequest()}
-                    onOpenHistory={() => setGenerationHistoryOpen(true)}
-                    onOpenSearch={() => setSearchOpen(true)}
-                    onOpenAssets={() => {
-                        setCanvasAssetPanelInitialTab("assets");
-                        setCanvasAssetPanelOpen(true);
-                    }}
-                    onOpenTemplates={() => setWorkflowToolboxOpen(true)}
-                />
-            ) : null}
             <section ref={canvasShellRef} className="creative-os-canvas relative min-w-0 flex-1 overflow-hidden">
                 {projectLoaded ? (
                     <>
