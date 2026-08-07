@@ -6,7 +6,7 @@ import { App, Button, Popover, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
-import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig, type CustomImageStyle } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -24,6 +24,8 @@ import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
+import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
+import { CanvasImageStyleLibrary } from "./canvas-image-style-library";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -201,7 +203,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         const enrichedPrompt = mode === "video"
             ? enrichVideoPrompt(text, node.metadata?.videoStylePreset, node.metadata?.videoCameraPreset)
             : mode === "image"
-                ? enrichImagePrompt(text, node.metadata?.imageStylePreset, readImageCameraSettings(node))
+                ? enrichImagePrompt(text, node.metadata?.imageStylePreset, readImageCameraSettings(node), config.customImageStyles)
                 : text;
         if (confirmMode === "manual" && mode !== "comfyui") {
             const source: ComposerConfirmSource = {
@@ -434,7 +436,7 @@ function ImageComposer({
     onRetry,
 }: ImageComposerProps) {
     const activeReferences = references.filter((reference) => reference.active);
-    const selectedStyle = IMAGE_STYLE_PRESETS.find((item) => item.id === node.metadata?.imageStylePreset) || IMAGE_STYLE_PRESETS[0];
+    const selectedStyle = resolveImageStylePreset(node.metadata?.imageStylePreset, config.customImageStyles);
     const cameraSettings = readImageCameraSettings(node);
     const [expanded, setExpanded] = useState(false);
 
@@ -505,10 +507,9 @@ function ImageComposer({
                         open={openMenu === "style"}
                         onOpenChange={(open) => onMenuChange(open ? "style" : null)}
                         content={
-                            <PresetGrid
-                                title="风格库"
-                                items={IMAGE_STYLE_PRESETS}
-                                value={selectedStyle.id}
+                            <CanvasImageStyleLibrary
+                                value={node.metadata?.imageStylePreset || ""}
+                                currentPrompt={prompt}
                                 theme={theme}
                                 onChange={(id) => {
                                     onConfigChange({ imageStylePreset: id || undefined });
@@ -1159,15 +1160,6 @@ const VIDEO_STYLE_PRESETS: VideoPreset[] = [
     { id: "retro", label: "复古胶片", shortLabel: "复古胶片", description: "柔和颗粒、低饱和与胶片色彩", prompt: "vintage film look, subtle grain, muted colors, analog texture", tone: "rgba(137,91,64,.16)" },
 ];
 
-const IMAGE_STYLE_PRESETS: VideoPreset[] = [
-    { id: "", label: "自动风格", shortLabel: "风格", description: "完全按提示词和参考素材生成", prompt: "", tone: "rgba(127,127,127,.08)" },
-    { id: "cinematic", label: "电影质感", shortLabel: "电影质感", description: "电影光影、真实镜头与层次构图", prompt: "cinematic still, dramatic lighting, realistic lens, layered composition", tone: "rgba(64,104,142,.18)" },
-    { id: "documentary", label: "纪实写实", shortLabel: "纪实写实", description: "自然光线、真实材质与生活感", prompt: "documentary photography, natural light, authentic texture, lifelike detail", tone: "rgba(88,116,92,.16)" },
-    { id: "anime", label: "二维动画", shortLabel: "二维动画", description: "清晰线稿、平涂色彩与动画表现", prompt: "2D anime illustration, clean line art, cel shading, expressive composition", tone: "rgba(132,91,157,.16)" },
-    { id: "commercial", label: "商业摄影", shortLabel: "商业摄影", description: "精致布光、干净背景与产品级细节", prompt: "premium commercial photography, polished lighting, clean composition, crisp detail", tone: "rgba(154,126,66,.16)" },
-    { id: "retro", label: "复古胶片", shortLabel: "复古胶片", description: "柔和颗粒、低饱和与胶片色彩", prompt: "vintage film photography, subtle grain, muted colors, analog texture", tone: "rgba(137,91,64,.16)" },
-];
-
 function videoRatioLabel(value: string) {
     if (value === "adaptive" || value === "auto") return "自动";
     if (value === "16:9") return "16:9（横屏）";
@@ -1186,8 +1178,8 @@ function enrichVideoPrompt(prompt: string, styleId?: string, cameraId?: string) 
     return [prompt, style, camera].filter(Boolean).join(", ");
 }
 
-function enrichImagePrompt(prompt: string, styleId?: string, cameraSettings?: CanvasImageCameraSettings) {
-    const style = IMAGE_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
+function enrichImagePrompt(prompt: string, styleId?: string, cameraSettings?: CanvasImageCameraSettings, customStyles: CustomImageStyle[] = []) {
+    const style = imageStylePresetPrompt(styleId, customStyles);
     const camera = buildImageCameraPrompt(cameraSettings);
     return [prompt, style, camera].filter(Boolean).join(", ");
 }

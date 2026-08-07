@@ -22,6 +22,14 @@ export type ModelChannel = {
 
 export type ImageResponseFormatPolicy = "auto" | "b64_json" | "url";
 
+/** 账号级自定义图片风格（画布风格库「保存当前提示词为自定义风格」），随用户配置同步到后端 */
+export type CustomImageStyle = {
+    id: string;
+    name: string;
+    prompt: string;
+    createdAt: string;
+};
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
@@ -55,6 +63,7 @@ export type AiConfig = {
     size: string;
     count: string;
     canvasImageCount: string;
+    customImageStyles?: CustomImageStyle[];
 };
 
 export type ProxyMode = "direct" | "backend";
