@@ -7,7 +7,7 @@ import { Bot, Box, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2
 
 import { saveAs } from "file-saver";
 
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask, type VideoGenerationTask } from "@/services/api/video";
 import { pushBackendProjects } from "@/services/api/backend-storage";
@@ -57,6 +57,14 @@ import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-be
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import { resolveVideoSubject, videoSubjectReferenceImages } from "../utils/canvas-video-subjects";
+import {
+    buildVideoStoryboardBody,
+    buildVideoStoryboardPrompt,
+    captureVideoFrames,
+    parseVideoStoryboardResponse,
+    trimVideoSegment,
+    type VideoTrimRange,
+} from "../utils/canvas-video-tools";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
     allocateCanvasNodeIdentity,
@@ -287,6 +295,7 @@ const CanvasNodeOutpaintDialog = lazy(() => import("../components/canvas-node-ou
 const CanvasNodeLightingDialog = lazy(() => import("../components/canvas-node-lighting-dialog").then((mod) => ({ default: mod.CanvasNodeLightingDialog })));
 const CanvasNodeSplitDialog = lazy(() => import("../components/canvas-node-split-dialog").then((mod) => ({ default: mod.CanvasNodeSplitDialog })));
 const CanvasNodeUpscaleDialog = lazy(() => import("../components/canvas-node-upscale-dialog").then((mod) => ({ default: mod.CanvasNodeUpscaleDialog })));
+const CanvasVideoTrimDialog = lazy(() => import("../components/canvas-video-trim-dialog").then((mod) => ({ default: mod.CanvasVideoTrimDialog })));
 const CanvasNodeHoverToolbar = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeHoverToolbar })));
 const CanvasNodeInfoModal = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeInfoModal })));
 const CanvasNodePromptPanel = lazy(() => import("../components/canvas-node-prompt-panel").then((mod) => ({ default: mod.CanvasNodePromptPanel })));
@@ -777,6 +786,8 @@ function LeaferCanvasPage() {
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
     const [lightingNodeId, setLightingNodeId] = useState<string | null>(null);
+    const [trimVideoNodeId, setTrimVideoNodeId] = useState<string | null>(null);
+    const [trimVideoSrc, setTrimVideoSrc] = useState("");
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
@@ -1541,6 +1552,7 @@ function LeaferCanvasPage() {
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const outpaintNode = outpaintNodeId ? nodeById.get(outpaintNodeId) || null : null;
     const lightingNode = lightingNodeId ? nodeById.get(lightingNodeId) || null : null;
+    const trimVideoNode = trimVideoNodeId ? nodeById.get(trimVideoNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null;
@@ -2888,6 +2900,111 @@ function LeaferCanvasPage() {
             setContextMenu(null);
         },
         [createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.textModel, message],
+    );
+
+    const analyzeVideoNode = useCallback(
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Video || (!node.metadata?.content && !node.metadata?.storageKey)) {
+                message.warning("视频节点为空，无法解析");
+                return;
+            }
+            const hide = message.loading("正在抽帧并解析视频分镜...", 0);
+            try {
+                const url = await resolveNodeContent(node);
+                if (!url) throw new Error("视频内容为空，无法解析");
+                const { frames, duration } = await captureVideoFrames(url);
+                if (!frames.length) throw new Error("未能从视频中抽取画面帧");
+                const generationConfig = buildGenerationConfig(effectiveConfig, undefined, "text");
+                const messages: AiTextMessage[] = [
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: buildVideoStoryboardPrompt(frames, duration) }, ...frames.map((frame) => ({ type: "image_url" as const, image_url: { url: frame.dataUrl } }))],
+                    },
+                ];
+                const answer = await requestImageQuestion(generationConfig, messages, () => {});
+                const beats = parseVideoStoryboardResponse(answer);
+                if (!beats.length) throw new Error("模型没有返回可识别的分镜表，请确认当前文本模型支持识图后重试");
+                const body = buildVideoStoryboardBody(beats);
+                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+                const position = { x: node.position.x + node.width + 96, y: node.position.y + node.height / 2 - spec.height / 2 };
+                const scriptNode = createCanvasNode(
+                    CanvasNodeType.Text,
+                    { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                    {
+                        canvasTool: "script",
+                        content: body,
+                        scriptTitle: `视频解析：${node.title || "视频"}`,
+                        scriptBody: body,
+                        scriptBeats: beats,
+                        status: NODE_STATUS_SUCCESS,
+                        generationMode: "text",
+                        fontSize: 14,
+                    },
+                );
+                setNodes((prev) => [...prev, scriptNode]);
+                setConnections((prev) => [...prev, createCanvasConnection(node.id, scriptNode.id)]);
+                setSelectedNodeIds(new Set([scriptNode.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(scriptNode.id);
+                message.success(`已解析出 ${beats.length} 个分镜`);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "视频解析失败");
+            } finally {
+                hide();
+            }
+        },
+        [createCanvasConnection, createCanvasNode, effectiveConfig, message],
+    );
+
+    const openVideoTrim = useCallback(
+        async (node: CanvasNodeData) => {
+            const url = await resolveNodeContent(node);
+            if (!url) {
+                message.warning("视频节点为空，无法剪辑");
+                return;
+            }
+            setTrimVideoSrc(url);
+            setTrimVideoNodeId(node.id);
+        },
+        [message],
+    );
+
+    const confirmVideoTrim = useCallback(
+        async (range: VideoTrimRange) => {
+            const node = trimVideoNode;
+            const src = trimVideoSrc;
+            setTrimVideoNodeId(null);
+            setTrimVideoSrc("");
+            if (!node || !src) return;
+            const hide = message.loading("正在导出剪辑片段，耗时与片段时长相当...", 0);
+            try {
+                const blob = await trimVideoSegment(src, range);
+                const video = await uploadMediaFile(blob, "video");
+                const size = fitNodeSize(video.width || node.metadata?.naturalWidth || 1280, video.height || node.metadata?.naturalHeight || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const position = { x: node.position.x + node.width + 96, y: node.position.y + node.height / 2 - size.height / 2 };
+                const child: CanvasNodeData = {
+                    ...createCanvasNode(
+                        CanvasNodeType.Video,
+                        { x: position.x + size.width / 2, y: position.y + size.height / 2 },
+                        { ...videoMetadata(video), prompt: node.metadata?.prompt },
+                    ),
+                    position,
+                    width: size.width,
+                    height: size.height,
+                };
+                setNodes((prev) => [...prev, child]);
+                setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+                setSelectedNodeIds(new Set([child.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(child.id);
+                message.success("剪辑完成，已生成新视频节点");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "视频剪辑失败");
+            } finally {
+                hide();
+            }
+        },
+        [createCanvasConnection, createCanvasNode, message, trimVideoNode, trimVideoSrc],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -5326,6 +5443,8 @@ function LeaferCanvasPage() {
                         onPanorama720={(node) => void generatePanorama720Node(node)}
                         onViewImage={handleViewNodeImage}
                         onReversePrompt={createImageReversePromptNodes}
+                        onAnalyzeVideo={(node) => void analyzeVideoNode(node)}
+                        onTrimVideo={(node) => void openVideoTrim(node)}
                         onRetry={handleRetryNodeAction}
                         onExecuteGroup={(node) => void handleExecuteGroup(node)}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
@@ -5447,6 +5566,18 @@ function LeaferCanvasPage() {
                 {outpaintNode?.metadata?.content ? <CanvasNodeOutpaintDialog dataUrl={outpaintNode.metadata.content} open={Boolean(outpaintNode)} onClose={() => setOutpaintNodeId(null)} onConfirm={(ratioId) => void generateOutpaintNode(outpaintNode!, ratioId)} /> : null}
 
                 {lightingNode?.metadata?.content ? <CanvasNodeLightingDialog dataUrl={lightingNode.metadata.content} open={Boolean(lightingNode)} onClose={() => setLightingNodeId(null)} onConfirm={(settings) => void generateLightingNode(lightingNode!, settings)} /> : null}
+
+                {trimVideoNode && trimVideoSrc ? (
+                    <CanvasVideoTrimDialog
+                        src={trimVideoSrc}
+                        open={Boolean(trimVideoNode)}
+                        onClose={() => {
+                            setTrimVideoNodeId(null);
+                            setTrimVideoSrc("");
+                        }}
+                        onConfirm={(range) => void confirmVideoTrim(range)}
+                    />
+                ) : null}
 
                 <Modal
                     className={previewNode?.metadata?.canvasTool === 'panorama360' ? 'canvas-panorama-modal' : undefined}
