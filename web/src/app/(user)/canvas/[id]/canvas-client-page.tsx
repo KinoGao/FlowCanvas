@@ -52,6 +52,7 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
+import { buildGroupExecutionPlan, collectGroupMemberIds } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
@@ -811,6 +812,7 @@ function LeaferCanvasPage() {
     const recoveredVideoTaskIdsRef = useRef(new Set<string>());
     const recoveryTrackingStartedRef = useRef(false);
     const resumedGenerationProjectKeyRef = useRef<string | null>(null);
+    const groupExecutionRunningRef = useRef(false);
     const multiNodeDragStartRef = useRef<MultiNodeDragState | null>(null);
     const setSelectedNodeIds = useCallback((nextValue: Set<string> | ((current: Set<string>) => Set<string>)) => {
         const next = typeof nextValue === "function" ? nextValue(selectedNodeIdsRef.current) : nextValue;
@@ -4595,6 +4597,57 @@ function LeaferCanvasPage() {
     }, []);
 
     const handleRetryNodeAction = useCallback((node: CanvasNodeData) => void handleRetryNode(node), [handleRetryNode]);
+
+    /** 整组执行：对打组成员（或与当前节点相连通的整组节点）按连线拓扑序逐层重跑生成节点，同层互不依赖可并发。 */
+    const handleExecuteGroup = useCallback(
+        async (node: CanvasNodeData) => {
+            if (groupExecutionRunningRef.current) {
+                message.warning("整组执行进行中，请等待完成");
+                return;
+            }
+            const memberIds = collectGroupMemberIds(nodesRef.current, connectionsRef.current, node.id);
+            const plan = buildGroupExecutionPlan(nodesRef.current, connectionsRef.current, memberIds);
+            const total = plan.levels.reduce((sum, level) => sum + level.length, 0);
+            if (!total) {
+                message.warning("组内没有可执行的生成节点");
+                return;
+            }
+            groupExecutionRunningRef.current = true;
+            const failed = new Set<string>();
+            let succeeded = 0;
+            let skipped = 0;
+            message.info(`开始整组执行，共 ${total} 个生成节点`);
+            try {
+                for (const level of plan.levels) {
+                    await Promise.all(
+                        level.map(async (nodeId) => {
+                            const dependencies = plan.dependencies.get(nodeId);
+                            if (dependencies && [...dependencies].some((id) => failed.has(id))) {
+                                skipped += 1;
+                                return;
+                            }
+                            const target = nodesRef.current.find((item) => item.id === nodeId);
+                            if (!target) return;
+                            try {
+                                await handleRetryNode(target);
+                            } catch {
+                                failed.add(nodeId);
+                                return;
+                            }
+                            const latest = nodesRef.current.find((item) => item.id === nodeId);
+                            if (latest?.metadata?.status === NODE_STATUS_ERROR) failed.add(nodeId);
+                            else succeeded += 1;
+                        }),
+                    );
+                }
+            } finally {
+                groupExecutionRunningRef.current = false;
+            }
+            if (failed.size) message.warning(`整组执行完成：成功 ${succeeded} 个，失败 ${failed.size} 个${skipped ? `，跳过 ${skipped} 个` : ""}`);
+            else message.success(`整组执行完成，共执行 ${succeeded} 个节点${skipped ? `，跳过 ${skipped} 个` : ""}`);
+        },
+        [handleRetryNode, message],
+    );
     const handleViewNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
     const insertPanoramaSnapshot = useCallback(
         async (sourceNode: CanvasNodeData, dataUrl: string) => {
@@ -5069,7 +5122,7 @@ function LeaferCanvasPage() {
                                 onGenerateImage={generateImageFromTextNode}
                                 onCaptureVideoFrame={insertVideoFrameCapture}
                                 onViewImage={handleViewNodeImage}
-                                onGroupAction={handleGroupAction}
+                                onGroupAction={(node, action) => (action === "execute" ? void handleExecuteGroup(node) : handleGroupAction(node, action))}
                                 onContextMenu={handleNodeContextMenu}
                             />
                         );
@@ -5224,6 +5277,7 @@ function LeaferCanvasPage() {
                         onViewImage={handleViewNodeImage}
                         onReversePrompt={createImageReversePromptNodes}
                         onRetry={handleRetryNodeAction}
+                        onExecuteGroup={(node) => void handleExecuteGroup(node)}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                         onQuickStoryboard={(node, command) => createScriptGridStoryboard(node, command)}
                         onQuickImageCommand={(node, command) => void generateImageQuickCommandNode(node, command)}
