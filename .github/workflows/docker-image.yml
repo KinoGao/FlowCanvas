@@ -10,8 +10,8 @@ permissions:
   packages: write
 
 env:
-  FRONTEND_IMAGE: ghcr.io/basketikun/infinite-canvas
-  BACKEND_IMAGE: ghcr.io/basketikun/infinite-canvas-backend
+  FRONTEND_IMAGE: ghcr.io/KinoGao/FlowCanvas-frontend
+  BACKEND_IMAGE: ghcr.io/KinoGao/FlowCanvas-backend
 
 jobs:
   meta:
@@ -37,22 +37,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: ghcr.io/basketikun/infinite-canvas
+          - image: ghcr.io/KinoGao/FlowCanvas-frontend
             dockerfile: Dockerfile
             platform: linux/amd64
             arch: frontend-amd64
             runner: ubuntu-latest
-          - image: ghcr.io/basketikun/infinite-canvas
+          - image: ghcr.io/KinoGao/FlowCanvas-frontend
             dockerfile: Dockerfile
             platform: linux/arm64
             arch: frontend-arm64
             runner: ubuntu-24.04-arm
-          - image: ghcr.io/basketikun/infinite-canvas-backend
+          - image: ghcr.io/KinoGao/FlowCanvas-backend
             dockerfile: backend/Dockerfile
             platform: linux/amd64
             arch: backend-amd64
             runner: ubuntu-latest
-          - image: ghcr.io/basketikun/infinite-canvas-backend
+          - image: ghcr.io/KinoGao/FlowCanvas-backend
             dockerfile: backend/Dockerfile
             platform: linux/arm64
             arch: backend-arm64

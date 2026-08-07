@@ -1,12 +1,12 @@
 services:
   app:
-    image: ghcr.io/basketikun/infinite-canvas:latest
+    image: ghcr.io/KinoGao/FlowCanvas-frontend:latest
     container_name: infinite-canvas
     ports:
       - "9800:9800"
     restart: unless-stopped
   backend:
-    image: ghcr.io/basketikun/infinite-canvas-backend:latest
+    image: ghcr.io/KinoGao/FlowCanvas-backend:latest
     container_name: infinite-canvas-backend
     ports:
       - "9801:9801"
