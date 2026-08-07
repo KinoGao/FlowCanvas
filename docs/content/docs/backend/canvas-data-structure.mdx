@@ -9,14 +9,12 @@ description: 画布本地存储、节点结构、媒体文件与清理机制
 
 ## 当前存储位置
 
-当前画布项目主要保存在浏览器本地：
+画布与素材的权威数据保存在后端账号工作区：
 
-- 画布项目 JSON：`localForage`，数据库名 `infinite-canvas`，storeName `app_state`，key 为 `infinite-canvas:canvas_store`。
-- 我的素材 JSON：`localForage`，数据库名 `infinite-canvas`，storeName `app_state`，key 为 `infinite-canvas:asset_store`。
-- 图片 Blob：单独存到 `localForage` 实例，数据库名 `infinite-canvas`，storeName `image_files`。
-- 视频等媒体 Blob：单独存到 `localForage` 实例，数据库名 `infinite-canvas`，storeName `media_files`。
-
-画布 JSON 不直接长期保存大体积 base64 图片或视频。图片节点、视频节点、助手图片和素材媒体只保存展示 URL、`storageKey` 和元信息，真实 Blob 通过 `storageKey` 读取。
+- 画布项目、视角/背景等保存在后端 `canvas_projects`，随账号自动保存。
+- 我的素材保存在后端 `assets`。
+- 图片 / 视频 / 音频等媒体 Blob 上传到后端 `user_files`，节点只保存签名后的展示 URL 与 `storageKey`，真实媒体通过签名地址读取。
+- 浏览器 `localforage` 仅用于一次性旧数据迁移与本地缓存，不是选择性的保存模式。
 
 ## 画布项目结构
 
@@ -30,24 +28,35 @@ type CanvasProject = {
   updatedAt: string;
   nodes: CanvasNodeData[];
   connections: CanvasConnection[];
+  nodeSequenceCounters: /* 类型级拆序号计数器 */;
+  referenceOrderCounter: number;
   chatSessions: CanvasAssistantSession[];
   activeChatId: string | null;
   backgroundMode: "lines" | "dots" | "blank";
+  snapToGrid: boolean;
+  alignmentGuidesEnabled: boolean;
+  showImageInfo: boolean;
   viewport: { x: number; y: number; k: number };
+  workflowTemplates: CanvasWorkflowTemplate[];
 };
 ```
 
 字段说明：
 
-- `id`：画布项目 ID，当前前端生成。
+- `id`：画布项目 ID，前端生成，保存到后端随账号持久化。
 - `title`：画布名称。
 - `createdAt` / `updatedAt`：ISO 字符串。
 - `nodes`：画布节点列表。
 - `connections`：节点连线列表。
+- `nodeSequenceCounters`：各节点类型的拆序号计数器，用于按类型编号。
+- `referenceOrderCounter`：连线引用顺序计数器，用于 Composer / ComfyUI 输入条排序。
 - `chatSessions`：右侧画布助手会话。
 - `activeChatId`：当前选中的助手会话 ID。
 - `backgroundMode`：画布背景模式。
+- `snapToGrid` / `alignmentGuidesEnabled`：网格吸附与辅助基准线开关。
+- `showImageInfo`：是否显示图片尺寸信息。
 - `viewport`：视口变换，`x/y` 是屏幕平移，`k` 是缩放比例。
+- `workflowTemplates`：工作流工具箱保存的项目内模板。
 
 ## 节点结构
 
@@ -62,6 +71,7 @@ type CanvasNodeData = {
   width: number;
   height: number;
   metadata?: CanvasNodeMetadata;
+  pinColor?: string; // 节点 Pin 标记色，来自画布 Pin 色板 id
 };
 ```
 
@@ -72,6 +82,7 @@ type CanvasNodeData = {
 - `title`：节点标题。新节点按类型独立编号，用户可重命名。
 - `position`：画布世界坐标，不是屏幕坐标。
 - `width` / `height`：画布世界坐标下的节点尺寸。
+- `pinColor`：节点的 Pin 颜色标记（右上角色点），对应画布 Pin 色板内的 id。
 - `metadata`：节点内容和业务状态。
 
 `metadata` 当前常用字段：
@@ -163,27 +174,13 @@ type CanvasAssistantMessage = {
 
 ## 图片写入流程
 
-所有新增图片应通过 `uploadImage(input)` 写入：
+在后端账号模式下，新增图片通过 `uploadImage(input)` 写入同步，媒体会经 `/api/user/files` 上传到后端 `user_files`，返回带签名地址的展示 URL 和 `backend:` 前缀的 `storageKey`：
 
-1. 传入 `Blob` 或 data URL。
-2. 内部转成 `Blob`。
-3. 生成 `storageKey`，格式为 `image:<id>`。
-4. 把 Blob 写入 `image_files`。
-5. 创建 `blob:` URL，并缓存在内存 `objectUrls`。
-6. 读取图片宽高，返回：
+1. 传入 `Blob` 或 data URL，内部统一转成 `Blob`。
+2. 登录账号时调用 `uploadBackendFile` 上传到后端，得到签名 URL 与 `storageKey`（`backend:<id>`）。
+3. 读取图片宽高，返回类似 `UploadedImage`（`url` / `storageKey` / `width` / `height` / `bytes` / `mimeType`）。
 
-```ts
-type UploadedImage = {
-  url: string;
-  storageKey: string;
-  width: number;
-  height: number;
-  bytes: number;
-  mimeType: string;
-};
-```
-
-图片节点会通过 `imageMetadata(image)` 写入：
+图片节点会写入：
 
 ```ts
 {
@@ -197,29 +194,21 @@ type UploadedImage = {
 }
 ```
 
-因此，`content` 只适合当前浏览器会话展示，不能作为长期文件标识；长期标识是 `storageKey`。
+因此，`content` 是带签名的可展示 URL，适合当前会话加载；长期标识是 `storageKey`。
+
+未登录的遗留逻辑仍会用 `localforage` 的 `image_files` 存 Blob，但正常业务以后端账号工作区为权威。
 
 ## 图片读取和旧数据迁移
 
 打开画布时会执行图片补水：
 
-- 如果图片节点有 `storageKey`，通过 `resolveImageUrl(storageKey, fallback)` 读取 Blob 并生成新的 `blob:` URL。
-- 如果图片节点没有 `storageKey`，但 `content` 是旧的 `data:image/...`，会调用 `uploadImage(content)` 迁移到 `image_files`，并补上 `storageKey`。
+- 节点 `storageKey` 带 `backend:` 前缀时，通过 `resolveImageUrl` 向后端换签名 URL 展示；浏览器会话内尽量复用已解析的缓存。
+- 旧数据中 `image:` 前缀的 `storageKey` 走 `localforage` 的 `image_files` 读取 Blob 生成 URL。
+- 如果节点没有 `storageKey`,但 `content` 是旧的 `data:image/...`，会调用 `uploadImage(content)` 迁移并补上 `storageKey`。
 - 助手消息里的引用图和生成图也会执行同类逻辑。
 
-我的素材读取时也会做迁移：
-
-- 有 `storageKey`：恢复 `coverUrl` 和 `data.dataUrl` 的可展示 URL。
-- 无 `storageKey` 且保存了 base64：写入 `image_files`，然后更新素材里的 `storageKey`。
+“我的素材”读取时也会做迁移，把旧 base64 / 本地 Blob 迁移到当前账号媒体。
 
 ## 图片移除和清理
 
-图片不是在删除节点时立即按节点逐张删除，而是做引用清理：
-
-1. 删除节点、清空画布、删除画布、删除素材、删除助手会话时，会触发 `cleanupImages`。
-2. `cleanupImages` 会收集当前仍被画布项目、素材和额外传入数据引用的所有 `storageKey`。
-3. `cleanupUnusedImages` 遍历 `image_files` 中的全部图片。
-4. 不在引用集合里的图片会被删除。
-5. 删除时会同时 `URL.revokeObjectURL`，并从内存缓存 `objectUrls` 移除。
-
-这套方式可以避免同一张图片被画布、素材或助手同时引用时误删。
+后端账号下的媒体由后端账号工作区统一管理，画布删除时同步清理对应 `user_files` 引用。遗留本地 `image_files` 缓存仍通过引用清理回收，避免同一张图片被画布、素材或助手同时引用时误删。

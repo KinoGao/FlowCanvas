@@ -5,44 +5,53 @@ description: 用最少步骤把无限画布跑起来
 
 # 快速开始
 
-如果你只是想先把项目跑起来，优先部署或启动 `web/` 前端。
-
-## Vercel 部署
-
-在 Vercel 中导入仓库即可，根目录 `vercel.json` 会构建 `web/`。当前版本的 AI 请求由浏览器前台直连用户自己的 OpenAI 兼容地址，不需要额外配置服务端。
+FlowCanvas 由前端（Vite + React，端口 `9800`）和后端（Spring Boot + SQLite，端口 `9801`）两部分组成。画布、素材、媒体和生成记录保存在后端账号工作区，模型厂商/API Key 由后端统一管理。
 
 ## 本地启动
 
+### 1. 启动后端
+
 ```bash
-git clone git@github.com:basketikun/infinite-canvas.git
-cd infinite-canvas
+cd backend
+mvn spring-boot:run
+```
+
+后端默认运行在 `http://localhost:9801`。可通过环境变量覆盖：
+
+- `PORT`：后端端口，默认 `9801`
+- `DB_PATH`：SQLite 数据库文件，默认 `./data/app.db`
+- `AUTH_CODE`：注册鉴权码，默认内部部署值 `gycode`
+- `ADMIN_CODE`：管理员授权码，默认 `admincode`
+- `MEDIA_SIGNING_SECRET`：媒体访问签名密钥，默认继承 `ADMIN_CODE`
+
+### 2. 启动前端
+
+```bash
 cd web
-bun install
-bun run dev
+pnpm install   # 或 bun install
+pnpm dev
 ```
 
-启动后访问：
+前端默认运行在 `http://localhost:9800`，开发模式下由 Vite 将 `/api/*` 代理到后端 `9801`。
 
-```text
-http://localhost:3000
-```
+## 首次使用
+
+1. 打开 `http://localhost:9800`，用注册鉴权码 `gycode` 注册账号并登录。
+2. 进入后台管理（`/admin`，用管理员授权码 `admincode`）登记模型厂商地址、API Key、模型 ID 与能力选项。
+3. 回到画布创建节点开始创作。AI 请求经由后端代理执行，不会把私有 API Key 下发到浏览器。
 
 ## Docker 启动
 
-如果你需要基于当前源码构建镜像：
+使用发布镜像：
 
 ```bash
-docker build -t infinite-canvas .
-docker run --rm -p 3000:3000 infinite-canvas
+docker compose up -d
 ```
 
-## 首次使用建议
+前端 `9800` 与后端 `9801` 会一并拉起，后端数据卷挂载到 `./data`。生产部署前请配置环境变量覆盖默认凭证。
 
-- 先打开右上角配置弹窗，填入自己的 `Base URL`、`API Key` 和模型名。
-- 如果需要提示词仓库内容，打开 `/prompts` 会通过 Next.js route 拉取并缓存在内存中。
-- 如果需要跨设备同步画布、素材和生成记录，可在配置弹窗中填写 WebDAV。
+本地构建镜像：
 
-## 说明
-
-- 当前画布项目和“我的素材”主要保存在浏览器本地，WebDAV 同步需要用户自行配置。
-- AI API Key 保存在浏览器本地，并由前端直接请求 OpenAI 兼容接口。
+```bash
+docker compose -f docker-compose.local.yml up -d --build
+```

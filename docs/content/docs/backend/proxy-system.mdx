@@ -2,15 +2,13 @@
 
 ## 概述
 
-前端直接请求外部服务时可能遇到 **CORS（跨域）** 限制。项目内置三种 Next.js 服务端转发机制来解决此问题：
+所有对外转发统一由后端 Spring Boot 承担，前端只请求后端的 `/api/*` 路径（开发由 Vite 代理，生产由反向代理同域）。前端不直连第三方第三方模型接口，私有 API Key 不会下发到浏览器。
 
-| 转发类型 | 服务端路由 | 适用场景 |
+| 代理 | 后端路径 | 用途 |
 |---|---|---|
-| AI 代理 | `/api/ai-proxy` | AI API 渠道（大模型请求、图片下载） |
-| WebDAV 代理 | `/webdav-proxy` | WebDAV 同步 |
-| ComfyUI 代理 | `/api/comfyui-proxy` | ComfyUI 工作流 |
-
-每种代理均可由用户在 UI 配置中切换为 **前端直连（direct）** 或 **Next.js 转发（nextjs）**。
+| AI 代理 | `/api/ai-proxy` | 转发上游 AI 返回的远程媒体 URL 等资源 |
+| 模型调用 | `/api/model-runtime/models/{modelId}/**` | 文本 / 图片 / 视频 / 音频模型调用 |
+| ComfyUI 代理 | `/api/comfyui-proxy` | ComfyUI 工作流提交、上传与媒体输出 |
 
 ---
 
@@ -18,171 +16,59 @@
 
 ### 工作原理
 
-AI 代理逻辑分散在两个工具函数中：
-
-1. **`buildApiUrl(baseUrl, path, useProxy)`** — 构造请求 URL
-   - 拼接 baseUrl + `/v1`（如果还没带） + path
-   - 如果 `useProxy === true`，返回 `/api/ai-proxy?target=<encodedUrl>` 让请求走服务端
-   - 否则直接返回完整 URL 供前端直连
-
-2. **`rewriteThroughProxy(url, useProxy)`** — 仅改写图片/视频等资源的下载 URL
-   - 如果 `useProxy === true`，将 URL 改为 `/api/ai-proxy?target=<encodedUrl>`
-   - 否则原样返回
+前端在需要读取上游返回的远程 URL 时，把 URL 改写为 `/api/ai-proxy?target=<encodedUrl>` 走后端透传。前端实现见 `web/src/lib/ai-proxy-url.ts`。
 
 ### 服务端实现
 
-`web/src/app/api/ai-proxy/route.ts`：
+`backend/src/main/java/com/infinitecanvas/backend/controller/AiProxyController.java`：
 
-- 接收 `target` 查询参数，调用 `fetch(target, ...)` 透传
-- 支持 GET、POST、PUT、DELETE 方法
-- 将客户端发送的 `Content-Type`、`Authorization` 等头转发
-- 默认 100s 超时
+- 透传任意 `target`，支持 GET / POST / PUT / DELETE
+- 转发 `Authorization`、`Content-Type`、`Accept`、`Range` 等请求头
+- 默认 10 分钟超时
+- **SSRF 防护**：未登录请求（浏览器媒体加载）拒绝解析到内网 / 环回 / 链路本地 / 组播等地址；已登录用户允许内网目标（本地模型服务等）
+- 上游超时返回 `502`，网络异常统一返回「上游请求失败」，不向客户端透出主机 / 端口 / 内网地址等细节
 
-### 渠道级别代理
-
-AI 渠道的 `useProxy` 字段在各服务的构建函数中传递：
-
-```typescript
-// 各 service 中的通用模式
-function aiApiUrl(config: AiConfig, path: string) {
-    return buildApiUrl(config.baseUrl, path, config.useProxy);
-}
-```
-
-服务中获取图片/视频下载 URL 时也会通过 `rewriteThroughProxy` 处理：
-
-- **image.ts**：`resolveImageDataUrl` 在解析 `b64_json` 或 `url` 时调用 `rewriteThroughProxy(url, useProxy)`
-- **image.ts**：`parseGeminiImagePayload` 对 Gemini 返回的 `fileUri` 调用 `rewriteThroughProxy`
-- **video.ts**：`pollOpenAIVideoTask`、`pollSeedanceTask`、`pollAgnesVideoTask` 获取视频下载 URL 时调用 `rewriteThroughProxy`
+前端调用 `rewriteThroughProxy(url)`（`web/src/lib/ai-proxy-url.ts`）把远程媒体 URL 改写为 `/api/ai-proxy?target=...`；`image.ts`、`video.ts` 等在解析上游返回的图片 / 视频 URL 时使用它。
 
 ---
 
-## WebDAV 代理
-
-### 前端实现
-
-`web/src/services/webdav-sync.ts`：
-
-- 通过 `config.proxyMode` 判断
-  - `"direct"`：前端直连 WebDAV URL
-  - `"nextjs"`：发送 POST 到 `/webdav-proxy`，目标 URL、方法、鉴权头通过自定义 HTTP 头传递：
-    - `x-webdav-target`：完整的 WebDAV URL
-    - `x-webdav-method`：HTTP 方法
-    - `x-webdav-authorization`：Basic Auth
-    - `x-webdav-depth`、`x-webdav-destination`、`x-webdav-overwrite`、`x-webdav-content-type`
+## 模型运行时代理
 
 ### 服务端实现
 
-`web/src/app/webdav-proxy/route.ts`：
+`backend/src/main/java/com/infinitecanvas/backend/controller/ModelRuntimeProxyController.java` 挂载在 `/api/model-runtime/models/{modelId}/**`：
 
-- Node.js runtime，`force-dynamic`
-- 从 `x-webdav-target` 读取目标 URL，从 `x-webdav-*` 头还原原始请求头
-- 120s 超时
-- 只返回有限的响应头（`content-type`、`etag`、`last-modified`、`dav`）
+- POST 模型调用必须登录；未登录调用返回 `401`
+- 仅 GET（浏览器签名媒体加载）对未登录公开
+- 每个模型由对应的 `ModelRequestAdapter` 适配（Generic OpenAI / Gemini / Agnes Video / Seedance 等）
+
+### 前端
+
+模型请求构造与能力读取见 `web/src/services/api/model-capabilities.ts`、`image.ts`、`video.ts`、`audio.ts` 等。
 
 ---
 
 ## ComfyUI 代理
 
-### 前端实现
-
-`web/src/services/api/comfyui.ts` 中有三种转发场景：
-
-**1. 通用请求（comfyRequest）**
-```typescript
-config.proxyMode === "nextjs"
-    ? fetch("/api/comfyui-proxy", { body: JSON.stringify({ baseUrl, path, method, body }) })
-    : fetch(`${baseUrl}${path}`, init)
-```
-
-**2. 文件上传（uploadComfyFile）**
-```typescript
-config.proxyMode === "nextjs"
-    ? fetch("/api/comfyui-proxy", { body: formData })  // 附加 baseUrl 字段
-    : fetch(`${baseUrl}/upload/image`, { body: formData })
-```
-
-**3. 文件查看 URL（buildComfyViewUrl）**
-```typescript
-config.proxyMode === "nextjs"
-    ? `/api/comfyui-proxy?baseUrl=...&path=...`
-    : `${baseUrl}${path}`
-```
-
 ### 服务端实现
 
-`web/src/app/api/comfyui-proxy/route.ts`：
+`backend/src/main/java/com/infinitecanvas/backend/controller/ComfyUiProxyController.java` 挂载在 `/api/comfyui-proxy`：
 
-- GET：从查询参数取 `baseUrl`、`path`
-- POST（JSON）：从请求体取 `baseUrl`、`path`、`method`、`body`
-- POST（multipart）：从 formData 取 `baseUrl`，其余字段透传
-- 白名单路径限制：`/system_stats`、`/object_info`、`/prompt`、`/history/`、`/view`、`/upload/image`
+- **路径白名单**：`/system_stats`、`/object_info`、`/prompt`、`/history/`、`/view`、`/upload/image`
+- GET：媒体读取走 `HttpClient`（不跟随重定向），透传 `Range` 等媒体请求头、返回媒体响应头
+- POST（JSON）：提交 `/prompt` 等，支持 `X-FlowCanvas-Job-Id` 去重
+- POST（multipart）：上传图片到 `/upload/image`，内存限制 16MB
+- 目标地址来自配置的 ComfyUI 地址（未配置回退 `127.0.0.1:8188`）；**未登录的 `/view` 媒体读取不允许客户端传入 `baseUrl`**，防止 SSRF
+- 上游超时 / 网络错误统一返回 `{ "detail": ... }` 脱敏文案
 
----
+### 前端
 
-## 数据结构
-
-### AIConfig（use-config-store.ts）
-
-```typescript
-type AiConfig = {
-    baseUrl: string;          // 旧版兼容，新用户不直接使用
-    apiKey: string;           // 旧版兼容，新用户不直接使用
-    apiFormat: ApiCallFormat; // "openai" | "gemini"
-    useProxy?: boolean;       // 旧版兼容，新用户不直接使用
-    channelMode: "local";
-    channels: ModelChannel[]; // 渠道列表
-    // ... 模型选择字段
-};
-```
-
-### ModelChannel
-
-```typescript
-type ModelChannel = {
-    id: string;           // 唯一标识（nanoid）
-    name: string;         // 显示名称
-    baseUrl: string;      // API 地址
-    apiKey: string;       // API Key
-    apiFormat: ApiCallFormat;
-    models: string[];     // 原始模型名列表
-    useProxy: boolean;    // true=走 Next.js 转发
-};
-```
-
-`resolveModelRequestConfig(config, value)` 根据选中的模型值（格式 `channelId||modelName`）查找对应渠道，将 `channel.baseUrl`、`channel.apiKey`、`channel.apiFormat`、`channel.useProxy` 合并到返回的 `AiConfig` 中，各 service 拿到的 `config.useProxy` 来自渠道而非顶层配置。
-
-### WebdavSyncConfig
-
-```typescript
-type WebdavSyncConfig = {
-    url: string;
-    directory: string;
-    username: string;
-    password: string;
-    proxyMode: "direct" | "nextjs";
-};
-```
-
-### ComfyUiConfig
-
-```typescript
-type ComfyUiConfig = {
-    baseUrl: string;
-    clientId: string;
-    proxyMode: "direct" | "nextjs";
-    timeoutSeconds: number;
-    pollIntervalMs: number;
-};
-```
+`web/src/services/api/comfyui.ts` 提供任务提交、上传与列表查询；载荷 / 媒体请求头带 `durableGenerationHeaders`（生成任务持久化）。
 
 ---
 
-## 关键区别
+## 安全要点
 
-| 特性 | `buildApiUrl` | `rewriteThroughProxy` |
-|---|---|---|
-| 用途 | 构造 API 请求 URL | 改写资源下载 URL |
-| 是否加 `/v1` 前缀 | 是（如需） | 否 |
-| 是否处理方舟 Plan URL | 是（`normalizeArkPlanBaseUrl`） | 否 |
-| 返回形式 | 完整 URL 或 `/api/ai-proxy?target=` | 原 URL 或 `/api/ai-proxy?target=` |
+- 所有代理统一由后端执行，浏览器不持有厂商 API Key。
+- AI 代理与 ComfyUI `/view` 均针对未登录请求做了 SSRF 防护（拒绝内网目标，或禁止客户端传入目标地址）。
+- 上游错误脱敏返回，不向浏览器暴露内网 / 上游地址细节。

@@ -7,27 +7,16 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 
 后端使用 SQLite 作为存储引擎，由 Spring Data JPA + Hibernate 自动迁移（`ddl-auto: update`）。数据库文件路径由环境变量 `DB_PATH` 指定，默认为 `./data/app.db`。
 
-## config 表
+## 表结构概述
 
-单行存储，固定 `id = 1`。整个 `AiConfig` JSON 作为一个字符串写入 `data` 字段。
+后端没有全局单行的 `AiConfig` 配置表：平台级配置存在 `platform_config`，每个账号的工作区配置存在 `user_configs`，账号与媒体、画布分别存于其他账号相关表（见下文）。前端不再通过 config 接口做 localStorage last-write-wins 合并。
 
-| 列名 | 类型 | 说明 |
-|---|---|---|
-| `id` | BIGINT (PK) | 固定值 `1`，单行存储 |
-| `data` | TEXT | `AiConfig` JSON 字符串，包含渠道、模型、偏好等全部配置 |
-| `updated_at` | TIMESTAMP | 最后一次写入时间（UTC），前端用于 last-write-wins 比较 |
+## 平台凭证
 
-### 同步策略
-
-1. **启动拉取**：前端应用启动时调用 `GET /api/config`，比较远端 `updatedAt` 与本地 `localStorage` 中的 `infinite-canvas:config_updated_at`，远端更新则覆盖本地
-2. **变更推送**：前端配置变更后 2s debounce 调用 `PUT /api/config`，将完整 `AiConfig` JSON 推送到后端
-3. **冲突处理**：last-write-wins，不进行字段级合并
-
-### 安全说明
-
-- `data` 字段中包含 API Key 等敏感信息，后端应部署在受控环境。
-- 旧 `/api/config` 等兼容接口仍可使用实例级 `AUTH_CODE`；新账号注册使用独立的 `REGISTRATION_CODE`，默认值为 `gycode`（内部部署硬编码，可通过环境变量覆盖）。
-- 管理后台不再直接使用共享 `AUTH_CODE` 作为身份，而是要求管理员账号、密码和 `ADMIN_CODE`（默认值为 `admincode`）换取带 `ADMIN` 角色的 Bearer 会话。
+- 注册账号提交 `REGISTRATION_CODE`（`app.registration-code`），未设置时回退到 `AUTH_CODE`（`app.auth-code`），内部部署默认为 `gycode`，可通过环境变量覆盖。
+- 管理员登录提交 `ADMIN_CODE`（`app.admin-code`），默认 `admincode`，账号还必须拥有 `ADMIN` 角色；实例尚无管理员时，首个通过管理员授权码登录的有效账号会被初始化为管理员。
+- 媒体访问签名密钥 `MEDIA_SIGNING_SECRET`（`app.media-signing-secret`），默认继承 `ADMIN_CODE`，生产应设置随机值。
+- 平台配置中托管的厂商 API Key 只保存在后端 `platform_config`，不下载到浏览器。
 
 ## platform_config 表
 
@@ -199,5 +188,4 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 ### 保存通道说明
 
 - `backend`：正常业务唯一账号存储。登录并完成 bootstrap 后读写 `user_configs`、`canvas_projects`、`assets`、`user_files`、`user_generation_logs` 和 `user_generation_jobs`，不同账号数据隔离。未登录、工作区加载失败或后端不可用时，前端锁定用户页面，不回退浏览器数据。
-- `webdav`：用户显式选择的独立保存/同步通道，继续通过 WebDAV manifest 与文件同步；WebDAV 配置页和后端 WebDAV proxy 保留，不依赖后端账号工作区。
-- 浏览器 `localforage`：仅用于一次性旧数据迁移和 WebDAV 传输缓存，不是可选择的保存模式。旧数据成功导入账号后，以后端账号工作区为权威。
+- 浏览器 `localforage`：仅用于一次性旧数据迁移的传输缓存，不是可选择的保存模式。旧数据成功导入账号后，以后端账号工作区为权威。

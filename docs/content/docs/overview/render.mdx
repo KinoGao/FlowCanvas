@@ -7,7 +7,7 @@ description: 使用 Render 部署无限画布
 
 点击下面链接即可部署到 Render：
 
-[部署到 Render](https://render.com/deploy?repo=https://github.com/basketikun/infinite-canvas)
+[部署到 Render](https://render.com/deploy?repo=https://github.com/KinoGao/FlowCanvas)
 
 ## 部署步骤
 
@@ -22,7 +22,7 @@ description: 使用 Render 部署无限画布
 默认使用 Render 免费 Web Service：
 
 - 空闲约 15 分钟后会休眠，下次访问会自动唤醒。
-- 当前主应用数据默认保存在浏览器本地；第三方提示词缓存会随 Render 实例重启而清空，下次访问会重新拉取。
-- 适合体验和演示，不适合长期保存正式数据。
+- 画布、素材、媒体和生成记录保存在后端账号工作区（SQLite）。如果后台未一并部署，前端无法完成登录与模型调用，仅能浏览静态页面。
+- Render 免费实例会在休眠时清空内存态数据，不适合长期保存正式数据。
 
-长期使用建议优先部署到 Vercel，或自行配置 WebDAV 同步浏览器本地数据。
+完整的本地 / 自托管体验建议使用 Docker Compose（前端 + 后端一体拉起）。

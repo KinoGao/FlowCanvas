@@ -5,36 +5,46 @@ description: 前端优先的本地开发方式
 
 # 本地开发
 
-当前主应用以 `web/` 前端为主，AI 请求由浏览器前台直连用户自己的 OpenAI 兼容接口。
+FlowCanvas 前后端分离：`web/` 是 Vite + React 前端，`backend/` 是 Spring Boot 后端。
 
-## 1. 启动前端
+## 1. 启动后端
+
+```bash
+cd backend
+mvn spring-boot:run
+```
+
+后端默认运行在 `http://localhost:9801`，数据库文件默认 `./data/app.db`。首次启动会自动建表。
+
+## 2. 启动前端
 
 ```bash
 cd web
-bun install
-bun run dev
+pnpm install   # 或 bun install
+pnpm dev
 ```
 
-前端默认访问：
+前端默认运行在 `http://localhost:9800`。开发模式由 Vite 配置把 `/api/*` 代理到后端 `9801`。
 
-```text
-http://localhost:3000
-```
+## 3. 数据库与初始凭证
 
-## 2. 配置模型
+- 使用 `AUTH_CODE` 注册账号、`ADMIN_CODE` 登录管理后台；内部部署默认值为 `gycode` / `admincode`，可通过环境变量覆盖。
+- 首次使用需在后台登记模型厂商与 API Key。
 
-打开右上角配置弹窗，填写自己的 `Base URL`、`API Key` 和模型名。第三方提示词由 Next.js route 拉取并缓存在运行实例内存中；WebDAV 可选择前端直连或 Next.js 转发。
+## 目录与常见改法
 
-## 3. 启动文档站
+- 前端 API 客户端：`web/src/services/api/`（按域分文件：`image` / `video` / `audio` / `prompts` / `comfyui` / `backend` 等）
+- 全局业务状态：`web/src/stores/`
+- 画布实现：`web/src/app/(user)/canvas/`
+- 后端接口：`backend/src/main/java/com/infinitecanvas/backend/controller/`
+- 后端业务逻辑：`backend/src/main/java/com/infinitecanvas/backend/service/`
+- 数据访问：`backend/src/main/java/com/infinitecanvas/backend/repository/`
+- 文档站内容：`docs/content/docs/`
 
-如果需要单独调整文档站，在 `docs` 目录执行：
+## 检查与测试
 
 ```bash
-bun run dev
+cd web && npx tsc --noEmit   # 前端类型检查
+cd web && npx vitest run     # 前端单测
+cd backend && mvn compile    # 后端编译
 ```
-
-## 常见场景
-
-- 改画布、页面和交互：主要看 `web/`
-- 改提示词缓存或 WebDAV 代理：主要看 `web/src/app/api/` 和 `web/src/app/webdav-proxy/`
-- 改文档站内容：主要看 `docs/content/docs/`

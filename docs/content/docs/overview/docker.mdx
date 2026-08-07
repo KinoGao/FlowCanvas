@@ -5,48 +5,42 @@ description: 使用 Docker Compose 部署无限画布
 
 # Docker 部署
 
-如果你希望在自己的机器或服务器上运行项目，可以直接使用 Docker Compose。
+如果你希望在自己的机器或服务器上运行项目，可以直接使用 Docker Compose。前端服务运行在 `9800`，后端服务运行在 `9801`。
 
 ## 使用发布镜像
 
 ```bash
-git clone git@github.com:basketikun/infinite-canvas.git
-cd infinite-canvas
+git clone https://github.com/KinoGao/FlowCanvas.git
+cd FlowCanvas
 docker compose up -d
 ```
 
 启动后访问：
 
 ```text
-http://localhost:3000
+http://localhost:9800
 ```
 
 ## 本地构建镜像
 
-如果需要基于当前源码构建镜像：
+如果需要基于当前源码构建镜像，使用本地构建配置：
 
 ```bash
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-## 文档站镜像
+## 凭证
 
-文档站位于 `docs/` 目录，按带服务端能力的 Next.js standalone 应用单独构建，不打进主应用镜像。
-
-使用发布镜像：
+Compose 默认使用内部硬编码凭证（注册码 `gycode`、管理员授权码 `admincode`），生产部署前请在 `.env` 中覆盖：
 
 ```bash
-cd docs
-docker compose up -d
+export AUTH_CODE=你的注册码
+export ADMIN_CODE=你的管理员授权码
+export MEDIA_SIGNING_SECRET=随机媒体签名密钥
 ```
 
-基于当前源码本地构建：
-
-```bash
-cd docs
-docker compose -f docker-compose.local.yml up -d --build
-```
+后端数据卷挂载到 `./data`（SQLite 数据库与用户媒体），生产部署请根据网络环境配置数据卷与后端公网媒体访问地址。
 
 ## 数据说明
 
-当前主应用镜像只启动 Next.js。画布、我的素材、生成记录和 AI API Key 默认保存在浏览器本地；第三方提示词由 Next.js route 拉取后缓存在运行实例内存里，不需要额外挂载数据目录。
+画布、素材、媒体文件和生成记录保存在后端账号工作区（SQLite + `data/user-files`），模型厂商与 API Key 也由后端统一管理，密钥不会下发到浏览器。
