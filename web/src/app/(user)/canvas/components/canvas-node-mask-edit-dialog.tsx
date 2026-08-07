@@ -7,6 +7,7 @@ import { Brush, Eraser, RotateCcw, WandSparkles, Workflow, X } from "lucide-reac
 import { readImageMeta } from "@/lib/image-utils";
 import { listComfyWorkflows, type ComfyWorkflow } from "@/services/comfyui-workflows";
 import { useConfigStore } from "@/stores/use-config-store";
+import { IMAGE_ERASE_PROMPT } from "../utils/canvas-image-tools";
 
 export type CanvasImageMaskEditPayload = {
     executor: "ai" | "comfyui";
@@ -129,8 +130,8 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
         setError("");
     };
 
-    const submit = (executor: CanvasImageMaskEditPayload["executor"]) => {
-        const nextPrompt = prompt.trim();
+    const submit = (executor: CanvasImageMaskEditPayload["executor"], presetPrompt?: string) => {
+        const nextPrompt = presetPrompt || prompt.trim();
         const canvas = maskCanvasRef.current;
         if (executor === "ai" && !nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
@@ -226,9 +227,12 @@ export function CanvasNodeMaskEditDialog({ dataUrl, open, onClose, onConfirm }: 
                                 取消
                             </Button>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                             <Button icon={<Workflow className="size-4" />} disabled={!workflows.length} onClick={() => submit("comfyui")}>
                                 ComfyUI 消除
+                            </Button>
+                            <Button icon={<Eraser className="size-4" />} title="移除涂抹区域内容并自然补全背景" onClick={() => submit("ai", IMAGE_ERASE_PROMPT)}>
+                                AI 擦除
                             </Button>
                             <Button type="primary" icon={<WandSparkles className="size-4" />} onClick={() => submit("ai")}>
                                 AI 修改

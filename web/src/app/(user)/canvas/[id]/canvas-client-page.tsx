@@ -56,6 +56,7 @@ import { buildGroupExecutionPlan, collectGroupMemberIds } from "../utils/canvas-
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
+import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
@@ -281,6 +282,8 @@ const CanvasAssistantPanel = lazy(() => import("../components/canvas-assistant-p
 const CanvasNodeAngleDialog = lazy(() => import("../components/canvas-node-angle-dialog").then((mod) => ({ default: mod.CanvasNodeAngleDialog })));
 const CanvasNodeCropDialog = lazy(() => import("../components/canvas-node-crop-dialog").then((mod) => ({ default: mod.CanvasNodeCropDialog })));
 const CanvasNodeMaskEditDialog = lazy(() => import("../components/canvas-node-mask-edit-dialog").then((mod) => ({ default: mod.CanvasNodeMaskEditDialog })));
+const CanvasNodeOutpaintDialog = lazy(() => import("../components/canvas-node-outpaint-dialog").then((mod) => ({ default: mod.CanvasNodeOutpaintDialog })));
+const CanvasNodeLightingDialog = lazy(() => import("../components/canvas-node-lighting-dialog").then((mod) => ({ default: mod.CanvasNodeLightingDialog })));
 const CanvasNodeSplitDialog = lazy(() => import("../components/canvas-node-split-dialog").then((mod) => ({ default: mod.CanvasNodeSplitDialog })));
 const CanvasNodeUpscaleDialog = lazy(() => import("../components/canvas-node-upscale-dialog").then((mod) => ({ default: mod.CanvasNodeUpscaleDialog })));
 const CanvasNodeHoverToolbar = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeHoverToolbar })));
@@ -771,6 +774,8 @@ function LeaferCanvasPage() {
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [upscaleNodeId, setUpscaleNodeId] = useState<string | null>(null);
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
+    const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
+    const [lightingNodeId, setLightingNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
@@ -1533,6 +1538,8 @@ function LeaferCanvasPage() {
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const upscaleNode = upscaleNodeId ? nodeById.get(upscaleNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
+    const outpaintNode = outpaintNodeId ? nodeById.get(outpaintNodeId) || null : null;
+    const lightingNode = lightingNodeId ? nodeById.get(lightingNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null;
@@ -1944,6 +1951,8 @@ function LeaferCanvasPage() {
         setCropNodeId(null);
         setMaskEditNodeId(null);
         setAngleNodeId(null);
+        setOutpaintNodeId(null);
+        setLightingNodeId(null);
         setPreviewNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
@@ -3112,6 +3121,38 @@ function LeaferCanvasPage() {
     const generateImageQuickCommandNode = useCallback(
         async (node: CanvasNodeData, command: CanvasImageQuickCommand) => {
             await runImageReferenceEdit(node, buildImageQuickCommandPrompt(command.id, node.metadata?.prompt));
+        },
+        [runImageReferenceEdit],
+    );
+
+    const generateOutpaintNode = useCallback(
+        async (node: CanvasNodeData, ratioId: string) => {
+            setOutpaintNodeId(null);
+            await runImageReferenceEdit(node, buildOutpaintPrompt(ratioId, node.metadata?.prompt));
+        },
+        [runImageReferenceEdit],
+    );
+
+    const generateLightingNode = useCallback(
+        async (node: CanvasNodeData, settings: CanvasLightingSettings) => {
+            setLightingNodeId(null);
+            const prompt = buildLightingPrompt(settings, node.metadata?.prompt);
+            if (!prompt) return;
+            await runImageReferenceEdit(node, prompt);
+        },
+        [runImageReferenceEdit],
+    );
+
+    const generateCutoutNode = useCallback(
+        async (node: CanvasNodeData) => {
+            await runImageReferenceEdit(node, buildCutoutPrompt(node.metadata?.prompt));
+        },
+        [runImageReferenceEdit],
+    );
+
+    const generatePanorama720Node = useCallback(
+        async (node: CanvasNodeData) => {
+            await runImageReferenceEdit(node, buildPanorama720Prompt(node.metadata?.prompt));
         },
         [runImageReferenceEdit],
     );
@@ -5274,6 +5315,10 @@ function LeaferCanvasPage() {
                         onSplit={(node) => setSplitNodeId(node.id)}
                         onUpscale={(node) => setUpscaleNodeId(node.id)}
                         onAngle={(node) => setAngleNodeId(node.id)}
+                        onOutpaint={(node) => setOutpaintNodeId(node.id)}
+                        onLighting={(node) => setLightingNodeId(node.id)}
+                        onCutout={(node) => void generateCutoutNode(node)}
+                        onPanorama720={(node) => void generatePanorama720Node(node)}
                         onViewImage={handleViewNodeImage}
                         onReversePrompt={createImageReversePromptNodes}
                         onRetry={handleRetryNodeAction}
@@ -5393,6 +5438,10 @@ function LeaferCanvasPage() {
                     <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
                 ) : null}
 {angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
+
+                {outpaintNode?.metadata?.content ? <CanvasNodeOutpaintDialog dataUrl={outpaintNode.metadata.content} open={Boolean(outpaintNode)} onClose={() => setOutpaintNodeId(null)} onConfirm={(ratioId) => void generateOutpaintNode(outpaintNode!, ratioId)} /> : null}
+
+                {lightingNode?.metadata?.content ? <CanvasNodeLightingDialog dataUrl={lightingNode.metadata.content} open={Boolean(lightingNode)} onClose={() => setLightingNodeId(null)} onConfirm={(settings) => void generateLightingNode(lightingNode!, settings)} /> : null}
 
                 <Modal
                     className={previewNode?.metadata?.canvasTool === 'panorama360' ? 'canvas-panorama-modal' : undefined}

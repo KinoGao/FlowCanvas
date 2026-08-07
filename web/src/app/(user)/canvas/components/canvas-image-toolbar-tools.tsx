@@ -1,11 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Brush, Camera, CircleDot, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, CircleDot, Copy, Expand, FileText, Globe, Grid2x2, Lock, LockOpen, Maximize2, PersonStanding, Scissors, SunMedium, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "../types";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "panorama360" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "angle" | "view";
+export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "panorama360" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "angle" | "outpaint" | "lighting" | "cutout" | "panorama720" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -16,6 +16,10 @@ export type ImageToolHandlers = {
     onCrop: (node: CanvasNodeData) => void;
     onSplit: (node: CanvasNodeData) => void;
     onUpscale: (node: CanvasNodeData) => void;    onAngle: (node: CanvasNodeData) => void;
+    onOutpaint: (node: CanvasNodeData) => void;
+    onLighting: (node: CanvasNodeData) => void;
+    onCutout: (node: CanvasNodeData) => void;
+    onPanorama720: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
     onCopyPrompt: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
@@ -133,6 +137,42 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: "生成角度",
         icon: () => <Camera className="size-4" />,
         run: (node, handlers) => handlers.onAngle(node),
+    },
+    {
+        id: "outpaint",
+        defaultVisible: true,
+        panelLabel: "扩图",
+        label: "扩图",
+        title: "选择画幅并以当前图为参考向外延展画面",
+        icon: () => <Expand className="size-4" />,
+        run: (node, handlers) => handlers.onOutpaint(node),
+    },
+    {
+        id: "lighting",
+        defaultVisible: true,
+        panelLabel: "打光",
+        label: "打光",
+        title: "调整主光方向、光色和强度",
+        icon: () => <SunMedium className="size-4" />,
+        run: (node, handlers) => handlers.onLighting(node),
+    },
+    {
+        id: "cutout",
+        defaultVisible: false,
+        panelLabel: "抠图",
+        label: "抠图",
+        title: "提取画面主体并替换为纯色背景",
+        icon: () => <PersonStanding className="size-4" />,
+        run: (node, handlers) => handlers.onCutout(node),
+    },
+    {
+        id: "panorama720",
+        defaultVisible: false,
+        panelLabel: "720全景",
+        label: "720全景",
+        title: "以当前图为参考生成 720° 全景图",
+        icon: () => <Globe className="size-4" />,
+        run: (node, handlers) => handlers.onPanorama720(node),
     },
     {
         id: "view",
