@@ -30,6 +30,16 @@ export type CustomImageStyle = {
     createdAt: string;
 };
 
+/** 账号级视频主体（视频节点 Composer「主体」入口），随用户配置同步到后端 */
+export type CanvasVideoSubject = {
+    id: string;
+    name: string;
+    description: string;
+    /** 参考图集：后端可访问的图片 URL，至少一张 */
+    images: string[];
+    createdAt: string;
+};
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
@@ -64,6 +74,7 @@ export type AiConfig = {
     count: string;
     canvasImageCount: string;
     customImageStyles?: CustomImageStyle[];
+    videoSubjects?: CanvasVideoSubject[];
 };
 
 export type ProxyMode = "direct" | "backend";

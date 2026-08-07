@@ -101,6 +101,8 @@ export type CanvasGenerationMetadata = {
     videoGenerationMode?: VideoGenerationMode;
     videoStylePreset?: string;
     videoCameraPreset?: string;
+    /** 视频主体库选中的主体 id（账号配置 videoSubjects） */
+    videoSubjectId?: string;
     imageStylePreset?: string;
     imageCameraBody?: string;
     imageCameraLens?: string;

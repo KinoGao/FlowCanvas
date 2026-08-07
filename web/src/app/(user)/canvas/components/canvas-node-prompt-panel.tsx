@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, WandSparkles } from "lucide-react";
+import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, Users, WandSparkles } from "lucide-react";
 import { App, Button, Popover, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
-import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig, type CustomImageStyle } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig, type CanvasVideoSubject, type CustomImageStyle } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -26,6 +26,8 @@ import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts,
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
 import { CanvasImageStyleLibrary } from "./canvas-image-style-library";
+import { buildVideoSubjectPrompt, resolveVideoSubject } from "../utils/canvas-video-subjects";
+import { CanvasVideoSubjectLibrary } from "./canvas-video-subject-library";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -42,7 +44,7 @@ type CanvasNodePromptPanelProps = {
     onRetry?: (nodeId: string) => void;
 };
 
-type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "mode" | "advanced" | null;
+type VideoComposerMenu = "ratio" | "duration" | "style" | "camera" | "subject" | "mode" | "advanced" | null;
 type ImageComposerMenu = "style" | "camera" | null;
 
 const COMPOSER_QUICK_PROMPTS = {
@@ -201,7 +203,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             return;
         }
         const enrichedPrompt = mode === "video"
-            ? enrichVideoPrompt(text, node.metadata?.videoStylePreset, node.metadata?.videoCameraPreset)
+            ? enrichVideoPrompt(text, node.metadata?.videoStylePreset, node.metadata?.videoCameraPreset, resolveVideoSubject(config.videoSubjects, node.metadata?.videoSubjectId))
             : mode === "image"
                 ? enrichImagePrompt(text, node.metadata?.imageStylePreset, readImageCameraSettings(node), config.customImageStyles)
                 : text;
@@ -635,6 +637,7 @@ function VideoComposer({
     const currentDuration = durations.includes(Number(config.videoSeconds)) ? Number(config.videoSeconds) : durations[0];
     const selectedStyle = VIDEO_STYLE_PRESETS.find((item) => item.id === node.metadata?.videoStylePreset) || VIDEO_STYLE_PRESETS[0];
     const selectedCamera = CANVAS_VIDEO_CAMERA_PRESETS.find((item) => item.id === node.metadata?.videoCameraPreset) || CANVAS_VIDEO_CAMERA_PRESETS[0];
+    const selectedSubject = resolveVideoSubject(config.videoSubjects, node.metadata?.videoSubjectId);
     const activeReferences = references.filter((reference) => reference.active);
     const disabled = capabilityPending || capabilityUnavailable;
     const canGenerate = Boolean(prompt.trim() || (selectedMode !== "text-to-video" && activeReferences.some((reference) => reference.kind !== "text")));
@@ -828,6 +831,23 @@ function VideoComposer({
                         }
                     >
                         <ComposerToolbarButton icon={<Camera className="size-3.5" />} label={selectedCamera.shortLabel} active={menuOpen("camera")} theme={theme} />
+                    </ComposerPopover>
+
+                    <ComposerPopover
+                        open={menuOpen("subject")}
+                        onOpenChange={(open) => setMenuOpen("subject", open)}
+                        content={
+                            <CanvasVideoSubjectLibrary
+                                value={selectedSubject?.id || ""}
+                                theme={theme}
+                                onChange={(subjectId) => {
+                                    onConfigChange({ videoSubjectId: subjectId || undefined });
+                                    onMenuChange(null);
+                                }}
+                            />
+                        }
+                    >
+                        <ComposerToolbarButton icon={<Users className="size-3.5" />} label={selectedSubject ? selectedSubject.name : "主体"} active={menuOpen("subject")} theme={theme} />
                     </ComposerPopover>
 
                     <ComposerPopover
@@ -1172,10 +1192,10 @@ function videoDurationLabel(value?: number) {
     return value === -1 ? "智能" : `${value || 5}s`;
 }
 
-function enrichVideoPrompt(prompt: string, styleId?: string, cameraId?: string) {
+function enrichVideoPrompt(prompt: string, styleId?: string, cameraId?: string, subject?: CanvasVideoSubject | null) {
     const style = VIDEO_STYLE_PRESETS.find((item) => item.id === styleId)?.prompt;
     const camera = videoCameraPresetPrompt(cameraId);
-    return [prompt, style, camera].filter(Boolean).join(", ");
+    return [buildVideoSubjectPrompt(prompt, subject || null), style, camera].filter(Boolean).join(", ");
 }
 
 function enrichImagePrompt(prompt: string, styleId?: string, cameraSettings?: CanvasImageCameraSettings, customStyles: CustomImageStyle[] = []) {

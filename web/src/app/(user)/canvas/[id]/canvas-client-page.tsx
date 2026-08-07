@@ -56,6 +56,7 @@ import { buildGroupExecutionPlan, collectGroupMemberIds } from "../utils/canvas-
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
+import { resolveVideoSubject, videoSubjectReferenceImages } from "../utils/canvas-video-subjects";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
     allocateCanvasNodeIdentity,
@@ -3746,6 +3747,9 @@ function LeaferCanvasPage() {
                     const videoPosition = isEmptyVideoNode && sourceNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y };
                     const videoWidth = isEmptyVideoNode && sourceNode ? sourceNode.width : spec.width;
                     const videoHeight = isEmptyVideoNode && sourceNode ? sourceNode.height : spec.height;
+                    // 视频主体库：选中主体时把主体参考图集并入参考图（追加在连线参考之后，避免抢占首帧位）
+                    const videoSubject = resolveVideoSubject(effectiveConfig.videoSubjects, sourceNode?.metadata?.videoSubjectId);
+                    const videoReferenceImages = videoSubject ? [...generationContext.referenceImages, ...videoSubjectReferenceImages(videoSubject)] : generationContext.referenceImages;
                     const pendingVideoMeta = {
                         prompt: rawPrompt,
                         requestPrompt: effectivePrompt,
@@ -3758,7 +3762,8 @@ function LeaferCanvasPage() {
                         watermark: generationConfig.videoWatermark,
                         draft: generationConfig.videoDraft,
                         videoGenerationMode: sourceNode?.metadata?.videoGenerationMode,
-                        references: generationReferenceUrls(generationContext),
+                        videoSubjectId: sourceNode?.metadata?.videoSubjectId,
+                        references: generationReferenceUrls({ ...generationContext, referenceImages: videoReferenceImages }),
                         errorDetails: undefined,
                     };
                     const videoNode: CanvasNodeData =
@@ -3781,7 +3786,7 @@ function LeaferCanvasPage() {
                     const generationJobId = nanoid();
                     await saveCanvasGenerationJobs(new Map([[videoId, generationJobId]]));
                     const controller = startGenerationRequest(videoId, nodeId, nodeId, runController);
-                    const task = await createVideoGenerationTask(generationConfig, effectivePrompt, generationContext.referenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
+                    const task = await createVideoGenerationTask(generationConfig, effectivePrompt, videoReferenceImages, generationContext.referenceVideos, generationContext.referenceAudios, {
                         signal: controller.signal,
                         jobId: generationJobId,
                         generationMode: sourceNode?.metadata?.videoGenerationMode,
