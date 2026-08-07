@@ -65,6 +65,8 @@ import {
     trimVideoSegment,
     type VideoTrimRange,
 } from "../utils/canvas-video-tools";
+import { composeVideoTimeline, type TimelineClip } from "../utils/canvas-video-timeline";
+import type { CompositionSource } from "../components/canvas-video-composition-dialog";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
     allocateCanvasNodeIdentity,
@@ -296,6 +298,7 @@ const CanvasNodeLightingDialog = lazy(() => import("../components/canvas-node-li
 const CanvasNodeSplitDialog = lazy(() => import("../components/canvas-node-split-dialog").then((mod) => ({ default: mod.CanvasNodeSplitDialog })));
 const CanvasNodeUpscaleDialog = lazy(() => import("../components/canvas-node-upscale-dialog").then((mod) => ({ default: mod.CanvasNodeUpscaleDialog })));
 const CanvasVideoTrimDialog = lazy(() => import("../components/canvas-video-trim-dialog").then((mod) => ({ default: mod.CanvasVideoTrimDialog })));
+const CanvasVideoCompositionDialog = lazy(() => import("../components/canvas-video-composition-dialog").then((mod) => ({ default: mod.CanvasVideoCompositionDialog })));
 const CanvasNodeHoverToolbar = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeHoverToolbar })));
 const CanvasNodeInfoModal = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeInfoModal })));
 const CanvasNodePromptPanel = lazy(() => import("../components/canvas-node-prompt-panel").then((mod) => ({ default: mod.CanvasNodePromptPanel })));
@@ -788,6 +791,8 @@ function LeaferCanvasPage() {
     const [lightingNodeId, setLightingNodeId] = useState<string | null>(null);
     const [trimVideoNodeId, setTrimVideoNodeId] = useState<string | null>(null);
     const [trimVideoSrc, setTrimVideoSrc] = useState("");
+    const [compositionNodeId, setCompositionNodeId] = useState<string | null>(null);
+    const [compositionSources, setCompositionSources] = useState<CompositionSource[]>([]);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [assistantCollapsed, setAssistantCollapsed] = useState(true);
     const [assistantMounted, setAssistantMounted] = useState(false);
@@ -1553,6 +1558,7 @@ function LeaferCanvasPage() {
     const outpaintNode = outpaintNodeId ? nodeById.get(outpaintNodeId) || null : null;
     const lightingNode = lightingNodeId ? nodeById.get(lightingNodeId) || null : null;
     const trimVideoNode = trimVideoNodeId ? nodeById.get(trimVideoNodeId) || null : null;
+    const compositionNode = compositionNodeId ? nodeById.get(compositionNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null;
@@ -3005,6 +3011,68 @@ function LeaferCanvasPage() {
             }
         },
         [createCanvasConnection, createCanvasNode, message, trimVideoNode, trimVideoSrc],
+    );
+
+    const openCompositionTimeline = useCallback(
+        async (node: CanvasNodeData) => {
+            const incoming = canvasGraph.incomingByNodeId.get(node.id) || [];
+            const resolved = await Promise.all(
+                incoming.map(async (connection) => {
+                    const source = canvasGraph.nodeById.get(connection.fromNodeId);
+                    if (!source || (source.type !== CanvasNodeType.Video && source.type !== CanvasNodeType.Audio)) return null;
+                    if (!source.metadata?.content && !source.metadata?.storageKey) return null;
+                    const src = await resolveNodeContent(source);
+                    if (!src) return null;
+                    const kind = source.type === CanvasNodeType.Video ? ("video" as const) : ("audio" as const);
+                    return { id: source.id, kind, title: source.title || (kind === "video" ? "视频片段" : "音频片段"), src };
+                }),
+            );
+            const sources = resolved.filter((item): item is CompositionSource => Boolean(item));
+            const videoCount = sources.filter((item) => item.kind === "video").length;
+            if (!videoCount || (videoCount < 2 && !sources.some((item) => item.kind === "audio"))) {
+                message.warning("请先连接至少两个视频节点，或视频加音频节点");
+                return;
+            }
+            setCompositionSources(sources);
+            setCompositionNodeId(node.id);
+        },
+        [canvasGraph, message],
+    );
+
+    const handleCompositionExport = useCallback(
+        async (videoClips: TimelineClip[], audioClips: TimelineClip[]) => {
+            const node = compositionNode;
+            setCompositionNodeId(null);
+            if (!node) return;
+            const hide = message.loading("正在合成导出视频，耗时与时间轴总时长相当...", 0);
+            try {
+                const blob = await composeVideoTimeline(videoClips, audioClips);
+                const video = await uploadMediaFile(blob, "video");
+                const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const position = { x: node.position.x + node.width + 96, y: node.position.y + node.height / 2 - size.height / 2 };
+                const child: CanvasNodeData = {
+                    ...createCanvasNode(
+                        CanvasNodeType.Video,
+                        { x: position.x + size.width / 2, y: position.y + size.height / 2 },
+                        { ...videoMetadata(video), prompt: node.metadata?.prompt },
+                    ),
+                    position,
+                    width: size.width,
+                    height: size.height,
+                };
+                setNodes((prev) => [...prev, child]);
+                setConnections((prev) => [...prev, createCanvasConnection(node.id, child.id)]);
+                setSelectedNodeIds(new Set([child.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(child.id);
+                message.success("合成完成，已生成新视频节点");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "视频合成失败");
+            } finally {
+                hide();
+            }
+        },
+        [compositionNode, createCanvasConnection, createCanvasNode, message],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -4965,6 +5033,9 @@ function LeaferCanvasPage() {
                 case "script-to-audio":
                     createScriptNarrationNode(node);
                     return;
+                case "composition-timeline":
+                    void openCompositionTimeline(node);
+                    return;
                 case "image-to-panorama": {
                     const prompt = (node.metadata?.composerContent || node.metadata?.prompt || DEFAULT_PANORAMA_360_PROMPT).trim();
                     const nextNode: CanvasNodeData = {
@@ -4991,7 +5062,7 @@ function LeaferCanvasPage() {
                 }
             }
         },
-        [createConnectedGenerationNode, createScriptNarrationNode, createScriptStoryboard, createScriptVideoNode, effectiveConfig.imageModel, effectiveConfig.model, openNodeComposer],
+        [createConnectedGenerationNode, createScriptNarrationNode, createScriptStoryboard, createScriptVideoNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
     );
     const visibleConnections = useMemo(
         () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
@@ -5577,6 +5648,10 @@ function LeaferCanvasPage() {
                         }}
                         onConfirm={(range) => void confirmVideoTrim(range)}
                     />
+                ) : null}
+
+                {compositionNode?.metadata?.canvasTool === "videoComposition" ? (
+                    <CanvasVideoCompositionDialog open={Boolean(compositionNode)} sources={compositionSources} onClose={() => setCompositionNodeId(null)} onExport={(videoClips, audioClips) => void handleCompositionExport(videoClips, audioClips)} />
                 ) : null}
 
                 <Modal

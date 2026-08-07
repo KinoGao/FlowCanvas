@@ -196,7 +196,7 @@ export async function trimVideoSegment(src: string, range: VideoTrimRange, onPro
     }
 }
 
-async function loadVideoElement(src: string): Promise<HTMLVideoElement> {
+export async function loadVideoElement(src: string): Promise<HTMLVideoElement> {
     const video = document.createElement("video");
     video.crossOrigin = "anonymous";
     video.preload = "auto";
@@ -209,7 +209,7 @@ async function loadVideoElement(src: string): Promise<HTMLVideoElement> {
     return video;
 }
 
-async function seekVideo(video: HTMLVideoElement, time: number) {
+export async function seekVideo(video: HTMLVideoElement, time: number) {
     if (Math.abs(video.currentTime - time) > 0.001) {
         const seeked = waitVideoEvent(video, "seeked");
         video.currentTime = time;
@@ -236,7 +236,7 @@ function waitVideoEvent(video: HTMLVideoElement, eventName: "loadedmetadata" | "
     });
 }
 
-function releaseVideoElement(video: HTMLVideoElement) {
+export function releaseVideoElement(video: HTMLVideoElement) {
     video.removeAttribute("src");
     video.load();
 }

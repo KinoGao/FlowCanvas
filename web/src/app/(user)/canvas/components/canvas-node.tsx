@@ -803,7 +803,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
     );
 }
 
-function VideoCompositionContent({ node, theme, onOpenComposer }: NodeContentRendererProps) {
+function VideoCompositionContent({ node, theme, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
     const connectedCount = node.metadata?.references?.length || 0;
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-4 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
@@ -813,19 +813,34 @@ function VideoCompositionContent({ node, theme, onOpenComposer }: NodeContentRen
             <div className="text-xs leading-5 opacity-65">
                 {connectedCount ? `已连接 ${connectedCount} 个视频节点，可继续编排合成要求` : "空空如也，请连接视频节点后操作"}
             </div>
-            <button
-                type="button"
-                className="rounded-lg px-3 py-1.5 text-xs transition"
-                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenComposer?.();
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-            >
-                编排合成
-            </button>
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    className="rounded-lg px-3 py-1.5 text-xs transition"
+                    style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onNodeAction?.("composition-timeline");
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    时间轴编辑
+                </button>
+                <button
+                    type="button"
+                    className="rounded-lg px-3 py-1.5 text-xs transition"
+                    style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenComposer?.();
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    编排合成
+                </button>
+            </div>
         </div>
     );
 }
