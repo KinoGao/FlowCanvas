@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video, Workflow } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Sparkles, Trash2, Upload, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -10,6 +10,7 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CANVAS_SLASH_COMMANDS, type CanvasSlashCommand } from "../utils/canvas-workflow-template";
+import { CANVAS_IMAGE_QUICK_COMMANDS, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import { ImageToolSettingsModal, type ImageToolbarSettingsTool } from "./canvas-image-toolbar-settings-modal";
 import { IMAGE_QUICK_TOOLS_STORAGE_KEY, buildImageToolbarTools, defaultImageQuickToolIds, readImageQuickToolsConfig, type ImageQuickToolId } from "./canvas-image-toolbar-tools";
 
@@ -38,6 +39,7 @@ type CanvasNodeHoverToolbarProps = {
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onQuickStoryboard: (node: CanvasNodeData, command: CanvasSlashCommand) => void;
+    onQuickImageCommand: (node: CanvasNodeData, command: CanvasImageQuickCommand) => void;
     onDelete: (node: CanvasNodeData) => void;
 };
 
@@ -76,6 +78,7 @@ export function CanvasNodeHoverToolbar({
     onRetry,
     onToggleFreeResize,
     onQuickStoryboard,
+    onQuickImageCommand,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
     const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
@@ -203,6 +206,20 @@ export function CanvasNodeHoverToolbar({
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
+                {hasImage ? (
+                    <ToolbarAction
+                        id="quickImageCommand"
+                        title="快捷功能：以当前图为参考生成"
+                        label="快捷功能"
+                        icon={<Sparkles className="size-4" />}
+                        active={storyboardMenuOpen}
+                        onClick={() => {
+                            onKeep(currentNode.id);
+                            setStoryboardMenuOpen((value) => !value);
+                        }}
+                        showLabel={showImageToolLabels}
+                    />
+                ) : null}
                 {storyboardMenuOpen ? (
                     <div
                         className="absolute left-1/2 top-full z-[80] mt-2 w-56 -translate-x-1/2 rounded-xl border p-1.5 shadow-[0_14px_34px_rgba(0,0,0,.28)] backdrop-blur-xl"
@@ -211,27 +228,54 @@ export function CanvasNodeHoverToolbar({
                         onPointerLeave={() => setStoryboardMenuOpen(false)}
                         onPointerDown={(event) => event.stopPropagation()}
                     >
-                        <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium opacity-50">快捷分镜 · 按宫格生成</div>
-                        {CANVAS_SLASH_COMMANDS.map((command) => (
-                            <button
-                                key={command.id}
-                                type="button"
-                                className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-black/5 dark:hover:bg-white/10"
-                                style={{ color: theme.node.text }}
-                                onClick={() => {
-                                    setStoryboardMenuOpen(false);
-                                    onQuickStoryboard(currentNode, command);
-                                }}
-                            >
-                                <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10 text-[10px] font-bold">
-                                    {command.cols}×{command.rows}
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                    <span className="block font-medium">{command.label}</span>
-                                    <span className="block truncate opacity-65">{command.description}</span>
-                                </span>
-                            </button>
-                        ))}
+                        {isText || currentNode.metadata?.canvasTool === "script" ? (
+                            <>
+                                <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium opacity-50">快捷分镜 · 按宫格生成</div>
+                                {CANVAS_SLASH_COMMANDS.map((command) => (
+                                    <button
+                                        key={command.id}
+                                        type="button"
+                                        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-black/5 dark:hover:bg-white/10"
+                                        style={{ color: theme.node.text }}
+                                        onClick={() => {
+                                            setStoryboardMenuOpen(false);
+                                            onQuickStoryboard(currentNode, command);
+                                        }}
+                                    >
+                                        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10 text-[10px] font-bold">
+                                            {command.cols}×{command.rows}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block font-medium">{command.label}</span>
+                                            <span className="block truncate opacity-65">{command.description}</span>
+                                        </span>
+                                    </button>
+                                ))}
+                            </>
+                        ) : null}
+                        {hasImage ? (
+                            <>
+                                <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium opacity-50">快捷功能 · 以当前图为参考</div>
+                                {CANVAS_IMAGE_QUICK_COMMANDS.map((command) => (
+                                    <button
+                                        key={command.id}
+                                        type="button"
+                                        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-black/5 dark:hover:bg-white/10"
+                                        style={{ color: theme.node.text }}
+                                        onClick={() => {
+                                            setStoryboardMenuOpen(false);
+                                            onQuickImageCommand(currentNode, command);
+                                        }}
+                                    >
+                                        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10 text-[11px] font-bold">{command.label.slice(0, 1)}</span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block font-medium">{command.label}</span>
+                                            <span className="block truncate opacity-65">{command.description}</span>
+                                        </span>
+                                    </button>
+                                ))}
+                            </>
+                        ) : null}
                     </div>
                 ) : null}
             </div>

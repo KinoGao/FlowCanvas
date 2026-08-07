@@ -54,6 +54,7 @@ import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvas
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
+import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import {
     allocateCanvasNodeIdentity,
     normalizeCanvasConnectionOrders,
@@ -3044,8 +3045,8 @@ function LeaferCanvasPage() {
         setDialogNodeId(child.id);
     }, [createCanvasConnection, createCanvasNode]);
 
-    const generateAngleNode = useCallback(
-        async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
+    const runImageReferenceEdit = useCallback(
+        async (node: CanvasNodeData, prompt: string) => {
             if (!node.metadata?.content) return;
             const generationConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
@@ -3053,7 +3054,6 @@ function LeaferCanvasPage() {
                 return;
             }
             const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-            const prompt = buildAnglePrompt(params);
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
                 { id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey },
             ]);
@@ -3065,7 +3065,6 @@ function LeaferCanvasPage() {
             child.position = { x: node.position.x + node.width + 96, y: node.position.y };
             child.width = imageConfig.width;
             child.height = imageConfig.height;
-            setAngleNodeId(null);
             setRunningNodeId(child.id);
             setNodes((prev) => [
                 ...prev,
@@ -3098,6 +3097,21 @@ function LeaferCanvasPage() {
             }
         },
         [createCanvasConnection, createCanvasNode, effectiveConfig, finishGenerationRequest, openConfigDialog, saveCanvasGenerationJobs, startGenerationRequest],
+    );
+
+    const generateAngleNode = useCallback(
+        async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
+            setAngleNodeId(null);
+            await runImageReferenceEdit(node, buildAnglePrompt(params));
+        },
+        [runImageReferenceEdit],
+    );
+
+    const generateImageQuickCommandNode = useCallback(
+        async (node: CanvasNodeData, command: CanvasImageQuickCommand) => {
+            await runImageReferenceEdit(node, buildImageQuickCommandPrompt(command.id, node.metadata?.prompt));
+        },
+        [runImageReferenceEdit],
     );
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -5212,6 +5226,7 @@ function LeaferCanvasPage() {
                         onRetry={handleRetryNodeAction}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                         onQuickStoryboard={(node, command) => createScriptGridStoryboard(node, command)}
+                        onQuickImageCommand={(node, command) => void generateImageQuickCommandNode(node, command)}
                         onDelete={(node) => deleteNodes(new Set([node.id]))}
                     />
                 ) : null}
