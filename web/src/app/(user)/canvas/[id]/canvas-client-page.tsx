@@ -104,6 +104,28 @@ type PendingConnectionCreate = {
 const CANVAS_OPEN_LOCK_PREFIX = "infinite-canvas:open-canvas:";
 const CANVAS_OPEN_LOCK_TTL = 8000;
 const CANVAS_OPEN_LOCK_HEARTBEAT = 2500;
+const CANVAS_RECOVERY_MARKER_PREFIX = "infinite-canvas:recovery:";
+
+function canvasRecoveryMarkerKey(userId: string | undefined, projectId: string) {
+    return `${CANVAS_RECOVERY_MARKER_PREFIX}${userId || "anonymous"}:${projectId}`;
+}
+
+function readCanvasRecoveryMarker(key: string) {
+    try {
+        return window.localStorage.getItem(key) === "pending";
+    } catch {
+        return false;
+    }
+}
+
+function writeCanvasRecoveryMarker(key: string, pending: boolean) {
+    try {
+        if (pending) window.localStorage.setItem(key, "pending");
+        else window.localStorage.removeItem(key);
+    } catch {
+        // 浏览器存储不可用时仍由后端自动保存恢复。
+    }
+}
 
 type CanvasOpenLock = {
     ownerId: string;
@@ -753,6 +775,7 @@ function LeaferCanvasPage() {
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [assistantClosing, setAssistantClosing] = useState(false);
     const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
+    const [showRecoveryNotice, setShowRecoveryNotice] = useState(false);
     const [agentMode, setAgentMode] = useState<CanvasAgentMode>("online");
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [titleEditing, setTitleEditing] = useState(false);
@@ -786,6 +809,7 @@ function LeaferCanvasPage() {
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
     const recoveredVideoTaskIdsRef = useRef(new Set<string>());
+    const recoveryTrackingStartedRef = useRef(false);
     const resumedGenerationProjectKeyRef = useRef<string | null>(null);
     const multiNodeDragStartRef = useRef<MultiNodeDragState | null>(null);
     const setSelectedNodeIds = useCallback((nextValue: Set<string> | ((current: Set<string>) => Set<string>)) => {
@@ -1188,6 +1212,26 @@ function LeaferCanvasPage() {
 
     useEffect(() => {
         if (!projectLoaded) return;
+        const key = canvasRecoveryMarkerKey(user?.id, projectId);
+        setShowRecoveryNotice(readCanvasRecoveryMarker(key));
+        recoveryTrackingStartedRef.current = false;
+        return () => {
+            recoveryTrackingStartedRef.current = false;
+        };
+    }, [projectId, projectLoaded, user?.id]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        if (!recoveryTrackingStartedRef.current) {
+            recoveryTrackingStartedRef.current = true;
+            return;
+        }
+        writeCanvasRecoveryMarker(canvasRecoveryMarkerKey(user?.id, projectId), true);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodes, projectId, projectLoaded, showImageInfo, snapToGrid, user?.id]);
+
+    useEffect(() => {
+        if (!projectLoaded) return;
+        const markerKey = canvasRecoveryMarkerKey(user?.id, projectId);
         const flushCanvasNodes = () => {
             updateProject(projectId, {
                 nodes: nodesRef.current,
@@ -1195,6 +1239,7 @@ function LeaferCanvasPage() {
                 nodeSequenceCounters: nodeSequenceCountersRef.current,
                 referenceOrderCounter: referenceOrderCounterRef.current,
             });
+            writeCanvasRecoveryMarker(markerKey, false);
         };
         const handleVisibilityChange = () => {
             if (document.visibilityState === "hidden") flushCanvasNodes();
@@ -1206,7 +1251,7 @@ function LeaferCanvasPage() {
             window.removeEventListener("pagehide", flushCanvasNodes, true);
             flushCanvasNodes();
         };
-    }, [projectId, projectLoaded, updateProject]);
+    }, [projectId, projectLoaded, updateProject, user?.id]);
 
     useEffect(() => {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
@@ -4895,6 +4940,25 @@ function LeaferCanvasPage() {
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
                     saveState={saveState}
                 />
+
+                {showRecoveryNotice ? (
+                    <div
+                        className="absolute left-1/2 top-3 z-[70] flex max-w-[calc(100%-24px)] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+                        style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow, color: theme.node.text }}
+                    >
+                        <span style={{ color: theme.ui.accent }}>已恢复上次未完成编辑的最近保存状态</span>
+                        <button
+                            type="button"
+                            className="grid size-5 shrink-0 place-items-center rounded transition-colors"
+                            aria-label="关闭恢复提示"
+                            onClick={() => setShowRecoveryNotice(false)}
+                            onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
+                            onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
+                        >
+                            <X className="size-3.5" />
+                        </button>
+                    </div>
+                ) : null}
 
                 <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
                 <CanvasSearchPanel open={searchOpen} nodes={nodes} onClose={() => setSearchOpen(false)} onLocateNode={locateNode} />
