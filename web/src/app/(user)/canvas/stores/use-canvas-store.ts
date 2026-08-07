@@ -3,7 +3,6 @@ import { create } from "zustand";
 
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
-import type { CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
 
 export type CanvasProject = {
@@ -22,10 +21,9 @@ export type CanvasProject = {
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
     viewport: ViewportTransform;
-    workflowTemplates: CanvasWorkflowTemplate[];
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "viewport" | "workflowTemplates">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -55,7 +53,6 @@ function emptyProjectDetail(): CanvasProjectDetail {
         alignmentGuidesEnabled: true,
         showImageInfo: false,
         viewport: initialViewport,
-        workflowTemplates: [],
     };
 }
 
@@ -80,7 +77,6 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || initialViewport,
-        workflowTemplates: Array.isArray(source.workflowTemplates) ? source.workflowTemplates : [],
     };
 }
 

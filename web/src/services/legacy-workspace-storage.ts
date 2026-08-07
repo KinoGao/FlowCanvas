@@ -104,6 +104,5 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         viewport: source.viewport || { x: 0, y: 0, k: 1 },
-        workflowTemplates: Array.isArray(source.workflowTemplates) ? source.workflowTemplates : [],
     };
 }
