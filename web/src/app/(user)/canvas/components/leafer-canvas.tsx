@@ -11,6 +11,7 @@ import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
+import { buildSpatialIndex, querySpatialIndex } from "../utils/canvas-spatial-index";
 import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
 import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM, canvasToScreen, clampViewport, screenToCanvas, stepCanvasZoom, viewportToCssTransform, sameViewport } from "./leafer-viewport";
 
@@ -171,6 +172,16 @@ export function LeaferCanvas({
         return index;
     }, [connections]);
     const connectionsByNodeIdRef = useRef(connectionsByNodeId); connectionsByNodeIdRef.current = connectionsByNodeId;
+    const nodeSpatialIndex = useMemo(
+        () => buildSpatialIndex(nodes, (node) => ({
+            left: node.position.x,
+            top: node.position.y,
+            right: node.position.x + node.width,
+            bottom: node.position.y + node.height,
+        })),
+        [nodes],
+    );
+    const nodeSpatialIndexRef = useRef(nodeSpatialIndex); nodeSpatialIndexRef.current = nodeSpatialIndex;
     const selectedNodeIdsRef = useRef(selectedNodeIds); selectedNodeIdsRef.current = selectedNodeIds;
     const selectedConnectionIdRef = useRef(selectedConnectionId); selectedConnectionIdRef.current = selectedConnectionId;
     const relatedNodeIdsRef = useRef(relatedNodeIds ?? EMPTY_ID_SET); relatedNodeIdsRef.current = relatedNodeIds ?? EMPTY_ID_SET;
@@ -1216,9 +1227,17 @@ export function LeaferCanvas({
         const pointer = { x: clientX - rect.left, y: clientY - rect.top };
         const targetSide = connection.handleType === "source" ? "target" : "source";
         const currentTargetId = connectionTargetNodeIdRef.current;
+        const canvasPointer = screenToCanvas(clientX, clientY, rect, viewportRef.current);
+        const queryRadius = CONNECTION_SNAP_RELEASE_RADIUS / viewportRef.current.k;
+        const candidates = querySpatialIndex(nodeSpatialIndexRef.current, {
+            left: canvasPointer.x - queryRadius,
+            top: canvasPointer.y - queryRadius,
+            right: canvasPointer.x + queryRadius,
+            bottom: canvasPointer.y + queryRadius,
+        });
         let nearest: { node: CanvasNodeData; distance: number } | null = null;
 
-        for (const node of nodesRef.current) {
+        for (const { item: node } of candidates) {
             if (node.id === connection.nodeId || node.type === CanvasNodeType.Group) continue;
             if (targetSide === "source" && (node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI)) continue;
             const canvasPoint = getNodeConnectionPoint(node, targetSide);
