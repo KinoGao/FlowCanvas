@@ -54,8 +54,10 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
     const audioLayout = useMemo(() => layoutTimeline(audioClips), [audioClips]);
     const audioLayoutRef = useRef(audioLayout);
     audioLayoutRef.current = audioLayout;
+    const layoutSignature = layout.items.map((item) => `${item.clip.id}:${item.start}:${item.end}`).join("|") + `|${layout.totalDuration}`;
 
     const updatePlayhead = useCallback((time: number) => {
+        if (playheadRef.current === time) return;
         playheadRef.current = time;
         setPlayhead(time);
     }, []);
@@ -179,7 +181,7 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
             return;
         }
         if (!items.some((item) => item.clip.id === currentClipIdRef.current)) applyPlayhead(playheadRef.current, false);
-    }, [layout, open, applyPlayhead]);
+    }, [layoutSignature, open, applyPlayhead]);
 
     // 快捷键：空格播放/暂停、Delete 删除、I/O 出入点、←/→ 移动播放头、↑/↓（Shift 精调）调整片段长度
     useEffect(() => {
@@ -231,7 +233,7 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
     useEffect(() => {
         if (!open || playingRef.current) return;
         applyPlayhead(playheadRef.current, false);
-    }, [layout, open, applyPlayhead]);
+    }, [layoutSignature, open, applyPlayhead]);
 
     const selectedVideoItem = layout.items.find((item) => item.clip.id === selectedId && item.clip.duration);
     const canExport = videoClips.some((clip) => clipEffectiveDuration(clip) >= VIDEO_TRIM_MIN_SECONDS) && layout.totalDuration > 0;
@@ -378,7 +380,17 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                             onLoadedMetadata={(event) => {
                                 // 同步读取 duration：合成事件的 currentTarget 在派发后会被置 null，而 setState 更新函数在下一次渲染时才执行
                                 const durationSeconds = event.currentTarget.duration;
-                                setVideoClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, durationSeconds) : item)));
+                                setVideoClips((current) => {
+                                    let changed = false;
+                                    const next = current.map((item) => {
+                                        if (item.id !== clip.id || item.duration) return item;
+                                        const updated = withClipDuration(item, durationSeconds);
+                                        if (updated.duration === item.duration && updated.inPoint === item.inPoint && updated.outPoint === item.outPoint) return item;
+                                        changed = true;
+                                        return updated;
+                                    });
+                                    return changed ? next : current;
+                                });
                             }}
                         />
                     ))}
@@ -395,7 +407,17 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                         className="hidden"
                         onLoadedMetadata={(event) => {
                             const durationSeconds = event.currentTarget.duration;
-                            setAudioClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, durationSeconds) : item)));
+                            setAudioClips((current) => {
+                                let changed = false;
+                                const next = current.map((item) => {
+                                    if (item.id !== clip.id || item.duration) return item;
+                                    const updated = withClipDuration(item, durationSeconds);
+                                    if (updated.duration === item.duration && updated.inPoint === item.inPoint && updated.outPoint === item.outPoint) return item;
+                                    changed = true;
+                                    return updated;
+                                });
+                                return changed ? next : current;
+                            });
                         }}
                     />
                 ))}
