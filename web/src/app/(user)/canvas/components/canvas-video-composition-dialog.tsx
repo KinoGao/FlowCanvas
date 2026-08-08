@@ -375,7 +375,11 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                             src={clip.src}
                             preload="metadata"
                             className="hidden"
-                            onLoadedMetadata={(event) => setVideoClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, event.currentTarget.duration) : item)))}
+                            onLoadedMetadata={(event) => {
+                                // 同步读取 duration：合成事件的 currentTarget 在派发后会被置 null，而 setState 更新函数在下一次渲染时才执行
+                                const durationSeconds = event.currentTarget.duration;
+                                setVideoClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, durationSeconds) : item)));
+                            }}
                         />
                     ))}
                 {audioClips.map((clip) => (
@@ -389,7 +393,10 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                         preload="auto"
                         muted={clip.muted}
                         className="hidden"
-                        onLoadedMetadata={(event) => setAudioClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, event.currentTarget.duration) : item)))}
+                        onLoadedMetadata={(event) => {
+                            const durationSeconds = event.currentTarget.duration;
+                            setAudioClips((current) => current.map((item) => (item.id === clip.id && !item.duration ? withClipDuration(item, durationSeconds) : item)));
+                        }}
                     />
                 ))}
 
