@@ -1609,24 +1609,27 @@ function applyNodeInteractionVisual(
     const active = state.selected || state.connectionTarget;
     const isDark = theme.canvas.background === canvasThemes.dark.canvas.background;
     const ambientShadow = isDark ? "rgba(0,0,0,.42)" : "rgba(15,23,42,.18)";
-    const accentShadow = withAlpha(theme.ui.accent, state.connectionTarget ? 0.34 : 0.22);
+    const accentShadow = withAlpha(theme.ui.accent, 0.28);
     rect.set({
         cornerRadius: CANVAS_NODE_RADIUS,
         stroke: active || state.related || state.hovered ? theme.ui.accent : theme.ui.hairline,
-        strokeWidth: state.connectionTarget ? 2.6 : state.selected ? 2.2 : state.hovered ? 1.5 : state.related ? 1.25 : 1,
+        strokeWidth: state.connectionTarget ? 2.4 : state.selected ? 1.8 : state.hovered ? 1.5 : state.related ? 1.25 : 1,
         shadow: state.dragging
             ? [
                 { x: 0, y: 14, blur: 34, spread: 1, color: ambientShadow },
                 { x: 0, y: 0, blur: 18, spread: 1, color: accentShadow },
             ]
-            : active
+            : state.connectionTarget
               ? [
                   { x: 0, y: 9, blur: 26, spread: 0, color: ambientShadow },
-                  { x: 0, y: 0, blur: state.connectionTarget ? 20 : 14, spread: 1, color: accentShadow },
+                  { x: 0, y: 0, blur: 18, spread: 1, color: accentShadow },
               ]
-              : state.hovered
-                ? { x: 0, y: 7, blur: 20, spread: 0, color: ambientShadow }
-                : undefined,
+              : state.selected
+                // 选中态只要细描边 + 轻微环境阴影，不要 accent 发光（对齐 TapNow 的低视觉重量选中框）。
+                ? { x: 0, y: 6, blur: 16, spread: 0, color: ambientShadow }
+                : state.hovered
+                  ? { x: 0, y: 7, blur: 20, spread: 0, color: ambientShadow }
+                  : undefined,
         cursor: state.dragging ? "grabbing" : "move",
     });
 }

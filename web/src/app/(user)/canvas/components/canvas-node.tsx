@@ -1636,9 +1636,8 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
     const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
-    const visualClass = isSource ? "left-[18px]" : "right-[18px]";
     const plusVisibility = active
-        ? "opacity-100 scale-125"
+        ? "opacity-100 scale-110"
         : visible
           ? "opacity-100 scale-100"
           : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
@@ -1686,14 +1685,15 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
             style={{ [side]: "-22px", width: "44px" }}
         >
-            <span onPointerDown={handlePointerDown} className={`pointer-events-auto absolute top-1/2 flex size-9 -translate-y-1/2 cursor-crosshair items-center justify-center ${visualClass}`}>
+            {/* 视觉圆点居中于 44px 命中条，即圆心正好骑在节点边框上（对齐 TapNow 贴边 ⊕）。 */}
+            <span onPointerDown={handlePointerDown} className="pointer-events-auto absolute left-1/2 top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center">
                 <span
                     className={`pointer-events-none relative grid size-5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                     style={{
-                        background: active ? "#a5f3fc" : "#f7f7f7",
-                        borderColor: active ? "#ecfeff" : "rgba(255,255,255,.7)",
-                        color: theme.canvas.background,
-                        boxShadow: active ? "0 0 0 7px rgba(165,243,252,.16), 0 0 18px rgba(103,232,249,.72)" : undefined,
+                        background: active ? theme.ui.accent : theme.ui.materialElevated,
+                        borderColor: active ? theme.ui.accent : theme.node.stroke,
+                        color: active ? theme.canvas.background : theme.node.muted,
+                        boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
                     }}
                 >
                     <span className="absolute left-1/2 top-1/2 h-[10px] w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />

@@ -5425,7 +5425,7 @@ function LeaferCanvasPage() {
                         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5">
                             <button
                                 type="button"
-                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
                                 style={{ color: theme.toolbar.item }}
                                 onClick={() => quickCreateFromEmpty(CanvasNodeType.Image)}
                             >
@@ -5434,7 +5434,7 @@ function LeaferCanvasPage() {
                             </button>
                             <button
                                 type="button"
-                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
                                 style={{ color: theme.toolbar.item }}
                                 onClick={() => quickCreateFromEmpty(CanvasNodeType.Video)}
                             >
@@ -5443,7 +5443,7 @@ function LeaferCanvasPage() {
                             </button>
                             <button
                                 type="button"
-                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
                                 style={{ color: theme.toolbar.item }}
                                 onClick={() => quickCreateFromEmpty(CanvasNodeType.Text)}
                             >
@@ -5452,7 +5452,7 @@ function LeaferCanvasPage() {
                             </button>
                             <button
                                 type="button"
-                                className="creative-os-icon-button gap-1.5 px-3 py-1.5 text-[13px]"
+                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
                                 style={{ color: theme.toolbar.item }}
                                 onClick={() => setWorkflowToolboxOpen(true)}
                             >
