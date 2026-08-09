@@ -708,6 +708,32 @@
         visibility: hidden;
     }
 
+    /* 远景缩放时保留可读的节点标题/类型标签（对齐 TapNow），反向缩放抵消视口 scale */
+    .canvas-node-overview-label {
+        display: none;
+    }
+
+    .node-element[data-leafer-overview="true"] .canvas-node-overview-label {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        z-index: 5;
+        display: inline-flex;
+        max-width: 260px;
+        margin-bottom: 8px;
+        padding: 3px 8px;
+        overflow: hidden;
+        border: 1px solid;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.4;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+        transform: scale(calc(1 / var(--canvas-k, 1)));
+        transform-origin: bottom left;
+    }
+
     .creative-os-composer {
         border-radius: 8px;
         transform-origin: top center;
@@ -1131,4 +1157,27 @@
 ::view-transition-new(root) {
     animation: none;
     mix-blend-mode: normal;
+}
+
+/* 创建节点菜单：从锚点淡入并轻微缩放到 100%（220-320ms，对齐 TapNow 创建动效） */
+@keyframes canvas-create-menu-in {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.canvas-create-menu-enter {
+    animation: canvas-create-menu-in 0.24s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .canvas-create-menu-enter {
+        animation: none;
+    }
 }

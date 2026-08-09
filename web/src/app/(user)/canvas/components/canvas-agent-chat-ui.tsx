@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, UserRound, Wrench, X, XCircle } from "lucide-react";
+import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, Plus, UserRound, Wrench, X, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { LocalUser } from "@/stores/use-user-store";
+import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 
 export type CanvasAgentChatAttachment = { id: string; name: string; url: string };
 export type CanvasAgentMode = "online" | "local";
@@ -177,6 +179,9 @@ export function AgentChatComposer({
     onAddFiles,
     onRemoveAttachment,
     left,
+    mentionReferences,
+    mentionRequestNonce,
+    onQuickReference,
 }: {
     prompt: string;
     attachments?: CanvasAgentChatAttachment[];
@@ -189,9 +194,22 @@ export function AgentChatComposer({
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
+    /** 传入后启用 @ 精确引用候选（对齐 TapNow Agent 的 @ 引用）。 */
+    mentionReferences?: CanvasResourceReference[];
+    /** 递增触发一次 @ 候选弹出。 */
+    mentionRequestNonce?: number;
+    /** 「+」轻量引用：把当前选中节点带入输入框。 */
+    onQuickReference?: () => void;
 }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
+    const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        if (!onAddFiles) return;
+        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+        if (!images.length) return;
+        event.preventDefault();
+        void onAddFiles(images);
+    };
     return (
         <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}>
             <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
@@ -215,27 +233,40 @@ export function AgentChatComposer({
                         ))}
                     </div>
                 ) : null}
-                <textarea
-                    value={prompt}
-                    onChange={(event) => onPromptChange(event.target.value)}
-                    onPaste={(event) => {
-                        if (!onAddFiles) return;
-                        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-                        if (!images.length) return;
-                        event.preventDefault();
-                        void onAddFiles(images);
-                    }}
-                    onKeyDown={(event) => {
-                        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) return;
-                        event.preventDefault();
-                        void onSubmit();
-                    }}
-                    className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
-                    style={{ color: theme.node.text }}
-                    placeholder={placeholder}
-                />
+                {mentionReferences ? (
+                    <CanvasResourceMentionTextarea
+                        value={prompt}
+                        references={mentionReferences}
+                        onChange={onPromptChange}
+                        onSubmit={() => void onSubmit()}
+                        mentionRequestNonce={mentionRequestNonce}
+                        onPaste={handlePaste}
+                        className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
+                        style={{ color: theme.node.text }}
+                        placeholder={placeholder}
+                    />
+                ) : (
+                    <textarea
+                        value={prompt}
+                        onChange={(event) => onPromptChange(event.target.value)}
+                        onPaste={handlePaste}
+                        onKeyDown={(event) => {
+                            if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey) return;
+                            event.preventDefault();
+                            void onSubmit();
+                        }}
+                        className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
+                        style={{ color: theme.node.text }}
+                        placeholder={placeholder}
+                    />
+                )}
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">
+                        {onQuickReference ? (
+                            <Tooltip title="引用画布节点：有选中节点时插入选中引用，否则打开 @ 候选">
+                                <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" disabled={sending} style={{ color: theme.node.muted }} icon={<Plus className="size-4" />} onClick={onQuickReference} aria-label="引用画布节点" />
+                            </Tooltip>
+                        ) : null}
                         {onAddFiles ? (
                             <>
                                 <input

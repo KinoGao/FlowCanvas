@@ -39,6 +39,7 @@ type LeaferCanvasProps = {
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>, canvasPos: { x: number; y: number }) => void;
     onCanvasDeselect?: () => void;
     onContextMenu?: (event: React.MouseEvent, canvasPos: { x: number; y: number }) => void;
+    onCanvasDoubleClick?: (event: React.MouseEvent, canvasPos: { x: number; y: number }) => void;
     onConnectStart?: (nodeId: string, handleType: "source" | "target") => void;
     onConnectEnd?: (canvasPos?: { x: number; y: number }) => void;
     onConnect?: (fromNodeId: string, toNodeId: string) => void;
@@ -54,7 +55,6 @@ type LeaferCanvasProps = {
     connectionTargetNodeId?: string | null;
     onConnectionTargetChange?: (nodeId: string | null) => void;
     onReady?: () => void;
-    miniMapOpen?: boolean;
     children?: React.ReactNode;
 };
 
@@ -99,6 +99,7 @@ export function LeaferCanvas({
     onCanvasMouseDown,
     onCanvasDeselect,
     onContextMenu,
+    onCanvasDoubleClick,
     onConnectStart,
     onConnectEnd,
     onConnect,
@@ -111,7 +112,6 @@ export function LeaferCanvas({
     connectionTargetNodeId,
     onConnectionTargetChange,
     onReady,
-    miniMapOpen = false,
     children,
 }: LeaferCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -190,8 +190,9 @@ export function LeaferCanvas({
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
-    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu });
-    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu };
+    const lastNodeDoubleTapAtRef = useRef(0);
+    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick });
+    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick };
 
     // Drag state
     const dragRef = useRef<{
@@ -852,6 +853,7 @@ export function LeaferCanvas({
                 });
                 rect.on(LUI.PointerEvent.TAP, () => callbacksRef.current.onNodeTap?.(node.id));
                 rect.on(LUI.PointerEvent.DOUBLE_TAP, () => {
+                    lastNodeDoubleTapAtRef.current = Date.now();
                     const element = containerRef.current?.querySelector<HTMLElement>(`[data-node-id="${CSS.escape(node.id)}"] .creative-os-node`);
                     element?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
                 });
@@ -1403,7 +1405,7 @@ export function LeaferCanvas({
                     x: Math.min(start.x, current.x), y: Math.min(start.y, current.y),
                     w: Math.abs(current.x - start.x), h: Math.abs(current.y - start.y),
                 };
-                renderSelectionBox(leaferRef.current, drag.selectRect);
+                renderSelectionBox(leaferRef.current, drag.selectRect, canvasThemes[useThemeStore.getState().theme]);
             }
         }
 
@@ -1501,6 +1503,15 @@ export function LeaferCanvas({
         callbacksRef.current.onContextMenu?.(event, pos);
     }, [getCanvasPos]);
 
+    // 空白处双击打开创建菜单；节点双击由 Leafer DOUBLE_TAP 转发为节点 DOM 的 dblclick（用于文本编辑），这里过滤掉。
+    const handleDoubleClick = useCallback((event: React.MouseEvent) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest?.("[data-node-id]")) return;
+        if (Date.now() - lastNodeDoubleTapAtRef.current < 350) return;
+        const pos = getCanvasPos(event.clientX, event.clientY);
+        callbacksRef.current.onCanvasDoubleClick?.(event, pos);
+    }, [getCanvasPos]);
+
     const viewportStyle: React.CSSProperties = useMemo(() => ({
         transform: viewportToCssTransform(viewport),
         transformOrigin: "0 0",
@@ -1510,6 +1521,8 @@ export function LeaferCanvas({
         height: 1,
         overflow: "visible",
         willChange: "transform",
+        // 供节点远景标签做反向缩放（calc(1 / var(--canvas-k))），避免缩放时整树重渲染。
+        ["--canvas-k" as string]: String(viewport.k),
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
     const cursor = isSpacePressed ? "grab" : "default";
@@ -1524,6 +1537,7 @@ export function LeaferCanvas({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerCancel}
             onContextMenu={handleContextMenu}
+            onDoubleClick={handleDoubleClick}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
                 e.preventDefault();
@@ -1547,11 +1561,19 @@ export function LeaferCanvas({
 
 let _selectionRect: LUI.Rect | null = null;
 
-function renderSelectionBox(app: LUI.App | null, rect: { x: number; y: number; w: number; h: number } | null) {
+function withAlpha(hex: string, alpha: number) {
+    const value = hex.replace("#", "");
+    const r = parseInt(value.slice(0, 2), 16);
+    const g = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function renderSelectionBox(app: LUI.App | null, rect: { x: number; y: number; w: number; h: number } | null, theme: (typeof canvasThemes)[keyof typeof canvasThemes]) {
     if (!app) return;
     if (_selectionRect) { _selectionRect.remove(); _selectionRect = null; }
     if (!rect || rect.w < 2 || rect.h < 2) return;
-    const box = new LUI.Rect({ x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: "rgba(125, 211, 252, 0.1)", stroke: "#7dd3fc", strokeWidth: 1 });
+    const box = new LUI.Rect({ x: rect.x, y: rect.y, width: rect.w, height: rect.h, fill: theme.canvas.selectionFill, stroke: theme.canvas.selectionStroke, strokeWidth: 1 });
     box.hittable = false;
     app.tree.add(box);
     _selectionRect = box;
@@ -1587,9 +1609,7 @@ function applyNodeInteractionVisual(
     const active = state.selected || state.connectionTarget;
     const isDark = theme.canvas.background === canvasThemes.dark.canvas.background;
     const ambientShadow = isDark ? "rgba(0,0,0,.42)" : "rgba(15,23,42,.18)";
-    const accentShadow = state.connectionTarget
-        ? "rgba(10,132,255,.34)"
-        : "rgba(10,132,255,.22)";
+    const accentShadow = withAlpha(theme.ui.accent, state.connectionTarget ? 0.34 : 0.22);
     rect.set({
         cornerRadius: CANVAS_NODE_RADIUS,
         stroke: active || state.related || state.hovered ? theme.ui.accent : theme.ui.hairline,

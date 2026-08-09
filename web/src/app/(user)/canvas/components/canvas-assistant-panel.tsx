@@ -24,6 +24,7 @@ import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { buildCanvasResourceReferences } from "../utils/canvas-resource-references";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
@@ -265,6 +266,31 @@ export function CanvasAssistantPanel({
     const selectedReferences = useMemo(() => allSelectedReferences.filter((item) => !removedReferenceIds.has(item.id)), [allSelectedReferences, removedReferenceIds]);
     const iconButtonStyle = { color: theme.node.muted };
 
+    // Agent 输入框 @ 精确引用：全画布资源节点作为候选（对齐 TapNow @ 引用具体节点）。
+    const [mentionNonce, setMentionNonce] = useState(0);
+    const mentionReferences = useMemo(
+        () => buildCanvasResourceReferences(snapshot.nodes, snapshot.connections).map((reference) => ({ ...reference, active: true })),
+        [snapshot.nodes, snapshot.connections],
+    );
+    const resolveMentionedReferences = (text: string) => {
+        const nodeById = new Map(snapshot.nodes.map((node) => [node.id, node]));
+        return mentionReferences
+            .filter((reference) => text.includes(reference.label))
+            .map((reference) => nodeById.get(reference.nodeId))
+            .filter((node): node is CanvasNodeData => Boolean(node))
+            .map(nodeToReference)
+            .filter((item): item is CanvasAssistantReference => Boolean(item));
+    };
+    /** 「+」轻量引用：有选中节点时把它们的引用标签插入输入框，否则弹出 @ 候选。 */
+    const handleQuickReference = () => {
+        const labels = mentionReferences.filter((reference) => selectedNodeIds.has(reference.nodeId)).map((reference) => reference.label);
+        if (!labels.length) {
+            setMentionNonce((value) => value + 1);
+            return;
+        }
+        setPrompt((current) => `${current}${current && !/\s$/.test(current) ? " " : ""}${labels.join(" ")} `);
+    };
+
     useEffect(() => {
         setRemovedReferenceIds(new Set());
     }, [selectedNodeKey]);
@@ -338,7 +364,7 @@ export function CanvasAssistantPanel({
             setLocalActiveSessionId(session.id);
         }
 
-        const refs = savedReferences || selectedReferences;
+        const refs = savedReferences || mergeAssistantReferences(selectedReferences, resolveMentionedReferences(text));
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references: refs };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
@@ -658,11 +684,14 @@ export function CanvasAssistantPanel({
                     <AgentChatComposer
                         prompt={prompt}
                         sending={isRunning}
-                        placeholder="描述你想让 Agent 如何操作画布"
+                        placeholder="描述你想让 Agent 如何操作画布，@ 可引用画布节点"
                         theme={theme}
                         onPromptChange={setPrompt}
                         onSubmit={submit}
                         onAddFiles={addImagesToCanvas}
+                        mentionReferences={mentionReferences}
+                        mentionRequestNonce={mentionNonce}
+                        onQuickReference={handleQuickReference}
                         left={
                             <>
                                 <CanvasPromptLibrary onSelect={setPrompt} />
@@ -1384,6 +1413,11 @@ function buildAssistantReferences(nodes: CanvasNodeData[], selectedNodeIds: Set<
         .filter((node): node is CanvasNodeData => Boolean(node))
         .map(nodeToReference)
         .filter((item): item is CanvasAssistantReference => Boolean(item));
+}
+
+function mergeAssistantReferences(base: CanvasAssistantReference[], extra: CanvasAssistantReference[]) {
+    const seen = new Set(base.map((item) => item.id));
+    return [...base, ...extra.filter((item) => !seen.has(item.id))];
 }
 
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage): Promise<ResponseInputMessage[]> {

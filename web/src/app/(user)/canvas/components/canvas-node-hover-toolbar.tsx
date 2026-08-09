@@ -387,7 +387,7 @@ function ToolbarAction({ title, label, icon, onClick, showLabel, active = false,
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color={theme.node.panel} styles={{ container: { color: theme.node.text, boxShadow: "0 8px 24px rgba(0,0,0,.24)", fontSize: 13, fontWeight: 500 } }}>
-            <button type="button" className="group relative flex h-11 items-center whitespace-nowrap px-1.5" style={{ color: danger ? "#f87171" : theme.node.text }} onClick={onClick} aria-label={title}>
+            <button type="button" className="group relative flex h-11 items-center whitespace-nowrap px-1.5" style={{ color: danger ? theme.ui.danger : theme.node.text }} onClick={onClick} aria-label={title}>
                 <span className={`flex h-8 items-center ${hasText ? "gap-2 px-2.5" : "justify-center px-2"} rounded-md transition group-hover:bg-black/5 dark:group-hover:bg-white/10`} style={{ background: active ? theme.toolbar.activeBg : undefined }}>
                     {icon}
                     {hasText ? <span>{label}</span> : null}

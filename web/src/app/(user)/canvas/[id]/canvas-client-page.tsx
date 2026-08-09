@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, Menu, Music2, Plus, Search, Share2, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -30,6 +30,7 @@ import { NODE_DEFAULT_SIZE, getConfigNodeHeight, getNodeSpec } from "../constant
 import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
+import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "../components/canvas-create-node-menu";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
 import type { CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -46,6 +47,7 @@ import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
+import { CanvasMiniMap } from "../components/canvas-minimap";
 import { centerViewportOnRect, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
@@ -758,6 +760,7 @@ function LeaferCanvasPage() {
     const highlightTimerRef = useRef<number | null>(null);
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [createMenu, setCreateMenu] = useState<{ x: number; y: number; canvasPosition: Position } | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
@@ -4397,6 +4400,52 @@ function LeaferCanvasPage() {
         setMaterialLibraryOpen(true);
     }, []);
 
+    /** 统一创建菜单（dock +、双击空白、右键空白共用）的动作分发。 */
+    const handleCreateMenuAction = useCallback(
+        (action: CanvasCreateMenuAction, position?: Position) => {
+            const options = position ? { position } : undefined;
+            switch (action) {
+                case "text":
+                    createNode(CanvasNodeType.Text, options);
+                    break;
+                case "image":
+                    createNode(CanvasNodeType.Image, options);
+                    break;
+                case "video":
+                    createNode(CanvasNodeType.Video, options);
+                    break;
+                case "audio":
+                    createNode(CanvasNodeType.Audio, options);
+                    break;
+                case "comfyui":
+                    createNode(CanvasNodeType.ComfyUI, options);
+                    break;
+                case "script":
+                    createScriptNode();
+                    break;
+                case "videoComposition":
+                    createVideoCompositionNode();
+                    break;
+                case "director":
+                    createDirectorNode();
+                    break;
+                case "panorama360":
+                    createPanorama360Node();
+                    break;
+                case "materialLibrary":
+                    openMaterialLibrary("styles");
+                    break;
+                case "upload":
+                    handleUploadRequest();
+                    break;
+                case "generationHistory":
+                    setGenerationHistoryOpen(true);
+                    break;
+            }
+        },
+        [createNode, createScriptNode, createVideoCompositionNode, createDirectorNode, createPanorama360Node, openMaterialLibrary, handleUploadRequest],
+    );
+
     const insertMaterialPreset = useCallback(
         (preset: { title: string; prompt: string }) => {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -5223,6 +5272,7 @@ function LeaferCanvasPage() {
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
                     saveState={saveState}
+                    onRetrySave={() => void retrySave()}
                 />
 
                 {showRecoveryNotice ? (
@@ -5278,6 +5328,11 @@ function LeaferCanvasPage() {
                         lastCanvasPositionRef.current = canvasPos;
                         setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY, canvasPosition: canvasPos });
                     }}
+                    onCanvasDoubleClick={(event, canvasPos) => {
+                        lastCanvasPositionRef.current = canvasPos;
+                        setContextMenu(null);
+                        setCreateMenu({ x: event.clientX, y: event.clientY, canvasPosition: canvasPos });
+                    }}
                     onConnectStart={handleLeaferConnectStart}
                     onConnectEnd={handleLeaferConnectEnd}
                     onConnect={handleLeaferConnect}
@@ -5310,7 +5365,6 @@ function LeaferCanvasPage() {
                     relatedConnectionIds={relatedHighlight.connectionIds}
                     onEdgeContextMenu={openConnectionContextMenu}
                     onReady={() => setCanvasVisualReady(true)}
-                    miniMapOpen={isMiniMapOpen}
                 >
                     {/* Render node DOM elements */}
                     {mountedNodeItems.map((node) => {
@@ -5533,11 +5587,7 @@ function LeaferCanvasPage() {
                     snapToGrid={snapToGrid}
                     alignmentGuidesEnabled={alignmentGuidesEnabled}
                     showImageInfo={showImageInfo}
-                    onAddImage={() => createNode(CanvasNodeType.Image)}
-                    onAddVideo={() => createNode(CanvasNodeType.Video)}
-                    onAddAudio={() => createNode(CanvasNodeType.Audio)}
-                    onAddText={() => createNode(CanvasNodeType.Text)}
-                    onAddComfyUI={() => createNode(CanvasNodeType.ComfyUI)}
+                    onCreateAction={(action) => handleCreateMenuAction(action)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
@@ -5556,12 +5606,7 @@ function LeaferCanvasPage() {
                         setCanvasAssetPanelOpen(true);
                     }}
                     onOpenMaterialLibrary={openMaterialLibrary}
-                    onOpenGenerationHistory={() => setGenerationHistoryOpen(true)}
                     onOpenWorkflowToolbox={() => setWorkflowToolboxOpen(true)}
-                    onAddScript={createScriptNode}
-                    onAddVideoComposition={createVideoCompositionNode}
-                    onAddDirector={createDirectorNode}
-                    onAddPanorama360={createPanorama360Node}
                 />
 
                 <CanvasZoomControls
@@ -5577,7 +5622,42 @@ function LeaferCanvasPage() {
                     }}
                 />
 
-                {contextMenu ? (
+                {isMiniMapOpen ? (
+                    <CanvasMiniMap
+                        nodes={nodes}
+                        selectedNodeIds={selectedNodeIds}
+                        viewport={viewport}
+                        containerSize={size}
+                        onNavigate={(next) => {
+                            viewportRef.current = next;
+                            setViewport(next);
+                        }}
+                    />
+                ) : null}
+
+                {contextMenu?.type === "canvas" ? (
+                    <CanvasCreateNodeMenu
+                        position={{ x: contextMenu.x, y: contextMenu.y }}
+                        onClose={() => setContextMenu(null)}
+                        onAction={(action) => {
+                            handleCreateMenuAction(action, contextMenu.canvasPosition);
+                            setContextMenu(null);
+                        }}
+                    />
+                ) : null}
+
+                {createMenu ? (
+                    <CanvasCreateNodeMenu
+                        position={createMenu}
+                        onClose={() => setCreateMenu(null)}
+                        onAction={(action) => {
+                            handleCreateMenuAction(action, createMenu.canvasPosition);
+                            setCreateMenu(null);
+                        }}
+                    />
+                ) : null}
+
+                {contextMenu && contextMenu.type !== "canvas" ? (
                     <CanvasNodeContextMenu
                         menu={contextMenu}
                         onClose={() => setContextMenu(null)}
@@ -5592,26 +5672,6 @@ function LeaferCanvasPage() {
                             } else if (contextMenu.type === "connection") {
                                 deleteConnection(contextMenu.connectionId);
                             }
-                            setContextMenu(null);
-                        }}
-                        onAddImage={() => {
-                            createNode(CanvasNodeType.Image, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
-                            setContextMenu(null);
-                        }}
-                        onAddVideo={() => {
-                            createNode(CanvasNodeType.Video, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
-                            setContextMenu(null);
-                        }}
-                        onAddAudio={() => {
-                            createNode(CanvasNodeType.Audio, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
-                            setContextMenu(null);
-                        }}
-                        onAddText={() => {
-                            createNode(CanvasNodeType.Text, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
-                            setContextMenu(null);
-                        }}
-                        onAddComfyUI={() => {
-                            createNode(CanvasNodeType.ComfyUI, contextMenu.type === "canvas" ? { position: contextMenu.canvasPosition } : undefined);
                             setContextMenu(null);
                         }}
                     />
@@ -6197,6 +6257,7 @@ function CanvasTopBar({
     agentOpen,
     onToggleAgent,
     saveState,
+    onRetrySave,
 }: {
     title: string;
     titleDraft: string;
@@ -6212,6 +6273,7 @@ function CanvasTopBar({
     agentOpen: boolean;
     onToggleAgent: () => void;
     saveState: CanvasSaveState;
+    onRetrySave: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -6247,9 +6309,7 @@ function CanvasTopBar({
                     </button>
                 </Dropdown>
                 <span className="hidden text-[13px] font-semibold tracking-normal opacity-70 sm:block">FlowCanvas</span>
-                <span className="ml-1.5 hidden text-[11px] opacity-50 sm:block" style={{ color: theme.node.muted }}>
-                    {saveState === "saving" ? "保存中…" : saveState === "error" ? "保存失败" : saveState === "offline" ? "离线" : "已保存"}
-                </span>
+                <SaveStateIndicator state={saveState} mutedColor={theme.node.muted} accentColor={theme.ui.accent} dangerColor={theme.ui.danger} onRetry={onRetrySave} />
             </div>
 
             <div ref={titleRef} className="pointer-events-auto absolute left-1/2 max-w-[44vw] -translate-x-1/2">
@@ -6317,6 +6377,38 @@ function CanvasTopBar({
                 </Button>
             </div>
         </div>
+    );
+}
+
+/** 顶栏保存状态：常驻小指示，失败/离线可点击重试（不打断式提示）。 */
+function SaveStateIndicator({ state, mutedColor, accentColor, dangerColor, onRetry }: { state: CanvasSaveState; mutedColor: string; accentColor: string; dangerColor: string; onRetry: () => void }) {
+    if (state === "saving") {
+        return (
+            <span className="ml-1.5 hidden items-center gap-1 text-[11px] sm:flex" style={{ color: mutedColor }}>
+                <LoaderCircle className="size-3 animate-spin" style={{ color: accentColor }} />
+                保存中…
+            </span>
+        );
+    }
+    if (state === "error" || state === "offline") {
+        return (
+            <button
+                type="button"
+                className="ml-1.5 hidden items-center gap-1 rounded px-1 text-[11px] transition hover:opacity-100 sm:flex"
+                style={{ color: dangerColor, opacity: 0.85 }}
+                onClick={onRetry}
+                title="点击重试保存"
+            >
+                <CloudOff className="size-3" />
+                {state === "offline" ? "离线，点击重试" : "保存失败，点击重试"}
+            </button>
+        );
+    }
+    return (
+        <span className="ml-1.5 hidden items-center gap-1 text-[11px] opacity-50 sm:flex" style={{ color: mutedColor }}>
+            <Check className="size-3" style={{ color: accentColor }} />
+            已保存
+        </span>
     );
 }
 

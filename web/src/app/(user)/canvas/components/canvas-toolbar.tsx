@@ -5,19 +5,14 @@ import {
     Boxes,
     CircleDot,
     Clapperboard,
-    Clock3,
     Crosshair,
     Eraser,
-    FileText,
     FolderOpen,
     Grid2x2,
-    Image as ImageIcon,
     Info,
     Keyboard,
     Layers3,
     Moon,
-    Music2,
-    PackagePlus,
     Palette,
     Plus,
     Redo2,
@@ -25,10 +20,8 @@ import {
     Square,
     Sun,
     Trash2,
-    Type,
     Undo2,
     Upload,
-    Video,
     WandSparkles,
     Workflow,
     X,
@@ -37,6 +30,7 @@ import {
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
+import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "./canvas-create-node-menu";
 
 export function CanvasToolbar({
     selectedCount,
@@ -46,16 +40,7 @@ export function CanvasToolbar({
     snapToGrid,
     alignmentGuidesEnabled,
     showImageInfo,
-    onAddImage,
-    onAddVideo,
-    onAddAudio,
-    onAddText,
-    onAddScript,
-    onAddComfyUI,
-    onAddConfig,
-    onAddVideoComposition,
-    onAddDirector,
-    onAddPanorama360,
+    onCreateAction,
     onUndo,
     onRedo,
     onUpload,
@@ -69,7 +54,6 @@ export function CanvasToolbar({
     onShowImageInfoChange,
     onOpenMyAssets,
     onOpenMaterialLibrary,
-    onOpenGenerationHistory,
     onOpenWorkflowToolbox,
     assetPanelOpen = false,
 }: {
@@ -80,17 +64,7 @@ export function CanvasToolbar({
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
-    onAddImage: () => void;
-    onAddVideo: () => void;
-    onAddAudio: () => void;
-    onAddText: () => void;
-    onAddScript: () => void;
-    onAddComfyUI?: () => void;
-    /** @deprecated Use onAddComfyUI for newly created nodes. */
-    onAddConfig?: () => void;
-    onAddVideoComposition: () => void;
-    onAddDirector: () => void;
-    onAddPanorama360: () => void;
+    onCreateAction: (action: CanvasCreateMenuAction) => void;
     onUndo: () => void;
     onRedo: () => void;
     onUpload: () => void;
@@ -105,7 +79,6 @@ export function CanvasToolbar({
     onShowImageInfoChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
-    onOpenGenerationHistory: () => void;
     onOpenWorkflowToolbox: () => void;
     assetPanelOpen?: boolean;
 }) {
@@ -117,6 +90,7 @@ export function CanvasToolbar({
     const [hovered, setHovered] = useState<string | null>(null);
     const [tipPosition, setTipPosition] = useState<DockPosition>({ x: 0, y: 0 });
     const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [addMenuAnchor, setAddMenuAnchor] = useState<DockPosition>({ x: 0, y: 0 });
     const [appearanceOpen, setAppearanceOpen] = useState(false);
     const [materialOpen, setMaterialOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -125,7 +99,6 @@ export function CanvasToolbar({
     const dockStyle = { background: theme.ui.material, borderColor: theme.ui.hairline, color: theme.toolbar.item, boxShadow: theme.ui.shadow };
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
-    const addComfyUI = onAddComfyUI ?? onAddConfig ?? (() => undefined);
     const tip = hovered ? toolLabel(hovered) : "";
     const dockPanelOpen = addMenuOpen || appearanceOpen || materialOpen;
 
@@ -139,6 +112,10 @@ export function CanvasToolbar({
     const openPanelAt = (event: ReactMouseEvent<HTMLElement>, panel: "add" | "appearance" | "material") => {
         setShortcutsOpen(false);
         setPanelPosition(getDockPosition(wrapRef.current, event.currentTarget));
+        if (panel === "add") {
+            const box = event.currentTarget.getBoundingClientRect();
+            setAddMenuAnchor({ x: box.left - 216, y: box.top + box.height / 2 });
+        }
         setAddMenuOpen(panel === "add" ? (value) => !value : false);
         setAppearanceOpen(panel === "appearance" ? (value) => !value : false);
         setMaterialOpen(panel === "material" ? (value) => !value : false);
@@ -220,26 +197,14 @@ export function CanvasToolbar({
             </div>
 
             {!assetPanelOpen && addMenuOpen ? (
-                <div
-                    ref={panelRef}
-                    className="canvas-toolbar-popover creative-os-panel pointer-events-auto absolute z-30 w-[196px] rounded-[8px] border p-2"
-                    style={{ left: panelPosition.x || "50%", top: panelTop, background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
-                >
-                    <div className="px-2 pb-2 text-xs font-medium opacity-60">添加节点</div>
-                    <AddNodeOption theme={theme} icon={<Type className="size-4" />} label="文本" onClick={onAddText} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<ImageIcon className="size-4" />} label="图片" onClick={onAddImage} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Video className="size-4" />} label="视频" onClick={onAddVideo} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Workflow className="size-4" />} label="ComfyUI" onClick={addComfyUI} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Clapperboard className="size-4" />} label="视频合成" tag="Beta" onClick={onAddVideoComposition} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" tag="NEW" onClick={onAddDirector} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" tag="NEW" onClick={onAddPanorama360} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Music2 className="size-4" />} label="音频" onClick={onAddAudio} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<FileText className="size-4" />} label="脚本" onClick={onAddScript} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" tag="NEW" onClick={() => onOpenMaterialLibrary("styles")} onClose={() => setAddMenuOpen(false)} />
-                    <div className="px-2 pb-1 pt-2 text-xs font-medium opacity-60">添加资源</div>
-                    <AddNodeOption theme={theme} icon={<Upload className="size-4" />} label="上传" onClick={onUpload} onClose={() => setAddMenuOpen(false)} />
-                    <AddNodeOption theme={theme} icon={<Clock3 className="size-4" />} label="从生成历史选择" onClick={onOpenGenerationHistory} onClose={() => setAddMenuOpen(false)} />
-                </div>
+                <CanvasCreateNodeMenu
+                    position={addMenuAnchor}
+                    onClose={() => setAddMenuOpen(false)}
+                    onAction={(action) => {
+                        setAddMenuOpen(false);
+                        onCreateAction(action);
+                    }}
+                />
             ) : null}
 
             {!assetPanelOpen && materialOpen ? (

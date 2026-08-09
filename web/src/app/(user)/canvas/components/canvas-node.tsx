@@ -20,7 +20,17 @@ import { getPinColor, getPinColorLabel, getPinColorValue } from "../utils/canvas
 import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-const selectionBlue = "#0a84ff";
+
+/** 远景缩放（overview）时节点上方显示的类型兜底文案。 */
+const NODE_OVERVIEW_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
+    [CanvasNodeType.Image]: "图片",
+    [CanvasNodeType.Video]: "视频",
+    [CanvasNodeType.Audio]: "音频",
+    [CanvasNodeType.Text]: "文本",
+    [CanvasNodeType.ComfyUI]: "工作流",
+    [CanvasNodeType.Config]: "配置",
+    [CanvasNodeType.Group]: "分组",
+};
 
 type ResizeStartEvent = React.PointerEvent;
 
@@ -483,6 +493,11 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
+            {editorManaged ? (
+                <div className="canvas-node-overview-label" style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}>
+                    {data.title?.trim() || NODE_OVERVIEW_TYPE_LABEL[data.type] || "节点"}
+                </div>
+            ) : null}
             <Card
                 className="creative-os-node relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
