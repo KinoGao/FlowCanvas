@@ -4,6 +4,8 @@
 > 文档类型：竞品交互研究、现场核验记录、FlowCanvas 差距清单
 > 研究对象：[LibTV](https://www.liblib.tv/)、[TapNow](https://www.tapnow.ai/zh)、[小云雀](https://xyq.jianying.com/)
 
+配套视觉证据：[节点 UI、操作状态与交互动效证据册](2026-08-11-node-ui-motion-evidence.md)。证据册包含 LibTV / TapNow / 小云雀截图、FlowCanvas 每类节点操作 UI、Agent 确认状态、分组、连线和 4 个 GIF。
+
 ## 0. 这份文档解决什么问题
 
 这是一份补充调研，专门记录三件容易被“看起来能用”掩盖的事：
@@ -205,6 +207,10 @@ LibTV 的公开信息更适合用来研究“如何让创作开始”和“如�
 
 以下内容来自当前仓库代码和本地画布现场操作，不是计划中的功能承诺。
 
+![FlowCanvas 从空画布到节点选中的操作序列](assets/libtv-tapnow-xiaoyunque-interaction/flowcanvas-node-create-sequence.gif)
+
+![FlowCanvas Agent 工具确认和执行结果序列](assets/libtv-tapnow-xiaoyunque-interaction/flowcanvas-agent-confirm-sequence.gif)
+
 ### 7.1 已有基础能力
 
 - 多选、框选、节点分组、故事板组和工作流模板。
@@ -241,6 +247,15 @@ LibTV 的公开信息更适合用来研究“如何让创作开始”和“如�
 快捷键面板目前列出 `Ctrl+D`、`Ctrl+Enter`、`Tab`、`Ctrl+L`、`Alt+Shift+F`、Alt 拖拽复制和 Ctrl+Alt 拖拽复制等操作，但键盘处理器现场能确认的主要是 `Ctrl/Cmd+Z`、`Y`、`A`、`C`、`V`、`+`、`-`、`0`、`S`、`P`、`J`、`F`、分组、删除和 Escape。
 
 这不是单纯的文案问题：快捷键面板是交互协议的一部分。用户按下一个可见快捷键后没有反馈，会降低对整个画布的信任。应先建立“面板条目—事件处理—撤销栈—现场测试”的一一对应关系，再补充更多快捷键。
+
+### 7.5 节点创建与命中层异常
+
+本次补充现场取证还复现了两个 P0 问题：
+
+1. 右侧“添加节点”菜单可打开，菜单项可 hover 或获得键盘焦点，但多次鼠标点击、Enter 和 Space 没有创建节点；空画布快捷入口和 Agent 工具可以创建节点。
+2. 在视觉上的视频节点区域右击，打开的是空白区“添加节点”菜单，而不是节点右键菜单，说明 Leafer 命中层和 DOM 节点视觉位置可能不一致。
+
+完整截图和逐节点操作矩阵见[节点 UI、操作状态与交互动效证据册](2026-08-11-node-ui-motion-evidence.md)。
 
 ## 8. FlowCanvas 的优先级差距清单
 
