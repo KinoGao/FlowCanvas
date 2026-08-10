@@ -39,8 +39,8 @@
 
 ## 研究与设计规格
 
-- [节点 UI、操作状态与交互动效证据册](superpowers/specs/2026-08-11-node-ui-motion-evidence.md)
-- [LibTV、TapNow 与小云雀无限画布交互调研](superpowers/specs/2026-08-11-libtv-tapnow-xiaoyunque-interaction-research.md)
+- [LibTV、TapNow 与小云雀无限画布公开材料调研](superpowers/specs/2026-08-11-libtv-tapnow-xiaoyunque-interaction-research.md)
+- [FlowCanvas 内部节点 UI / 交互动效自测证据](superpowers/specs/2026-08-11-node-ui-motion-evidence.md)
 - [LibTV 与 TapNow 视觉交互调研](superpowers/specs/2026-08-09-libtv-tapnow-visual-interaction.md)
 - [TapNow 画布交互对齐设计](superpowers/specs/2026-08-06-tapnow-canvas-interaction-parity.md)
 
