@@ -37,6 +37,12 @@
 - [待测试](/docs/progress/pending-test)
 - [TODO](/docs/progress/todo)
 
+## 研究与设计规格
+
+- [LibTV、TapNow 与小云雀无限画布交互调研](superpowers/specs/2026-08-11-libtv-tapnow-xiaoyunque-interaction-research.md)
+- [LibTV 与 TapNow 视觉交互调研](superpowers/specs/2026-08-09-libtv-tapnow-visual-interaction.md)
+- [TapNow 画布交互对齐设计](superpowers/specs/2026-08-06-tapnow-canvas-interaction-parity.md)
+
 ## 说明
 
 - 当前画布项目、“我的素材”和生成记录保存在后端账号工作区（单机 / 自托管 SQLite）。
