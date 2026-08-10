@@ -3,6 +3,19 @@ title: 待测试
 description: 当前版本已实现但仍需人工验证的变更项
 ---
 
+## 画布 Agent 能力重写（全能力操作层）
+
+- Agent 操作层（ops）从 8 种扩展到 22 种，在线 Agent（网站模式）新增 14 个工具、本地 MCP Agent（本机模式）新增 13 个工具，两个 Agent 共用同一执行层：
+  - 生成与重跑：`canvas_retry_node`（沿用上次参数重跑）、`canvas_execute_group`（整组拓扑重跑）；
+  - 图像：`canvas_image_edit`（多角度/扩图/打光/抠图/720° 全景）、`canvas_image_quick_command`（镜头聚焦/焦点编辑/电影级光影/角色三视图/画面推演）、`canvas_image_process`（本地裁剪/宫格切分/高清放大，不耗模型）；
+  - 视频：`canvas_video_analyze`（抽帧拆分镜表）、`canvas_video_trim`（出入点剪辑）、`canvas_video_compose`（多片段拼接合成，可指定片段出入点）；
+  - 组织复用：`canvas_group_nodes` / `canvas_ungroup_nodes`、`canvas_save_template` / `canvas_insert_template` / `canvas_list_templates`（仅在线）、`canvas_grid_storyboard`（脚本节点拆四宫格/九宫格/25 宫格分镜）。
+- Agent 可读上下文扩充：画布快照的节点 metadata 从 6 个键扩到 20 个（count/seconds/quality/vquality/generateAudio/audioVoice/风格预设/运镜预设/主体/canvasTool/errorDetails/批次关系等），Agent 现在"看得见也改得动"生成参数。
+- `update_node` 带 size/generationMode 时改走配置补丁通道，节点尺寸随画幅比例自动联动（与 Composer 手动修改一致）。
+- Agent 撤销从单级快照改为多级栈（上限 20 层），在线面板输入框左侧新增撤销按钮（此前只有本机模式有）。
+- 在线 Agent tool 循环上限 4 → 8 步；系统提示词按能力域重写；修复 `canvas_apply_ops` 解析丢失 `delete_node.nodeType` 的问题。
+- 需要确认：让 Agent 依次执行「重跑这个节点」「给这张图打光/抠图/扩图」「拆成九宫格分镜」「整组执行」「保存为模板再插入」「把这两个视频拼起来」「剪辑这个视频 2 到 5 秒」均能落地为真实画布操作；撤销按钮可逐级回滚 Agent 操作；本机模式（Codex MCP）同样能调用新工具；确认模式（工具确认开关）下新工具仍会先出确认卡片。
+
 ## 画布物理交互与快捷键闭环（LibTV × TapNow × 小云雀调研落地）
 
 依据调研文档 `docs/superpowers/specs/2026-08-11-libtv-tapnow-xiaoyunque-interaction-research.md` 落地：

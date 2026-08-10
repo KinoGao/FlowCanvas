@@ -50,24 +50,25 @@ import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasMiniMap } from "../components/canvas-minimap";
 import { centerViewportOnRect, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
 import { useCanvasStore } from "../stores/use-canvas-store";
-import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGroupExecutionPlan, collectGroupMemberIds, isGroupExecutableNode } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
-import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
-import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
+import { canvasSelectionCenter, cloneCanvasSelection, CANVAS_SLASH_COMMANDS, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
+import { buildImageQuickCommandPrompt, CANVAS_IMAGE_QUICK_COMMANDS, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import { resolveVideoSubject, videoSubjectReferenceImages } from "../utils/canvas-video-subjects";
 import {
     buildVideoStoryboardBody,
     buildVideoStoryboardPrompt,
     captureVideoFrames,
+    normalizeVideoTrimRange,
     parseVideoStoryboardResponse,
     trimVideoSegment,
     type VideoTrimRange,
 } from "../utils/canvas-video-tools";
-import { composeVideoTimeline, type TimelineClip } from "../utils/canvas-video-timeline";
+import { composeVideoTimeline, createTimelineClip, withClipDuration, type TimelineClip } from "../utils/canvas-video-timeline";
 import type { CompositionSource } from "../components/canvas-video-composition-dialog";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
@@ -707,6 +708,8 @@ function LeaferCanvasPage() {
         return p?.title || "";
     });
     const [workflowTemplates, setWorkflowTemplates] = useState<CanvasWorkflowTemplate[]>([]);
+    const workflowTemplatesRef = useRef(workflowTemplates);
+    workflowTemplatesRef.current = workflowTemplates;
     const [workflowTemplatesLoading, setWorkflowTemplatesLoading] = useState(false);
     useEffect(() => {
         if (!backendWorkspaceReady || !token) return;
@@ -805,7 +808,7 @@ function LeaferCanvasPage() {
     const [saveState, setSaveState] = useState<CanvasSaveState>("saved");
     const [showRecoveryNotice, setShowRecoveryNotice] = useState(false);
     const [agentMode, setAgentMode] = useState<CanvasAgentMode>("online");
-    const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
+    const [agentUndoStack, setAgentUndoStack] = useState<CanvasAgentSnapshot[]>([]);
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
     const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -832,6 +835,8 @@ function LeaferCanvasPage() {
     const lastCanvasPositionRef = useRef<Position | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const retryNodeRef = useRef<((node: CanvasNodeData) => void) | null>(null);
+    /** Agent 副作用 op 分发器：在所有画布 handler 定义完之后赋值（见 handleExecuteGroup 之后）。 */
+    const agentOpsDispatcherRef = useRef<(sideEffectOps: CanvasAgentOp[], configPatchOps: Extract<CanvasAgentOp, { type: "update_node" }>[]) => void>(() => undefined);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1652,10 +1657,16 @@ function LeaferCanvasPage() {
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
             const before = { projectId, title: projectTitle || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
-            const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
+            // 带 size / generationMode 的 update_node 走配置补丁通道，获得节点尺寸联动副作用
+            const configPatchOps = safeOps.filter(
+                (op): op is Extract<CanvasAgentOp, { type: "update_node" }> => op.type === "update_node" && Boolean(op.metadata && ("size" in op.metadata || "generationMode" in op.metadata)),
+            );
+            const configPatchSet = new Set<CanvasAgentOp>(configPatchOps);
+            const sideEffectOps = safeOps.filter((op) => CANVAS_AGENT_SIDE_EFFECT_OP_TYPES.has(op.type));
+            const pureOps = safeOps.filter((op) => !CANVAS_AGENT_SIDE_EFFECT_OP_TYPES.has(op.type) && !configPatchSet.has(op));
             const next = applyCanvasAgentOps(
                 before,
-                safeOps.filter((op) => op.type !== "run_generation"),
+                pureOps,
                 {
                     createNode: (op, index) => {
                         const type = op.nodeType === CanvasNodeType.Config ? CanvasNodeType.ComfyUI : op.nodeType || CanvasNodeType.Text;
@@ -1678,41 +1689,36 @@ function LeaferCanvasPage() {
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
             viewportRef.current = next.viewport;
-            setAgentUndoSnapshot(before);
+            setAgentUndoStack((prev) => [...prev.slice(-19), before]);
             setNodes(next.nodes);
             setConnections(next.connections);
             setSelectedNodeIds(new Set(next.selectedNodeIds));
             setSelectedConnectionId(null);
             setViewport(next.viewport);
             setContextMenu(null);
-            if (generationOps.length) {
-                queueMicrotask(() =>
-                    generationOps.forEach((op) => {
-                        const target = nodesRef.current.find((node) => node.id === op.nodeId);
-                        const prompt = op.prompt?.trim() ? op.prompt : (target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
-                        void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || defaultGenerationMode(target?.type), prompt);
-                    }),
-                );
+            if (sideEffectOps.length || configPatchOps.length) {
+                queueMicrotask(() => agentOpsDispatcherRef.current(sideEffectOps, configPatchOps));
             }
             return { ...next, projectId, title: projectTitle || "未命名画布" };
         },
         [createCanvasConnection, createCanvasNode, projectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
-        if (!agentUndoSnapshot) return null;
-        nodesRef.current = agentUndoSnapshot.nodes;
-        connectionsRef.current = agentUndoSnapshot.connections;
-        selectedNodeIdsRef.current = new Set(agentUndoSnapshot.selectedNodeIds);
-        viewportRef.current = agentUndoSnapshot.viewport;
-        setNodes(agentUndoSnapshot.nodes);
-        setConnections(agentUndoSnapshot.connections);
-        setSelectedNodeIds(new Set(agentUndoSnapshot.selectedNodeIds));
+        const snapshot = agentUndoStack[agentUndoStack.length - 1];
+        if (!snapshot) return null;
+        nodesRef.current = snapshot.nodes;
+        connectionsRef.current = snapshot.connections;
+        selectedNodeIdsRef.current = new Set(snapshot.selectedNodeIds);
+        viewportRef.current = snapshot.viewport;
+        setNodes(snapshot.nodes);
+        setConnections(snapshot.connections);
+        setSelectedNodeIds(new Set(snapshot.selectedNodeIds));
         setSelectedConnectionId(null);
-        setViewport(agentUndoSnapshot.viewport);
+        setViewport(snapshot.viewport);
         setContextMenu(null);
-        setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: projectTitle || "未命名画布" };
-    }, [agentUndoSnapshot, projectTitle, projectId]);
+        setAgentUndoStack((prev) => prev.slice(0, -1));
+        return { ...snapshot, projectId, title: projectTitle || "未命名画布" };
+    }, [agentUndoStack, projectTitle, projectId]);
     const createNode = useCallback(
         (
             type: CanvasNodeType,
@@ -3058,13 +3064,8 @@ function LeaferCanvasPage() {
         [message],
     );
 
-    const confirmVideoTrim = useCallback(
-        async (range: VideoTrimRange) => {
-            const node = trimVideoNode;
-            const src = trimVideoSrc;
-            setTrimVideoNodeId(null);
-            setTrimVideoSrc("");
-            if (!node || !src) return;
+    const exportVideoTrimSegment = useCallback(
+        async (node: CanvasNodeData, src: string, range: VideoTrimRange) => {
             const hide = message.loading("正在导出剪辑片段，耗时与片段时长相当...", 0);
             try {
                 const blob = await trimVideoSegment(src, range);
@@ -3093,7 +3094,19 @@ function LeaferCanvasPage() {
                 hide();
             }
         },
-        [createCanvasConnection, createCanvasNode, message, trimVideoNode, trimVideoSrc],
+        [createCanvasConnection, createCanvasNode, message],
+    );
+
+    const confirmVideoTrim = useCallback(
+        async (range: VideoTrimRange) => {
+            const node = trimVideoNode;
+            const src = trimVideoSrc;
+            setTrimVideoNodeId(null);
+            setTrimVideoSrc("");
+            if (!node || !src) return;
+            await exportVideoTrimSegment(node, src, range);
+        },
+        [exportVideoTrimSegment, trimVideoNode, trimVideoSrc],
     );
 
     const openCompositionTimeline = useCallback(
@@ -3122,11 +3135,8 @@ function LeaferCanvasPage() {
         [canvasGraph, message],
     );
 
-    const handleCompositionExport = useCallback(
-        async (videoClips: TimelineClip[], audioClips: TimelineClip[]) => {
-            const node = compositionNode;
-            setCompositionNodeId(null);
-            if (!node) return;
+    const exportComposition = useCallback(
+        async (node: CanvasNodeData, videoClips: TimelineClip[], audioClips: TimelineClip[]) => {
             const hide = message.loading("正在合成导出视频，耗时与时间轴总时长相当...", 0);
             try {
                 const blob = await composeVideoTimeline(videoClips, audioClips);
@@ -3155,7 +3165,80 @@ function LeaferCanvasPage() {
                 hide();
             }
         },
-        [compositionNode, createCanvasConnection, createCanvasNode, message],
+        [createCanvasConnection, createCanvasNode, message],
+    );
+
+    const handleCompositionExport = useCallback(
+        async (videoClips: TimelineClip[], audioClips: TimelineClip[]) => {
+            const node = compositionNode;
+            setCompositionNodeId(null);
+            if (!node) return;
+            await exportComposition(node, videoClips, audioClips);
+        },
+        [compositionNode, exportComposition],
+    );
+
+    /** Agent 视频剪辑：给定节点 + 出入点，解析内容后走共享导出核心。 */
+    const agentTrimVideo = useCallback(
+        async (node: CanvasNodeData, start: number, end: number) => {
+            const src = await resolveNodeContent(node);
+            if (!src) {
+                message.warning("无法读取视频内容");
+                return;
+            }
+            const duration = await probeMediaDuration(src, "video");
+            const range = normalizeVideoTrimRange(start, end, duration || end);
+            if (!range) {
+                message.warning("剪辑区间无效");
+                return;
+            }
+            await exportVideoTrimSegment(node, src, range);
+        },
+        [exportVideoTrimSegment, message],
+    );
+
+    /** Agent 视频合成：按连线顺序收集上游视频/音频，探测时长后构造片段（可指定出入点）并导出。 */
+    const agentComposeVideo = useCallback(
+        async (node: CanvasNodeData, clipSpecs?: { nodeId: string; start?: number; end?: number }[]) => {
+            const incoming = canvasGraph.incomingByNodeId.get(node.id) || [];
+            const resolved = await Promise.all(
+                incoming.map(async (connection) => {
+                    const source = canvasGraph.nodeById.get(connection.fromNodeId);
+                    if (!source || (source.type !== CanvasNodeType.Video && source.type !== CanvasNodeType.Audio)) return null;
+                    if (!source.metadata?.content && !source.metadata?.storageKey) return null;
+                    const src = await resolveNodeContent(source);
+                    if (!src) return null;
+                    const kind = source.type === CanvasNodeType.Video ? ("video" as const) : ("audio" as const);
+                    return { id: source.id, kind, title: source.title || (kind === "video" ? "视频片段" : "音频片段"), src };
+                }),
+            );
+            let sources = resolved.filter((item): item is CompositionSource => Boolean(item));
+            if (clipSpecs?.length) sources = sources.filter((source) => clipSpecs.some((spec) => spec.nodeId === source.id));
+            const videoCount = sources.filter((source) => source.kind === "video").length;
+            if (!videoCount || (videoCount < 2 && !sources.some((source) => source.kind === "audio"))) {
+                message.warning("请先连接至少两个视频节点，或视频加音频节点");
+                return;
+            }
+            const clips = await Promise.all(
+                sources.map(async (source) => {
+                    const duration = await probeMediaDuration(source.src, source.kind);
+                    let clip = withClipDuration(createTimelineClip(source), duration);
+                    const spec = clipSpecs?.find((item) => item.nodeId === source.id);
+                    if (spec && duration) {
+                        const range = normalizeVideoTrimRange(spec.start ?? 0, spec.end ?? duration, duration);
+                        if (range) clip = { ...clip, inPoint: range.start, outPoint: range.end };
+                    }
+                    return clip;
+                }),
+            );
+            const valid = clips.filter((clip) => clip.duration);
+            await exportComposition(
+                node,
+                valid.filter((clip) => clip.kind === "video"),
+                valid.filter((clip) => clip.kind === "audio"),
+            );
+        },
+        [canvasGraph, exportComposition, message],
     );
 
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -5009,6 +5092,99 @@ function LeaferCanvasPage() {
         },
         [handleRetryNode, message],
     );
+
+    // Agent 副作用 op 分发器：所有被引用的 handler 都已定义完毕，赋值给 ref 供 applyAgentOps 使用。
+    agentOpsDispatcherRef.current = (sideEffectOps, configPatchOps) => {
+        configPatchOps.forEach((op) => {
+            if (op.metadata) handleConfigNodeChange(op.id, op.metadata);
+        });
+        sideEffectOps.forEach((op) => {
+            const nodeById = (id?: string) => (id ? nodesRef.current.find((node) => node.id === id) : undefined);
+            switch (op.type) {
+                case "run_generation": {
+                    const target = nodeById(op.nodeId);
+                    const prompt = op.prompt?.trim() ? op.prompt : (target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                    void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || defaultGenerationMode(target?.type), prompt);
+                    break;
+                }
+                case "retry_node": {
+                    const target = nodeById(op.id);
+                    if (target) void handleRetryNode(target);
+                    break;
+                }
+                case "execute_group": {
+                    const target = nodeById(op.id);
+                    if (target) void handleExecuteGroup(target);
+                    break;
+                }
+                case "group_nodes": {
+                    selectedNodeIdsRef.current = new Set(op.ids);
+                    setSelectedNodeIds(new Set(op.ids));
+                    createGroupFromSelection(op.variant || "normal");
+                    break;
+                }
+                case "ungroup_nodes":
+                    ungroupNodes(op.ids);
+                    break;
+                case "image_edit": {
+                    const target = nodeById(op.id);
+                    if (!target) break;
+                    if (op.action === "angle") void generateAngleNode(target, { horizontalAngle: 30, pitchAngle: 9, cameraDistance: 4.8, wideAngle: false, ...(op.params || {}) } as CanvasImageAngleParams);
+                    else if (op.action === "outpaint") void generateOutpaintNode(target, typeof op.params?.ratioId === "string" ? op.params.ratioId : "16:9");
+                    else if (op.action === "lighting") void generateLightingNode(target, (op.params || {}) as CanvasLightingSettings);
+                    else if (op.action === "cutout") void generateCutoutNode(target);
+                    else if (op.action === "panorama720") void generatePanorama720Node(target);
+                    break;
+                }
+                case "image_quick_command": {
+                    const target = nodeById(op.id);
+                    const command = CANVAS_IMAGE_QUICK_COMMANDS.find((item) => item.id === op.commandId);
+                    if (target && command) void generateImageQuickCommandNode(target, command);
+                    break;
+                }
+                case "image_process": {
+                    const target = nodeById(op.id);
+                    if (!target) break;
+                    if (op.action === "crop" && op.params) void cropImageNode(target, op.params as unknown as CanvasImageCropRect);
+                    else if (op.action === "split") void splitImageNode(target, { rows: 2, columns: 2, ...(op.params || {}) } as CanvasImageSplitParams);
+                    else if (op.action === "upscale") void upscaleImageNode(target, { targetLongEdge: 2048, algorithm: "high", ...(op.params || {}) } as CanvasImageUpscaleParams);
+                    break;
+                }
+                case "grid_storyboard": {
+                    const target = nodeById(op.id);
+                    const command = CANVAS_SLASH_COMMANDS.find((item) => item.id === op.commandId);
+                    if (target && command) createScriptGridStoryboard(target, command);
+                    break;
+                }
+                case "video_analyze": {
+                    const target = nodeById(op.id);
+                    if (target) void analyzeVideoNode(target);
+                    break;
+                }
+                case "video_trim": {
+                    const target = nodeById(op.id);
+                    if (target) void agentTrimVideo(target, op.start, op.end);
+                    break;
+                }
+                case "video_compose": {
+                    const target = nodeById(op.id);
+                    if (target) void agentComposeVideo(target, op.clips);
+                    break;
+                }
+                case "save_template": {
+                    selectedNodeIdsRef.current = new Set(op.ids);
+                    setSelectedNodeIds(new Set(op.ids));
+                    void saveSelectionAsTemplate(op.name);
+                    break;
+                }
+                case "insert_template": {
+                    const template = workflowTemplatesRef.current.find((item) => item.id === op.templateId) || (op.name ? workflowTemplatesRef.current.find((item) => item.name === op.name) : undefined);
+                    if (template) insertWorkflowTemplate(template);
+                    break;
+                }
+            }
+        });
+    };
     const handleViewNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
     const insertPanoramaSnapshot = useCallback(
         async (sourceNode: CanvasNodeData, dataUrl: string) => {
@@ -5895,12 +6071,13 @@ function LeaferCanvasPage() {
                     onSelectNodeIds={setSelectedNodeIds}
                     onSessionsChange={handleAssistantSessionsChange}
                     onApplyOps={applyAgentOps}
-                    canUndoOps={Boolean(agentUndoSnapshot)}
+                    canUndoOps={agentUndoStack.length > 0}
                     onUndoOps={undoAgentOps}
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
                     promptRequest={agentPromptRequest}
+                    workflowTemplates={workflowTemplates}
                     closing={assistantClosing}
                     onCollapse={closeAgent}
                 />
@@ -6799,6 +6976,17 @@ async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
         }),
     );
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
+}
+
+/** 探测媒体时长（秒），失败返回 0。供 Agent 合成/剪辑构造时间轴片段使用。 */
+function probeMediaDuration(src: string, kind: "video" | "audio") {
+    return new Promise<number>((resolve) => {
+        const element = document.createElement(kind);
+        element.preload = "metadata";
+        element.onloadedmetadata = () => resolve(Number.isFinite(element.duration) ? element.duration : 0);
+        element.onerror = () => resolve(0);
+        element.src = src;
+    });
 }
 
 /** Resolve a node's media content URL from storageKey if needed.

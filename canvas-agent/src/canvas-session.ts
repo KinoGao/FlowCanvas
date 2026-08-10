@@ -134,6 +134,11 @@ export class CanvasSession {
             input = { ops: [runGenerationOp(data.nodeId, generationMode(data.mode), data.prompt)] };
             tool = "canvas_apply_ops";
         }
+        const passthroughOpType = (passthroughOpTypes as Record<string, string>)[tool];
+        if (passthroughOpType) {
+            input = { ops: [{ type: passthroughOpType, ...(input as Record<string, unknown>) }] };
+            tool = "canvas_apply_ops";
+        }
         if (tool !== "canvas_apply_ops") throw new Error(`未知工具：${tool}`);
         if (!this.clients.size) throw new Error("当前没有已连接画布");
         return await this.requestCanvasTool(tool, input);
@@ -157,6 +162,23 @@ export class CanvasSession {
 function sendEvent(res: ServerResponse, type: string, payload: unknown) {
     res.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
+
+// 输入字段与 op 字段一一对应的工具，直接透传编译为同名 op。
+const passthroughOpTypes = {
+    canvas_retry_node: "retry_node",
+    canvas_execute_group: "execute_group",
+    canvas_group_nodes: "group_nodes",
+    canvas_ungroup_nodes: "ungroup_nodes",
+    canvas_image_edit: "image_edit",
+    canvas_image_quick_command: "image_quick_command",
+    canvas_image_process: "image_process",
+    canvas_grid_storyboard: "grid_storyboard",
+    canvas_video_analyze: "video_analyze",
+    canvas_video_trim: "video_trim",
+    canvas_video_compose: "video_compose",
+    canvas_save_template: "save_template",
+    canvas_insert_template: "insert_template",
+} as const;
 
 function textNodeOp(input: { id?: string; text?: string; title?: string; width?: number; height?: number }, x: number, y: number) {
     return { type: "add_node", id: input.id, nodeType: "text", title: input.title, position: { x, y }, width: input.width, height: input.height, metadata: { content: input.text || "", status: "success", fontSize: 14 } };

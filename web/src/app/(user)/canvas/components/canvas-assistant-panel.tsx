@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Bot, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
+import { Bot, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Trash2, Undo2, Video, X } from "lucide-react";
 import { Button, Modal, Segmented, Select, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 
@@ -23,14 +23,25 @@ import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
-import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
+import { summarizeCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildCanvasResourceReferences } from "../utils/canvas-resource-references";
+import type { CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
-const ONLINE_AGENT_MAX_STEPS = 4;
-const ONLINE_AGENT_PROMPT =
-    "你是 Infinite Canvas 网页内置在线画布助手。当前画布 JSON 会随用户消息提供。首轮必须调用工具：只读问题调用 canvas_get_state，需要改动画布时调用和本地 Agent 一致的 infinite-canvas 工具。需要生成内容时直接调用 canvas_generate_text、canvas_generate_image、canvas_generate_video、canvas_generate_audio 或 canvas_create_generation_flow；需要精确批量操作时调用 canvas_apply_ops。不要输出 JSON ops，不要编造执行结果。工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择或说明，不要猜测。工具返回结果后，再根据真实结果回答用户。";
+const ONLINE_AGENT_MAX_STEPS = 8;
+const ONLINE_AGENT_PROMPT = [
+    "你是 Infinite Canvas 网页内置在线画布助手，可以直接操作当前画布。当前画布 JSON 会随用户消息提供（含每个节点的生成参数）。",
+    "首轮必须调用工具：只读问题用 canvas_get_state / canvas_get_selection；改动画布时调用对应工具。",
+    "能力域：",
+    "- 创建：canvas_create_node / canvas_create_text_node(s) / canvas_create_image_prompt_flow / canvas_create_generation_flow；",
+    "- 生成与重跑：canvas_generate_text/image/video/audio（新建流程并立即生成）、canvas_run_generation（按给定提示词跑已有节点）、canvas_retry_node（沿用上次参数重跑）、canvas_execute_group（整组拓扑重跑）；",
+    "- 修改：canvas_update_node（含 model/size/count/quality/seconds 等 metadata 参数）、canvas_update_node_text、canvas_move_nodes、canvas_resize_node、canvas_delete_nodes、canvas_connect_nodes、canvas_select_nodes、canvas_set_viewport、canvas_apply_ops（精确批量）；",
+    "- 图像工具：canvas_image_edit（多角度/扩图/打光/抠图/720 全景）、canvas_image_quick_command（镜头聚焦/焦点编辑/电影级光影/角色三视图/画面推演）、canvas_image_process（本地裁剪/宫格切分/高清放大，不耗模型）；",
+    "- 视频工具：canvas_video_analyze（拆分镜表）、canvas_video_trim（剪辑出入点）、canvas_video_compose（拼接合成）；",
+    "- 组织与复用：canvas_group_nodes / canvas_ungroup_nodes、canvas_save_template / canvas_insert_template / canvas_list_templates、canvas_grid_storyboard（脚本节点拆宫格分镜）。",
+    "规则：不要输出 JSON ops，不要编造执行结果；工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择，不要猜测；高成本操作（批量生成、整组执行、合成导出）前先简要说明将要执行的动作；工具返回结果后，再根据真实结果回答用户。",
+].join("\n");
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
@@ -76,7 +87,7 @@ const CANVAS_OP_SCHEMA = {
     required: ["type"],
     additionalProperties: false,
 };
-const ONLINE_READ_TOOLS = new Set(["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"]);
+const ONLINE_READ_TOOLS = new Set(["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot", "canvas_list_templates"]);
 
 function toolDefinition(name: string, description: string, properties: Record<string, unknown>, required: string[] = [], strict = false): ResponseFunctionTool {
     return { type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false }, strict } };
@@ -106,7 +117,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     toolDefinition("canvas_export_snapshot", "导出当前画布快照，用于理解布局。", {}),
     toolDefinition(
         "canvas_apply_ops",
-        "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
+        "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation、retry_node、execute_group、group_nodes、ungroup_nodes、image_edit、image_quick_command、image_process、grid_storyboard、video_analyze、video_trim、video_compose、save_template、insert_template。",
         { ops: { type: "array", items: CANVAS_OP_SCHEMA } },
         ["ops"],
         false,
@@ -175,6 +186,50 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     toolDefinition("canvas_select_nodes", "设置当前选中节点。", { ids: { type: "array", items: { type: "string" } } }, ["ids"]),
     toolDefinition("canvas_set_viewport", "调整画布视口。", { viewport: VIEWPORT_SCHEMA }, ["viewport"]),
     toolDefinition("canvas_run_generation", "触发指定节点生成，通常用于配置节点或文本/图片/视频/音频节点。", { nodeId: { type: "string" }, mode: GENERATION_MODE_SCHEMA, prompt: { type: "string" } }, ["nodeId"]),
+    toolDefinition("canvas_list_templates", "列出账号下的工作流模板（id、名称、节点数、连线数）。", {}),
+    toolDefinition("canvas_retry_node", "沿用上次参数重跑指定生成节点（重试 / 重新生成）。", { id: { type: "string" } }, ["id"]),
+    toolDefinition("canvas_execute_group", "整组执行：传入组内任意节点 id，按连线拓扑序重跑其所在打组或连通分组的全部生成节点。", { id: { type: "string" } }, ["id"]),
+    toolDefinition(
+        "canvas_group_nodes",
+        "把指定节点打组；variant 为 storyboard 时合并为分镜组。",
+        { ids: { type: "array", items: { type: "string" }, minItems: 2 }, variant: { type: "string", enum: ["normal", "storyboard"] } },
+        ["ids"],
+    ),
+    toolDefinition("canvas_ungroup_nodes", "解散指定分组节点。", { ids: { type: "array", items: { type: "string" }, minItems: 1 } }, ["ids"]),
+    toolDefinition(
+        "canvas_image_edit",
+        "以图片节点当前图为参考做 AI 图像编辑，生成新子节点并自动连线。action：angle 多角度（params 可带 horizontalAngle/pitchAngle/cameraDistance/wideAngle）、outpaint 扩图（params.ratioId 如 16:9、9:16、4:3）、lighting 打光（params.direction/color/intensity）、cutout 抠图、panorama720 720° 全景。",
+        { id: { type: "string" }, action: { type: "string", enum: ["angle", "outpaint", "lighting", "cutout", "panorama720"] }, params: JSON_RECORD_SCHEMA },
+        ["id", "action"],
+    ),
+    toolDefinition(
+        "canvas_image_quick_command",
+        "对图片节点执行快捷功能，生成新子节点。commandId：lens-focus 镜头聚焦、focus-edit 焦点编辑、cinematic-lighting 电影级光影矫正、character-turnaround 角色三视图、extrapolate-forward 画面推演 3 秒后、extrapolate-backward 画面推演 5 秒前。",
+        { id: { type: "string" }, commandId: { type: "string", enum: ["lens-focus", "focus-edit", "cinematic-lighting", "character-turnaround", "extrapolate-forward", "extrapolate-backward"] } },
+        ["id", "commandId"],
+    ),
+    toolDefinition(
+        "canvas_image_process",
+        "本地图像处理（不调用模型）：crop 裁剪（params: {x, y, width, height}，像素）、split 宫格切分（params: {rows, columns}）、upscale 高清放大（params.targetLongEdge 取 1024/2048/4096）。",
+        { id: { type: "string" }, action: { type: "string", enum: ["crop", "split", "upscale"] }, params: JSON_RECORD_SCHEMA },
+        ["id", "action"],
+    ),
+    toolDefinition(
+        "canvas_grid_storyboard",
+        "把脚本节点拆成宫格连贯分镜：four-grid 2×2、nine-grid 3×3、twentyfive-grid 5×5，生成占位图节点并自动连线。",
+        { id: { type: "string" }, commandId: { type: "string", enum: ["four-grid", "nine-grid", "twentyfive-grid"] } },
+        ["id", "commandId"],
+    ),
+    toolDefinition("canvas_video_analyze", "抽帧并调用识图模型，把视频节点解析为分镜表脚本节点（自动连线）。", { id: { type: "string" } }, ["id"]),
+    toolDefinition("canvas_video_trim", "剪辑视频节点：按 start/end（秒）导出片段为新视频节点。", { id: { type: "string" }, start: { type: "number" }, end: { type: "number" } }, ["id", "start", "end"]),
+    toolDefinition(
+        "canvas_video_compose",
+        "把连入视频合成节点的视频/音频按连线顺序拼接导出为新视频节点；clips 可选，用于指定参与片段及出入点（秒）。",
+        { id: { type: "string" }, clips: { type: "array", items: { type: "object", properties: { nodeId: { type: "string" }, start: { type: "number" }, end: { type: "number" } }, required: ["nodeId"], additionalProperties: false } } },
+        ["id"],
+    ),
+    toolDefinition("canvas_save_template", "把指定节点组保存为工作流模板（账号级，跨画布可复用）。", { ids: { type: "array", items: { type: "string" }, minItems: 1 }, name: { type: "string" } }, ["ids", "name"]),
+    toolDefinition("canvas_insert_template", "把工作流模板插入画布（自动避开现有节点）；先用 canvas_list_templates 查询可用模板。", { templateId: { type: "string" }, name: { type: "string" } }),
 ];
 type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
@@ -200,6 +255,8 @@ type CanvasAssistantPanelProps = {
     onAgentModeChange: (mode: CanvasAgentMode) => void;
     /** 外部入口（如空画布「输入灵感」）注入的待发送消息，nonce 变化时发送一次。 */
     promptRequest?: { text: string; nonce: number } | null;
+    /** 账号级工作流模板列表，供 canvas_list_templates 只读查询。 */
+    workflowTemplates: CanvasWorkflowTemplate[];
     closing: boolean;
     onCollapse: () => void;
 };
@@ -219,6 +276,7 @@ export function CanvasAssistantPanel({
     agentMode,
     onAgentModeChange,
     promptRequest,
+    workflowTemplates,
     closing,
     onCollapse,
 }: CanvasAssistantPanelProps) {
@@ -462,10 +520,11 @@ export function CanvasAssistantPanel({
         const before = snapshotSignature(beforeSnapshot);
         const next = onApplyOps(ops);
         snapshotRef.current = next;
-        const ranGeneration = ops.some((op) => op.type === "run_generation" && Boolean(op.nodeId));
-        const changed = before !== snapshotSignature(next) || ranGeneration;
+        // 副作用 op（生成/重跑/工具类）的结果异步落地，签名比对看不出来，恒算 changed
+        const hasSideEffect = ops.some((op) => CANVAS_AGENT_SIDE_EFFECT_OP_TYPES.has(op.type));
+        const changed = before !== snapshotSignature(next) || hasSideEffect;
         const noopReason = changed ? "" : explainNoop(ops, beforeSnapshot);
-        return { changed, ops, ranGeneration, noopReason, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) };
+        return { changed, ops, ranGeneration: hasSideEffect, noopReason, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) };
     };
 
     const executeOnlineTool = (name: string, args: Record<string, unknown>): OnlineToolResult => {
@@ -476,6 +535,10 @@ export function CanvasAssistantPanel({
             if (name === "canvas_get_selection") {
                 const ids = new Set(current.selectedNodeIds || []);
                 return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
+            }
+            if (name === "canvas_list_templates") {
+                const list = workflowTemplates.map((template) => ({ id: template.id, name: template.name, nodes: template.nodes.length, connections: template.connections.length }));
+                return { ok: true, message: list.length ? `共 ${list.length} 个模板。` : "还没有保存过工作流模板。", data: { templates: list } };
             }
             const ops = onlineToolToOps(name, args, current, effectiveConfig);
             const result = executeOps(ops);
@@ -707,6 +770,11 @@ export function CanvasAssistantPanel({
                         onQuickReference={handleQuickReference}
                         left={
                             <>
+                                {canUndoOps ? (
+                                    <Tooltip title="撤销上一次 Agent 操作">
+                                        <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" style={{ color: theme.node.muted }} icon={<Undo2 className="size-4" />} onClick={() => onUndoOps()} aria-label="撤销 Agent 操作" />
+                                    </Tooltip>
+                                ) : null}
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
                             </>
@@ -1132,6 +1200,31 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
     if (name === "canvas_select_nodes") return [{ type: "select_nodes", ids: requireStringArray(input.ids, "ids") }];
     if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
     if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
+    if (name === "canvas_retry_node") return [{ type: "retry_node", id: requireString(input.id, "id") }];
+    if (name === "canvas_execute_group") return [{ type: "execute_group", id: requireString(input.id, "id") }];
+    if (name === "canvas_group_nodes") return [{ type: "group_nodes", ids: requireStringArray(input.ids, "ids"), variant: input.variant === "storyboard" ? "storyboard" : "normal" }];
+    if (name === "canvas_ungroup_nodes") return [{ type: "ungroup_nodes", ids: requireStringArray(input.ids, "ids") }];
+    if (name === "canvas_image_edit")
+        return [{ type: "image_edit", id: requireString(input.id, "id"), action: requireString(input.action, "action") as "angle" | "outpaint" | "lighting" | "cutout" | "panorama720", params: recordOptional(input.params) }];
+    if (name === "canvas_image_quick_command") return [{ type: "image_quick_command", id: requireString(input.id, "id"), commandId: requireString(input.commandId, "commandId") }];
+    if (name === "canvas_image_process")
+        return [{ type: "image_process", id: requireString(input.id, "id"), action: requireString(input.action, "action") as "crop" | "split" | "upscale", params: recordOptional(input.params) }];
+    if (name === "canvas_grid_storyboard")
+        return [{ type: "grid_storyboard", id: requireString(input.id, "id"), commandId: requireString(input.commandId, "commandId") as "four-grid" | "nine-grid" | "twentyfive-grid" }];
+    if (name === "canvas_video_analyze") return [{ type: "video_analyze", id: requireString(input.id, "id") }];
+    if (name === "canvas_video_trim") return [{ type: "video_trim", id: requireString(input.id, "id"), start: requireNumber(input.start, "start"), end: requireNumber(input.end, "end") }];
+    if (name === "canvas_video_compose") {
+        const clips = Array.isArray(input.clips)
+            ? input.clips.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null).map((item) => ({
+                  nodeId: requireString(item.nodeId, "clips.nodeId"),
+                  start: numberOptional(item.start),
+                  end: numberOptional(item.end),
+              }))
+            : undefined;
+        return [{ type: "video_compose", id: requireString(input.id, "id"), clips }];
+    }
+    if (name === "canvas_save_template") return [{ type: "save_template", ids: requireStringArray(input.ids, "ids"), name: requireString(input.name, "name") }];
+    if (name === "canvas_insert_template") return [{ type: "insert_template", templateId: stringOptional(input.templateId), name: stringOptional(input.name) }];
     throw new Error(`不支持的工具：${name}`);
 }
 
@@ -1246,6 +1339,20 @@ function toolCallLabel(name: string) {
     if (name === "canvas_select_nodes") return "选择节点";
     if (name === "canvas_set_viewport") return "调整视口";
     if (name === "canvas_run_generation") return "触发生成";
+    if (name === "canvas_list_templates") return "查询模板";
+    if (name === "canvas_retry_node") return "重跑节点";
+    if (name === "canvas_execute_group") return "整组执行";
+    if (name === "canvas_group_nodes") return "打组";
+    if (name === "canvas_ungroup_nodes") return "解组";
+    if (name === "canvas_image_edit") return "图像编辑";
+    if (name === "canvas_image_quick_command") return "快捷功能";
+    if (name === "canvas_image_process") return "图像处理";
+    if (name === "canvas_grid_storyboard") return "宫格分镜";
+    if (name === "canvas_video_analyze") return "视频解析";
+    if (name === "canvas_video_trim") return "视频剪辑";
+    if (name === "canvas_video_compose") return "视频合成";
+    if (name === "canvas_save_template") return "保存模板";
+    if (name === "canvas_insert_template") return "插入模板";
     return name;
 }
 
@@ -1282,12 +1389,30 @@ function toCanvasAgentOp(value: unknown): CanvasAgentOp {
         };
     }
     if (type === "update_node") return { type, id: requireString(item.id, "id"), patch: recordOptional(item.patch) as Partial<CanvasNodeData> | undefined, metadata: recordOptional(item.metadata) as CanvasNodeData["metadata"] };
-    if (type === "delete_node") return { type, id: stringOptional(item.id), ids: Array.isArray(item.ids) ? requireStringArray(item.ids, "ids") : undefined };
+    if (type === "delete_node") return { type, id: stringOptional(item.id), ids: Array.isArray(item.ids) ? requireStringArray(item.ids, "ids") : undefined, nodeType: item.nodeType ? requireNodeType(item.nodeType) : undefined };
     if (type === "delete_connections") return { type, id: stringOptional(item.id), ids: Array.isArray(item.ids) ? requireStringArray(item.ids, "ids") : undefined, all: typeof item.all === "boolean" ? item.all : undefined };
     if (type === "connect_nodes") return { type, id: stringOptional(item.id), fromNodeId: requireString(item.fromNodeId, "fromNodeId"), toNodeId: requireString(item.toNodeId, "toNodeId") };
     if (type === "set_viewport") return { type, viewport: requireViewport(item.viewport) };
     if (type === "select_nodes") return { type, ids: requireStringArray(item.ids, "ids") };
     if (type === "run_generation") return { type, nodeId: requireString(item.nodeId, "nodeId"), mode: generationMode(item.mode), prompt: stringOptional(item.prompt) };
+    if (type === "retry_node") return { type, id: requireString(item.id, "id") };
+    if (type === "execute_group") return { type, id: requireString(item.id, "id") };
+    if (type === "group_nodes") return { type, ids: requireStringArray(item.ids, "ids"), variant: item.variant === "storyboard" ? "storyboard" : "normal" };
+    if (type === "ungroup_nodes") return { type, ids: requireStringArray(item.ids, "ids") };
+    if (type === "image_edit") return { type, id: requireString(item.id, "id"), action: requireString(item.action, "action") as "angle" | "outpaint" | "lighting" | "cutout" | "panorama720", params: recordOptional(item.params) };
+    if (type === "image_quick_command") return { type, id: requireString(item.id, "id"), commandId: requireString(item.commandId, "commandId") };
+    if (type === "image_process") return { type, id: requireString(item.id, "id"), action: requireString(item.action, "action") as "crop" | "split" | "upscale", params: recordOptional(item.params) };
+    if (type === "grid_storyboard") return { type, id: requireString(item.id, "id"), commandId: requireString(item.commandId, "commandId") as "four-grid" | "nine-grid" | "twentyfive-grid" };
+    if (type === "video_analyze") return { type, id: requireString(item.id, "id") };
+    if (type === "video_trim") return { type, id: requireString(item.id, "id"), start: requireNumber(item.start, "start"), end: requireNumber(item.end, "end") };
+    if (type === "video_compose") {
+        const clips = Array.isArray(item.clips)
+            ? requireRecordArray(item.clips, "clips").map((clip) => ({ nodeId: requireString(clip.nodeId, "clips.nodeId"), start: numberOptional(clip.start), end: numberOptional(clip.end) }))
+            : undefined;
+        return { type, id: requireString(item.id, "id"), clips };
+    }
+    if (type === "save_template") return { type, ids: requireStringArray(item.ids, "ids"), name: requireString(item.name, "name") };
+    if (type === "insert_template") return { type, templateId: stringOptional(item.templateId), name: stringOptional(item.name) };
     throw new Error("不支持的画布操作类型");
 }
 
@@ -1561,9 +1686,23 @@ function compactMetadata(metadata: CanvasNodeData["metadata"]) {
         content: String(metadata?.content || "").slice(0, 500),
         prompt: String(metadata?.prompt || metadata?.composerContent || "").slice(0, 500),
         status: metadata?.status,
+        errorDetails: metadata?.errorDetails,
         generationMode: metadata?.generationMode,
         model: metadata?.model,
         size: metadata?.size,
+        quality: metadata?.quality,
+        count: metadata?.count,
+        seconds: metadata?.seconds,
+        vquality: metadata?.vquality,
+        generateAudio: metadata?.generateAudio,
+        audioVoice: metadata?.audioVoice,
+        imageStylePreset: metadata?.imageStylePreset,
+        videoStylePreset: metadata?.videoStylePreset,
+        videoCameraPreset: metadata?.videoCameraPreset,
+        videoSubjectId: metadata?.videoSubjectId,
+        canvasTool: metadata?.canvasTool,
+        isBatchRoot: metadata?.isBatchRoot,
+        batchRootId: metadata?.batchRootId,
     };
 }
 
