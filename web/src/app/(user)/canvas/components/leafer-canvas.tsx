@@ -204,11 +204,14 @@ export function LeaferCanvas({
         selectStartCanvas: { x: number; y: number };
         selectRect: { x: number; y: number; w: number; h: number } | null;
         selectionMode: 'replace' | 'add' | 'toggle';
+        fromRightButton?: boolean;
     }>({
         type: null, startScreenX: 0, startScreenY: 0,
         startViewportX: 0, startViewportY: 0,
         selectStartCanvas: { x: 0, y: 0 }, selectRect: null, selectionMode: 'replace',
     });
+    // 右键拖拽超过阈值后置位，用于抑制紧随其后的 contextmenu 菜单（画布/节点/连线三条路径）。
+    const suppressContextMenuRef = useRef(false);
 
     const frozenTempEdgeRef = useRef<NonNullable<LeaferCanvasProps["pendingConnection"]>>(null);
     const previousPendingConnectionRef = useRef(pendingConnection ?? null);
@@ -664,9 +667,12 @@ export function LeaferCanvas({
                 },
             },
             wheel: {
-                zoomMode: true,
+                zoomMode: false,
                 preventDefault: true,
+                // TapNow 契约：普通滚轮/触控板双指 = 平移（getScale 返回 1 时 Leafer 走 move 分支），
+                // Ctrl/Cmd + 滚轮或触控板捏合（浏览器上报为 ctrlKey wheel）= 以指针为锚点缩放。
                 getScale: (event) => {
+                    if (!event.ctrlKey && !event.metaKey) return 1;
                     const delta = event.deltaY || event.deltaX;
                     if (!delta) return 1;
                     const current = viewportRef.current.k;
@@ -871,6 +877,10 @@ export function LeaferCanvas({
                     if (wasHovered) callbacksRef.current.onNodeHoverChange?.(null);
                 });
                 rect.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
+                    if (suppressContextMenuRef.current) {
+                        suppressContextMenuRef.current = false;
+                        return;
+                    }
                     const pagePoint = event.getPagePoint();
                     const bounds = containerRef.current?.getBoundingClientRect();
                     if (!bounds) return;
@@ -1101,6 +1111,10 @@ export function LeaferCanvas({
                     updateConnectionVisualStyle(connection.id);
                 });
                 hit.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
+                    if (suppressContextMenuRef.current) {
+                        suppressContextMenuRef.current = false;
+                        return;
+                    }
                     const pagePoint = event.getPagePoint();
                     const bounds = containerRef.current?.getBoundingClientRect();
                     if (!bounds) return;
@@ -1294,6 +1308,24 @@ export function LeaferCanvas({
         const isTextEditableContent = !!target.closest("[data-node-text-editable]");
         const cb = callbacksRef.current;
 
+        // 右键拖拽平移（TapNow/Figma 契约）：任意位置右键按下即进入 pan，
+        // 位移超过 6px 置 suppressContextMenuRef，短按抬起仍正常出菜单。
+        if (event.button === 2) {
+            dragRef.current = {
+                type: "pan",
+                fromRightButton: true,
+                startScreenX: event.clientX, startScreenY: event.clientY,
+                startViewportX: viewportRef.current.x, startViewportY: viewportRef.current.y,
+                selectStartCanvas: getCanvasPos(event.clientX, event.clientY),
+                selectRect: null,
+                selectionMode: "replace",
+            };
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            event.preventDefault();
+            document.body.style.userSelect = "none";
+            return;
+        }
+
         // Leafer owns hit testing, selection, box selection, node transforms and viewport gestures.
         if (target.closest("[data-leafer-editor-layer]")) return;
 
@@ -1388,6 +1420,9 @@ export function LeaferCanvas({
                 drag.startScreenY = event.clientY;
             }
             if (drag.type === "pan") {
+                if (drag.fromRightButton && Math.hypot(event.clientX - drag.startScreenX, event.clientY - drag.startScreenY) > 6) {
+                    suppressContextMenuRef.current = true;
+                }
                 const next = {
                     x: drag.startViewportX + (event.clientX - drag.startScreenX),
                     y: drag.startViewportY + (event.clientY - drag.startScreenY),
@@ -1499,6 +1534,10 @@ export function LeaferCanvas({
 
     const handleContextMenu = useCallback((event: React.MouseEvent) => {
         event.preventDefault();
+        if (suppressContextMenuRef.current) {
+            suppressContextMenuRef.current = false;
+            return;
+        }
         const pos = getCanvasPos(event.clientX, event.clientY);
         callbacksRef.current.onContextMenu?.(event, pos);
     }, [getCanvasPos]);

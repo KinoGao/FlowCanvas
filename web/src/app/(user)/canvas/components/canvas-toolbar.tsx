@@ -407,12 +407,9 @@ function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: 
                 ["成组", "Ctrl/Alt + G"],
                 ["合并分镜组", "Ctrl + Alt + G"],
                 ["解组", "Ctrl/Alt + Shift + G"],
-                ["连线", "Ctrl + L"],
                 ["复制节点和连线", "Ctrl + D"],
                 ["生成", "Ctrl + Enter"],
                 ["新建节点", "Tab"],
-                ["节点复制", "Alt + 拖动节点"],
-                ["创建副本", "Ctrl + Alt + 拖动"],
             ],
         },
         {
@@ -421,17 +418,16 @@ function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: 
                 ["放大", "Ctrl + +"],
                 ["缩小", "Ctrl + -"],
                 ["适应画布", "Ctrl + 0"],
-                ["触控板", "双指缩放"],
+                ["触控板", "捏合缩放"],
                 ["鼠标", "Ctrl + 滚轮"],
             ],
         },
         {
             title: "移动画布",
             items: [
-                ["键盘", "Space"],
-                ["触控板", "双指拖移"],
-                ["鼠标", "中键/空格拖移"],
-                ["整理画布", "Alt + Shift + F"],
+                ["键盘", "Space + 拖动"],
+                ["鼠标", "滚轮 / 中键 / 右键拖拽"],
+                ["触控板", "双指滑动"],
             ],
         },
         {
@@ -440,6 +436,8 @@ function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: 
                 ["撤销", "Ctrl + Z"],
                 ["重做", "Ctrl + Shift + Z"],
                 ["删除", "Delete"],
+                ["搜索节点", "Ctrl + F"],
+                ["创作 Agent", "Ctrl + J"],
             ],
         },
     ];

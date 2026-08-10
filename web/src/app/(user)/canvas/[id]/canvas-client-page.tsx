@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, ArrowUp, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -54,7 +54,7 @@ import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } fro
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
-import { buildGroupExecutionPlan, collectGroupMemberIds } from "../utils/canvas-group-execution";
+import { buildGroupExecutionPlan, collectGroupMemberIds, isGroupExecutableNode } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { canvasSelectionCenter, cloneCanvasSelection, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
@@ -761,6 +761,8 @@ function LeaferCanvasPage() {
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [createMenu, setCreateMenu] = useState<{ x: number; y: number; canvasPosition: Position } | null>(null);
+    const [inspiration, setInspiration] = useState("");
+    const [agentPromptRequest, setAgentPromptRequest] = useState<{ text: string; nonce: number } | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
@@ -829,6 +831,7 @@ function LeaferCanvasPage() {
     alignmentGuidesEnabledRef.current = alignmentGuidesEnabled;
     const lastCanvasPositionRef = useRef<Position | null>(null);
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
+    const retryNodeRef = useRef<((node: CanvasNodeData) => void) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2066,8 +2069,30 @@ function LeaferCanvasPage() {
             if (!template.nodes.length) return;
             const center = getCanvasCenter();
             const templateCenter = canvasSelectionCenter(template.nodes);
-            const dx = center.x - templateCenter.x;
-            const dy = center.y - templateCenter.y;
+            const baseDx = center.x - templateCenter.x;
+            const baseDy = center.y - templateCenter.y;
+            // 插入位置避免与现有节点重叠：先放视口中心，碰撞则向右逐档偏移，再向下换行。
+            const boundsWidth = Math.max(...template.nodes.map((node) => node.position.x + node.width)) - Math.min(...template.nodes.map((node) => node.position.x));
+            const boundsHeight = Math.max(...template.nodes.map((node) => node.position.y + node.height)) - Math.min(...template.nodes.map((node) => node.position.y));
+            const overlaps = (offsetX: number, offsetY: number) =>
+                template.nodes.some((node) => {
+                    const x = node.position.x + offsetX;
+                    const y = node.position.y + offsetY;
+                    return nodesRef.current.some(
+                        (existing) =>
+                            x < existing.position.x + existing.width && x + node.width > existing.position.x && y < existing.position.y + existing.height && y + node.height > existing.position.y,
+                    );
+                });
+            let dx = baseDx;
+            let dy = baseDy;
+            for (let attempt = 0; overlaps(dx, dy) && attempt < 12; attempt += 1) {
+                if (attempt === 6) {
+                    dx = baseDx;
+                    dy = baseDy + boundsHeight + 80;
+                } else {
+                    dx += boundsWidth + 80;
+                }
+            }
             const { nodes: nextNodes, connections: nextConnections } = cloneCanvasSelection(
                 template.nodes,
                 template.connections,
@@ -2394,6 +2419,18 @@ function LeaferCanvasPage() {
         }, CANVAS_AGENT_PANEL_MOTION_MS);
     };
 
+    /** 空画布「输入灵感」：打开在线 Agent 并直接发送，由 Agent 搭建初始创作工作流（小云雀式入口）。 */
+    const submitInspiration = (text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        openAgent("online");
+        setAgentPromptRequest({
+            text: `灵感：${trimmed}\n请基于这句灵感在当前画布搭建初始创作工作流（脚本 / 分镜 / 生成节点等），并简要说明每个节点的用途。`,
+            nonce: Date.now(),
+        });
+        setInspiration("");
+    };
+
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
@@ -2443,6 +2480,49 @@ function LeaferCanvasPage() {
             if (isModifierShortcut && !event.altKey && key === "v") {
                 event.preventDefault();
                 if (!pasteCopiedNodes()) void pasteSystemClipboard();
+                return;
+            }
+
+            // Ctrl/Cmd+D 复制选中节点和连线（副本落到视口中心并选中）
+            if (isModifierShortcut && !event.altKey && key === "d") {
+                event.preventDefault();
+                if (selectedNodeIdsRef.current.size) {
+                    copySelectedNodes();
+                    pasteCopiedNodes();
+                }
+                return;
+            }
+
+            // Ctrl/Cmd+Enter 运行选中的可生成节点（复用节点重试链路）
+            if (isModifierShortcut && !event.altKey && event.key === "Enter") {
+                event.preventDefault();
+                const selected = selectedNodeIdsRef.current;
+                const targets = nodesRef.current.filter(
+                    (node) => selected.has(node.id) && isGroupExecutableNode(node, connectionsRef.current.some((connection) => connection.toNodeId === node.id)),
+                );
+                if (!targets.length) {
+                    message.info("选中的节点没有可执行的生成任务");
+                    return;
+                }
+                targets.forEach((node) => retryNodeRef.current?.(node));
+                return;
+            }
+
+            // Tab 打开统一创建菜单（落在最后画布交互点，无视口交互过则在视口中心）
+            if (event.key === "Tab") {
+                event.preventDefault();
+                const shellRect = canvasShellRef.current?.getBoundingClientRect();
+                const vp = viewportRef.current;
+                const centerClient = {
+                    x: (shellRect?.left ?? 0) + (shellRect?.width ?? window.innerWidth) / 2,
+                    y: (shellRect?.top ?? 0) + (shellRect?.height ?? window.innerHeight) / 2,
+                };
+                const world = lastCanvasPositionRef.current ?? screenToCanvas(centerClient.x, centerClient.y);
+                const client = lastCanvasPositionRef.current && shellRect
+                    ? { x: shellRect.left + world.x * vp.k + vp.x, y: shellRect.top + world.y * vp.k + vp.y }
+                    : centerClient;
+                setContextMenu(null);
+                setCreateMenu({ x: client.x, y: client.y, canvasPosition: world });
                 return;
             }
 
@@ -2531,7 +2611,7 @@ function LeaferCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown, { capture: true });
         return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-    }, [assistantCollapsed, assistantMounted, closeAgent, copySelectedNodes, createGroupFromSelection, deleteConnection, deleteSelectedNodes, openAgent, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
+    }, [assistantCollapsed, assistantMounted, closeAgent, copySelectedNodes, createGroupFromSelection, deleteConnection, deleteSelectedNodes, message, openAgent, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, resetImageTapGesture, resetViewport, screenToCanvas, setConnecting, setZoomScale, undoCanvas, ungroupNodes]);
 
     const handleConnectStart = useCallback(
         (nodeId: string, handleType: "source" | "target") => {
@@ -4877,6 +4957,7 @@ function LeaferCanvasPage() {
     }, []);
 
     const handleRetryNodeAction = useCallback((node: CanvasNodeData) => void handleRetryNode(node), [handleRetryNode]);
+    retryNodeRef.current = handleRetryNodeAction;
 
     /** 整组执行：对打组成员（或与当前节点相连通的整组节点）按连线拓扑序逐层重跑生成节点，同层互不依赖可并发。 */
     const handleExecuteGroup = useCallback(
@@ -5422,6 +5503,33 @@ function LeaferCanvasPage() {
                         <div className="text-[13px] opacity-60" style={{ color: theme.node.muted }}>
                             双击画布自由创作，或从下方快速开始
                         </div>
+                        <form
+                            className="pointer-events-auto flex items-center gap-2 rounded-full border py-1.5 pl-4 pr-1.5"
+                            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                submitInspiration(inspiration);
+                            }}
+                        >
+                            <Sparkles className="size-4 shrink-0" style={{ color: theme.ui.accent }} />
+                            <input
+                                value={inspiration}
+                                onChange={(event) => setInspiration(event.target.value)}
+                                placeholder="输入一句灵感，Agent 帮你搭建工作流"
+                                className="w-64 bg-transparent text-[13px] outline-none placeholder:opacity-45"
+                                style={{ color: theme.node.text }}
+                                aria-label="输入灵感"
+                            />
+                            <button
+                                type="submit"
+                                disabled={!inspiration.trim()}
+                                className="grid size-7 shrink-0 place-items-center rounded-full transition disabled:opacity-40"
+                                style={{ background: theme.ui.accent, color: theme.canvas.background }}
+                                aria-label="发送灵感"
+                            >
+                                <ArrowUp className="size-3.5" />
+                            </button>
+                        </form>
                         <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5">
                             <button
                                 type="button"
@@ -5792,6 +5900,7 @@ function LeaferCanvasPage() {
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
+                    promptRequest={agentPromptRequest}
                     closing={assistantClosing}
                     onCollapse={closeAgent}
                 />

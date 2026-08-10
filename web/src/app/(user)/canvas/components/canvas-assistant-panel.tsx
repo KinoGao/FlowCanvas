@@ -198,6 +198,8 @@ type CanvasAssistantPanelProps = {
     onPasteImage: (file: File) => void;
     agentMode: CanvasAgentMode;
     onAgentModeChange: (mode: CanvasAgentMode) => void;
+    /** 外部入口（如空画布「输入灵感」）注入的待发送消息，nonce 变化时发送一次。 */
+    promptRequest?: { text: string; nonce: number } | null;
     closing: boolean;
     onCollapse: () => void;
 };
@@ -216,6 +218,7 @@ export function CanvasAssistantPanel({
     onPasteImage,
     agentMode,
     onAgentModeChange,
+    promptRequest,
     closing,
     onCollapse,
 }: CanvasAssistantPanelProps) {
@@ -547,6 +550,16 @@ export function CanvasAssistantPanel({
         if (!text || isRunning) return;
         await sendMessage(text, messages);
     };
+
+    // 外部入口（空画布「输入灵感」）注入的消息：填入输入框并直接发送一次。
+    const handledPromptRequestRef = useRef(0);
+    useEffect(() => {
+        if (!promptRequest || promptRequest.nonce === handledPromptRequestRef.current) return;
+        handledPromptRequestRef.current = promptRequest.nonce;
+        setPrompt(promptRequest.text);
+        void sendMessage(promptRequest.text, messages);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [promptRequest]);
 
     const addImagesToCanvas = (files: FileList | File[] | null) => {
         const file = Array.from(files || []).find((item) => item.type.startsWith("image/"));
