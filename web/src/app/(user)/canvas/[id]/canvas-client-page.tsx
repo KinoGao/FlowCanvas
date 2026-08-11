@@ -53,6 +53,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import { resolveComposerOverlayPosition } from "../utils/canvas-composer-position";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGroupExecutionPlan, collectGroupMemberIds, isGroupExecutableNode } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
@@ -446,45 +447,6 @@ function resolveNodeAlignment(
     return { position: { x: position.x + xAdjustment, y: position.y + yAdjustment }, guides };
 }
 
-function resolveComposerOverlayPosition({
-    rawLeft,
-    nodeTop,
-    nodeBottom,
-    composerHeight,
-    composerWidth,
-    canvasWidth,
-    canvasHeight,
-}: {
-    rawLeft: number;
-    nodeTop: number;
-    nodeBottom: number;
-    composerHeight: number;
-    composerWidth: number;
-    canvasWidth: number;
-    canvasHeight: number;
-}) {
-    const edge = 12;
-    const gap = 12;
-    const safeWidth = Math.max(1, canvasWidth);
-    const safeHeight = Math.max(1, canvasHeight);
-    const minPanelHeight = Math.min(180, Math.max(120, safeHeight - edge * 2));
-    const maxPanelHeight = Math.max(minPanelHeight, safeHeight - edge * 2);
-    const panelHeight = Math.min(Math.max(minPanelHeight, composerHeight), maxPanelHeight);
-    const belowTop = nodeBottom + gap;
-    const belowAvailable = safeHeight - belowTop - edge;
-    const aboveTop = nodeTop - gap - panelHeight;
-    const aboveAvailable = nodeTop - gap - edge;
-    const preferredTop = belowAvailable >= minPanelHeight || belowAvailable >= aboveAvailable ? belowTop : aboveTop;
-    const top = Math.min(Math.max(edge, preferredTop), Math.max(edge, safeHeight - panelHeight - edge));
-    const halfWidth = Math.max(0, composerWidth / 2);
-    const left = Math.min(Math.max(halfWidth + edge, rawLeft), Math.max(halfWidth + edge, safeWidth - halfWidth - edge));
-    return {
-        left,
-        top,
-        maxHeight: panelHeight,
-    };
-}
-
 export default function CanvasPage() {
     return (
         <ErrorBoundary>
@@ -677,7 +639,6 @@ function LeaferCanvasPage() {
     const composerOverlayRef = useRef<HTMLDivElement>(null);
     const composerPanelRef = useRef<HTMLDivElement>(null);
     const dialogNodeRef = useRef<CanvasNodeData | null>(null);
-    const composerWidthRef = useRef(0);
     const composerHeightRef = useRef(360);
     const composerScrollRestoreRef = useRef<number | null>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
@@ -5419,7 +5380,6 @@ function LeaferCanvasPage() {
           )
         : 0;
     dialogNodeRef.current = dialogNode;
-    composerWidthRef.current = composerWidth;
     useLayoutEffect(() => {
         const panel = composerPanelRef.current;
         if (!panel || !dialogNode) return;
@@ -5475,15 +5435,11 @@ function LeaferCanvasPage() {
               const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
               const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
               const rawLeft = nodeRect ? nodeRect.left - shellOffsetX + nodeRect.width / 2 : containerOffsetX + (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
-              const nodeTop = nodeRect ? nodeRect.top - shellOffsetY : containerOffsetY + dialogNode.position.y * viewport.k + viewport.y;
               const nodeBottom = nodeRect ? nodeRect.bottom - shellOffsetY : containerOffsetY + (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y;
               return resolveComposerOverlayPosition({
                   rawLeft,
-                  nodeTop,
                   nodeBottom,
                   composerHeight: composerContentHeight,
-                  composerWidth,
-                  canvasWidth: shellRect?.width || containerRect?.width || size.width,
                   canvasHeight: shellRect?.height || containerRect?.height || size.height,
               });
           })()
@@ -5502,19 +5458,15 @@ function LeaferCanvasPage() {
         const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
         const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
         const rawLeft = containerOffsetX + (node.position.x + node.width / 2) * next.k + next.x;
-        const nodeTop = containerOffsetY + node.position.y * next.k + next.y;
         const nodeBottom = containerOffsetY + (node.position.y + node.height) * next.k + next.y;
         const position = resolveComposerOverlayPosition({
             rawLeft,
-            nodeTop,
             nodeBottom,
             composerHeight: composerHeightRef.current,
-            composerWidth: composerWidthRef.current,
-            canvasWidth: shellRect?.width || containerRect?.width || size.width,
             canvasHeight: shellRect?.height || containerRect?.height || size.height,
         });
 
-        overlay.style.left = `${position.left - composerWidthRef.current / 2}px`;
+        overlay.style.left = `${position.left}px`;
         overlay.style.top = `${position.top}px`;
         const panel = composerPanelRef.current;
         if (panel) panel.style.maxHeight = `${position.maxHeight}px`;
@@ -5729,9 +5681,10 @@ function LeaferCanvasPage() {
                         data-canvas-no-zoom
                         className="pointer-events-none absolute z-[70]"
                         style={{
-                            left: composerPosition.left - composerWidth / 2,
+                            left: composerPosition.left,
                             top: composerPosition.top,
                             width: composerWidth,
+                            transform: "translateX(-50%)",
                         }}
                     >
                         <div
