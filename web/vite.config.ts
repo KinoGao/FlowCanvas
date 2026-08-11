@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+const apiProxyTarget = process.env.VITE_DEV_PROXY_TARGET?.trim() || "http://127.0.0.1:9801";
+
 export default defineConfig({
     plugins: [react()],
     resolve: {
@@ -21,7 +23,7 @@ export default defineConfig({
         },
         proxy: {
             "/api": {
-                target: "http://127.0.0.1:9801",
+                target: apiProxyTarget,
                 changeOrigin: true,
             },
         },

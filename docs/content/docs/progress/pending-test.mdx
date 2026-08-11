@@ -288,6 +288,11 @@ description: 当前版本已实现但仍需人工验证的变更项
 - **已配置模型分类筛选**：「模型配置」tab 的「已配置模型」表格上方新增分类 Segmented（全部 / 文本·多模态 / 图像 / 视频 / 音频），切换后表格只显示对应分类的模型，「全部」保持原混排视图。需要确认：各分类切换显示正确、无报错；「手动添加模型」按钮与分页在筛选态下行为正常；文本类模型在「文本 / 多模态」分类下可见。
 - **厂商配置协议说明与地址联动**：厂商抽屉「协议」字段下方新增说明文字（厂商级协议用于拉取模型列表；每个模型的调用协议在模型抽屉中按模型单独选择）；「接口地址」占位随协议切换（Gemini 提示 Google 地址、OpenAI 提示 OpenAI 地址）；厂商表格「协议」列显示中文协议名（OpenAI 直连 / Gemini 协议），hover 显示描述。需要确认：新建厂商时占位与说明正确；已有厂商编辑不受影响；「模型列表路径」在协议切换时仍自动联动（gemini → /v1beta/models）。
 
+## 本地开发代理
+
+- Vite 的 `/api` 代理目标新增 `VITE_DEV_PROXY_TARGET` 环境变量，未设置时仍连接 `http://127.0.0.1:9801`。需要确认设置为其他本地端口后登录、工作区恢复、媒体读取和生成请求均走指定后端。
+- 本机 `backend/backend-config.yml` 已配置 `public-base-url: https://gycmservice.nas.cpolar.cn`。需要确认上传参考图时返回该域名下的 `/api/public-image/{filename}`，外部视频模型能够下载图片，且不再出现“请先配置 PUBLIC_BASE_URL”。
+
 ## Junli Studio 视频适配器（junli_openai）
 
 - 后端新增 `JunliOpenAiAdapter`（请求适配器 `junli_openai`，管理后台模型抽屉协议下拉框自动出现「OpenAI 直连 · Junli Studio」）：专门对接 img.junliai.org 的 Sora 风格异步视频接口。前端 OpenAI 视频通道的 multipart 创建请求由适配器转换为 Junli 的 JSON 请求体（`prompt` / `seconds` / `size`（WxH，按 `resolution_name` 短边与画幅比例换算）），单张参考图映射为 `reference_images`、首尾帧模式映射为 `start_frame` + `end_frame`，轮询 `GET /videos/{id}` 与下载 `GET /videos/{id}/content` 沿用 Sora 三步契约；本地参考图经后端公网图片存储上传为公网 URL（需配置 `PUBLIC_BASE_URL`）。图像端点仍走通用 OpenAI 适配器透传。

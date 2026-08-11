@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- 修复本地参考图提交视频模型时提示未配置 `PUBLIC_BASE_URL`：本机后端公网地址设为 `https://gycmservice.nas.cpolar.cn`；前端开发服务器的 `/api` 代理新增 `VITE_DEV_PROXY_TARGET`，可在旧后端无法停止时切换到最新后端实例。
 - 修复画布 `@` 引用上游文本时最终提示词重复出现 `【文本1】` 的问题：引用标记从正文位置移除，上游正文只追加一次带编号的上下文块；节点连线改为从外侧「+」端口球心发出，端口支持有限半径磁吸跟随并直接拉线，选中节点只显示四角缩放点；同时移除火山方舟 Agent Plan / Seedance 专用协议、默认能力模板与前端专用任务分流。
 
 - 画布工作流模板升级为账号级持久化（对齐 LibTV「创建工作流 → 我的工具箱」）：新增 `canvas_templates` 表与 `GET/POST/DELETE /api/canvas-templates` 接口（按账号隔离，节点组与连线以 JSON 存储），画布工具箱的模板列表 / 保存 / 删除全部走账号 API，跨画布、跨设备可用；原项目级 `workflowTemplates` 字段移除。
