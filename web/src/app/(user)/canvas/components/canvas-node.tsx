@@ -510,7 +510,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
-            {data.metadata?.canvasTool === "script" ? (                <div className="pointer-events-none absolute inset-0 z-20">                    <div className="absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium leading-4" style={{ background: theme.ui.accent, color: "#fff" }}>                        脚本                    </div>                    <button type="button" className="pointer-events-auto absolute bottom-2 right-2 rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80" style={{ background: theme.ui.accent, color: "#fff" }} onClick={(event) => { event.stopPropagation(); onNodeAction?.(data, "script-edit"); }}>                        进入脚本编辑                    </button>                </div>            ) : null}            {editorManaged ? (
+            {editorManaged ? (
                 <div className="canvas-node-overview-label" style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}>
                     {data.title?.trim() || NODE_OVERVIEW_TYPE_LABEL[data.type] || "节点"}
                 </div>
@@ -646,6 +646,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.type === CanvasNodeType.Group) return <GroupContent {...props} />;
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
+    if (props.node.metadata?.canvasTool === "script") return <ScriptNodeContent {...props} />;
     if (isGenerationConfigNode(props.node.type) && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
@@ -866,16 +867,6 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                     onPointerDown={(event) => event.stopPropagation()}
                     onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 />
-            ) : isEmpty && node.metadata?.canvasTool === "script" ? (
-                <NodeStarterPanel kind="text"
-                    theme={theme}
-                    actions={[
-                        { label: "自己编写脚本", onClick: () => onNodeAction?.("script-edit") },
-                        { label: "拆成分镜", onClick: () => onNodeAction?.("script-to-storyboard") },
-                        { label: "脚本生视频", onClick: () => onNodeAction?.("script-to-video") },
-                        { label: "生成旁白", onClick: () => onNodeAction?.("script-to-audio") },
-                    ]}
-                />
             ) : isEmpty ? (
                 <div className="canvas-node-text-empty flex h-full w-full items-start px-5 pt-3 text-[14px]" style={{ color: theme.node.placeholder }}>
                     双击开始编辑…
@@ -970,6 +961,36 @@ function DirectorContent({ theme, onOpenComposer }: NodeContentRendererProps) {
                 onPointerDown={(event) => event.stopPropagation()}
             >
                 打开导演台
+            </button>
+        </div>
+    );
+}
+
+function ScriptNodeContent({ theme, onOpenComposer, node }: NodeContentRendererProps) {
+    const title = node.metadata?.scriptTitle?.trim() || "脚本";
+    const logline = node.metadata?.scriptLogline?.trim();
+    const beatCount = node.metadata?.scriptBeats?.length ?? 0;
+    const assetCount = node.metadata?.scriptAssets?.length ?? 0;
+    return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <span className="grid size-11 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
+                <FileText className="size-5" />
+            </span>
+            <div className="text-sm font-medium">{title}</div>
+            <div className="text-xs leading-5 opacity-70">{logline || "编辑剧本、拆分镜，逐镜生成图片 / 视频"}</div>
+            {beatCount || assetCount ? <div className="text-[11px] opacity-50">{beatCount} 个分镜 · {assetCount} 项资产</div> : null}
+            <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-xs transition"
+                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenComposer?.();
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                进入脚本编辑
             </button>
         </div>
     );
