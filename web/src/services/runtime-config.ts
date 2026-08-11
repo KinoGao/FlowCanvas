@@ -59,6 +59,10 @@ export function reconcileConfigWithRuntime(
     const { entries, channels, modelsByCapability, allModels, defaultByCapability } = runtimeCatalog(runtime);
     const choose = (current: string | undefined, capability?: ModelCapability) => {
         const allowedOptions = capability ? modelsByCapability[capability] : allModels;
+        // 后台默认模型优先：管理员设置的默认覆盖账号里已有的旧选择；节点级手动选择仍通过
+        // normalizeRuntimeModelOption + node.metadata.model 生效。
+        const defaultOption = capability ? defaultByCapability[capability] : "";
+        if (defaultOption && allowedOptions.includes(defaultOption)) return defaultOption;
         const normalized = normalizeModelOptionValue(current, channels);
         if (allowedOptions.includes(normalized)) return normalized;
         const requestedModel = modelOptionName(current || "").trim();
@@ -67,8 +71,6 @@ export function reconcileConfigWithRuntime(
             && entry.patterns.some((pattern) => wildcardMatches(pattern, requestedModel)),
         );
         if (matched) return matched.option;
-        const defaultOption = capability ? defaultByCapability[capability] : "";
-        if (defaultOption && allowedOptions.includes(defaultOption)) return defaultOption;
         return allowedOptions[0] || "";
     };
     const imageModel = choose(preferences.imageModel, "image");
