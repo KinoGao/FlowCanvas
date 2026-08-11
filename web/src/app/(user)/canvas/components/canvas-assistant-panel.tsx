@@ -35,7 +35,7 @@ const ONLINE_AGENT_PROMPT = [
     "你是 Infinite Canvas 网页内置在线画布助手，可以直接操作当前画布。当前画布 JSON 会随用户消息提供（含每个节点的生成参数）。",
     "首轮必须调用工具：只读问题用 canvas_get_state / canvas_get_selection；改动画布时调用对应工具。",
     "能力域：",
-    "- 创建：canvas_create_node / canvas_create_text_node(s) / canvas_create_image_prompt_flow / canvas_create_generation_flow；",
+    "- 创建：canvas_create_node / canvas_create_text_node(s) / canvas_create_image_prompt_flow / canvas_create_generation_flow；生成剧本/脚本/分镜时用 canvas_create_node 创建 canvasTool=\"script\" 的脚本节点（metadata.scriptBody 填剧本正文，支持分镜表与 AI 拆解），不要用普通文本节点代替；",
     "- 生成与重跑：canvas_generate_text/image/video/audio（新建流程并立即生成）、canvas_run_generation（按给定提示词跑已有节点）、canvas_retry_node（沿用上次参数重跑）、canvas_execute_group（整组拓扑重跑）；",
     "- 修改：canvas_update_node（含 model/size/count/quality/seconds 等 metadata 参数）、canvas_update_node_text、canvas_move_nodes、canvas_resize_node、canvas_delete_nodes、canvas_connect_nodes、canvas_select_nodes、canvas_set_viewport、canvas_apply_ops（精确批量）；",
     "- 图像工具：canvas_image_edit（多角度/扩图/打光/抠图/720 全景）、canvas_image_quick_command（镜头聚焦/焦点编辑/电影级光影/角色三视图/画面推演）、canvas_image_process（本地裁剪/宫格切分/高清放大，不耗模型）；",
@@ -161,14 +161,14 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     ),
     toolDefinition(
         "canvas_create_node",
-        "创建任意类型节点：text、image、video、audio、comfyui。适合创建占位内容、媒体占位、ComfyUI 工作流节点或自定义 metadata 节点。",
+        "创建任意类型节点：text、image、video、audio、comfyui。适合创建占位内容、媒体占位、ComfyUI 工作流节点或自定义 metadata 节点。创建脚本节点：nodeType=text、metadata.canvasTool=\"script\"、metadata.scriptBody=剧本正文。",
         { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA },
         ["nodeType"],
     ),
     toolDefinition("canvas_create_text_node", "在当前画布创建单个文本节点。", { text: { type: "string" }, x: { type: "number" }, y: { type: "number" }, title: { type: "string" }, width: { type: "number" }, height: { type: "number" } }),
     toolDefinition(
         "canvas_create_text_nodes",
-        "批量创建文本节点，适合生成标题、段落、脚本、说明等内容块。",
+        "批量创建普通文本节点，适合生成标题、段落、说明等内容块；剧本/脚本请用 canvas_create_node 创建脚本节点。",
         {
             items: {
                 type: "array",

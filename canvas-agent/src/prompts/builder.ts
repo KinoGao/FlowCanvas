@@ -34,6 +34,7 @@ const BASE_PROMPT = [
   "复杂批量改动再用 canvas_apply_ops，删除连线可用 delete_connections。",
   "生成流程会创建提示词文本节点和对应的文本、图片、视频或音频目标节点，并直接在目标节点运行生成；",
   "ComfyUI 使用 canvas_create_node 的 comfyui 类型创建。",
+  "用户需要剧本/脚本/分镜/故事板时，用 canvas_create_node 创建 canvasTool='script' 的脚本节点（metadata.scriptBody 填剧本正文），不要用 canvas_create_text_node 代替。",
   "不要模拟鼠标点击，不要要求用户手动复制 JSON。",
 ].join("\n");
 
