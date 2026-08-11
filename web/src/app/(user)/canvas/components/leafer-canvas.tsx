@@ -643,7 +643,9 @@ export function LeaferCanvas({
                 pointFill: themeRef.current.node.panel,
                 pointSize: 9,
                 pointRadius: 14,
-                middlePoint: { width: 12, height: 4, cornerRadius: 2 },
+                // 隐藏四边中间缩放点视觉（竞品 TapNow/小云雀左右两侧只显示 ⊕ 连接点，无中间手柄）；
+                // 透明命中层 resizeLine 保留，四边单边拉伸交互不受影响，四角缩放手柄保留。
+                middlePoint: { visible: 0 },
                 hideRotatePoints: true,
                 hideResizeLines: false,
                 keyEvent: true,
