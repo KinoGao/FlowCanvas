@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import type { CanvasNodeType } from "../types";
 import { applyCanvasAgentOps, type CanvasAgentOp } from "./canvas-agent-ops";
 import type { CanvasAgentSnapshot } from "./canvas-agent-ops";
 
 function emptySnapshot(): CanvasAgentSnapshot {
-    return { nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
+    return { projectId: "test", title: "测试", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 }
 
 test("未指定坐标的多个 add_node 自动横向流式排列不重叠", () => {
     const ops: CanvasAgentOp[] = [
-        { type: "add_node", nodeType: "text", metadata: { content: "一" } },
-        { type: "add_node", nodeType: "text", metadata: { content: "二" } },
-        { type: "add_node", nodeType: "text", metadata: { content: "三" } },
+        { type: "add_node", nodeType: "text" as CanvasNodeType, metadata: { content: "一" } },
+        { type: "add_node", nodeType: "text" as CanvasNodeType, metadata: { content: "二" } },
+        { type: "add_node", nodeType: "text" as CanvasNodeType, metadata: { content: "三" } },
     ];
     const result = applyCanvasAgentOps(emptySnapshot(), ops);
     assert.equal(result.nodes.length, 3);
@@ -32,9 +33,9 @@ test("未指定坐标的多个 add_node 自动横向流式排列不重叠", () =
 
 test("已有节点时未指定坐标的 add_node 排到最右侧", () => {
     const snapshot = emptySnapshot();
-    const seed: CanvasAgentOp[] = [{ type: "add_node", nodeType: "text", position: { x: 500, y: 300 }, metadata: { content: "已有" } }];
+    const seed: CanvasAgentOp[] = [{ type: "add_node", nodeType: "text" as CanvasNodeType, position: { x: 500, y: 300 }, metadata: { content: "已有" } }];
     const seeded = applyCanvasAgentOps(snapshot, seed);
-    const result = applyCanvasAgentOps(seeded, [{ type: "add_node", nodeType: "text", metadata: { content: "新" } }]);
+    const result = applyCanvasAgentOps(seeded, [{ type: "add_node", nodeType: "text" as CanvasNodeType, metadata: { content: "新" } }]);
     const existing = result.nodes.find((node) => node.metadata?.content === "已有")!;
     const added = result.nodes.find((node) => node.metadata?.content === "新")!;
     assert.ok(added.position.x >= existing.position.x + (existing.width || 0) + 40);
@@ -42,7 +43,7 @@ test("已有节点时未指定坐标的 add_node 排到最右侧", () => {
 });
 
 test("显式指定坐标的 add_node 保持原位置", () => {
-    const result = applyCanvasAgentOps(emptySnapshot(), [{ type: "add_node", nodeType: "text", position: { x: 123, y: 456 } }]);
+    const result = applyCanvasAgentOps(emptySnapshot(), [{ type: "add_node", nodeType: "text" as CanvasNodeType, position: { x: 123, y: 456 } }]);
     assert.equal(result.nodes[0].position.x, 123);
     assert.equal(result.nodes[0].position.y, 456);
 });

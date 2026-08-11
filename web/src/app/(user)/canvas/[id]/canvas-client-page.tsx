@@ -4881,6 +4881,14 @@ function LeaferCanvasPage() {
         setDialogNodeId(node.id);
     }, [createCanvasConnection, createCanvasNode]);
 
+    const upstreamScriptText = useCallback((scriptNode: CanvasNodeData): string => {
+        const fromIds = connectionsRef.current.filter((conn) => conn.toNodeId === scriptNode.id).map((conn) => conn.fromNodeId);
+        return nodesRef.current
+            .filter((node) => fromIds.includes(node.id) && node.type === CanvasNodeType.Text && node.metadata?.content?.trim())
+            .map((node) => node.metadata?.content?.trim() || "")
+            .join("\n\n");
+    }, []);
+
     const analyzeScriptNode = useCallback(
         async (scriptNode: CanvasNodeData) => {
             const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
@@ -4888,9 +4896,10 @@ function LeaferCanvasPage() {
                 openConfigDialog(true);
                 return;
             }
-            const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || "";
+            let body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || "";
+            if (!body) body = upstreamScriptText(scriptNode);
             if (!body) {
-                message.warning("请先输入剧本正文");
+                message.warning("请输入剧本正文，或先连接上游文本节点");
                 return;
             }
             const hide = message.loading("正在用 AI 拆解剧本...", 0);
@@ -4908,6 +4917,20 @@ function LeaferCanvasPage() {
             }
         },
         [effectiveConfig, isAiConfigReady, openConfigDialog, message, handleConfigNodeChange],
+    );
+
+    const handleImportScriptUpstream = useCallback(
+        async (scriptNode: CanvasNodeData) => {
+            const upstream = upstreamScriptText(scriptNode);
+            if (!upstream) {
+                message.warning("请先连接一个文本节点作为剧本输入");
+                return;
+            }
+            const merged = { ...scriptNode, metadata: { ...scriptNode.metadata, scriptBody: upstream, content: upstream } };
+            handleConfigNodeChange(scriptNode.id, { scriptBody: upstream, content: upstream, status: NODE_STATUS_SUCCESS });
+            await analyzeScriptNode(merged);
+        },
+        [handleConfigNodeChange, analyzeScriptNode, upstreamScriptText, message],
     );
 
     const handleScriptBeatChange = useCallback(
@@ -4978,6 +5001,8 @@ function LeaferCanvasPage() {
                     theme={theme}
                     onChange={(patch) => handleConfigNodeChange(panelNode.id, patch)}
                     onAiAnalyze={() => void analyzeScriptNode(panelNode)}
+                    onImportUpstream={() => void handleImportScriptUpstream(panelNode)}
+                    hasUpstreamText={Boolean(upstreamScriptText(panelNode))}
                     onBeatChange={(beat) => handleScriptBeatChange(panelNode, beat)}
                     onBeatAdd={(index) => handleScriptBeatAdd(panelNode, index)}
                     onBeatRemove={(index) => handleScriptBeatRemove(panelNode, index)}
@@ -6154,6 +6179,8 @@ function ScriptDeskPanel({
     theme,
     onChange,
     onAiAnalyze,
+    onImportUpstream,
+    hasUpstreamText,
     onBeatChange,
     onBeatAdd,
     onBeatRemove,
@@ -6171,6 +6198,8 @@ function ScriptDeskPanel({
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onChange: (patch: Partial<CanvasNodeMetadata>) => void;
     onAiAnalyze: () => void;
+    onImportUpstream: () => void;
+    hasUpstreamText: boolean;
     onBeatChange: (beat: CanvasScriptBeat) => void;
     onBeatAdd: (index: number) => void;
     onBeatRemove: (index: number) => void;
@@ -6232,11 +6261,18 @@ function ScriptDeskPanel({
                             style={fieldStyle}
                         />
                     </label>
-                    <div className="flex items-center justify-between gap-2">
-                        <Button type="primary" icon={<Sparkles className="size-4" />} onClick={onAiAnalyze} disabled={!body.trim()}>
-                            AI 拆解
-                        </Button>
-                        <span className="text-[11px] opacity-45">用文本模型把剧本拆成角色/场景资产与分镜表</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <Button type="primary" icon={<Sparkles className="size-4" />} onClick={onAiAnalyze} disabled={!body.trim()}>
+                                AI 拆解
+                            </Button>
+                            {hasUpstreamText ? (
+                                <Button onClick={onImportUpstream}>
+                                    从上游导入
+                                </Button>
+                            ) : null}
+                        </div>
+                        <span className="text-[11px] opacity-45">连接上游文本节点可自动读取剧本；AI 拆解按「资产（人物/道具/场景）→ 分镜」顺序解析</span>
                     </div>
                     {assets.length ? (
                         <div className="rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
