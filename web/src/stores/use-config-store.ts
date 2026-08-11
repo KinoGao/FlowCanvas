@@ -396,28 +396,9 @@ export function buildApiUrl(baseUrl: string, path: string, useProxy = false) {
         const finalUrl = normalizedBaseUrl + path;
         return useProxy ? apiUrl("/api/ai-proxy?target=" + encodeURIComponent(finalUrl)) : finalUrl;
     }
-    normalizedBaseUrl = normalizeArkPlanBaseUrl(normalizedBaseUrl);
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
-    const apiBaseUrl = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") || lowerBaseUrl.endsWith("/api/plan/v3") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
+    const apiBaseUrl = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
     const finalUrl = `${apiBaseUrl}${path}`;
     if (useProxy) return apiUrl(`/api/ai-proxy?target=${encodeURIComponent(finalUrl)}`);
     return finalUrl;
-}
-
-function normalizeArkPlanBaseUrl(baseUrl: string) {
-    try {
-        const url = new URL(baseUrl);
-        const path = url.pathname.replace(/\/+$/, "");
-        const lowerPath = path.toLowerCase();
-        const arkPlanIndex = lowerPath.indexOf("/api/plan/v3");
-        if (arkPlanIndex < 0) return baseUrl;
-        const end = arkPlanIndex + "/api/plan/v3".length;
-        if (lowerPath.length !== end && lowerPath[end] !== "/") return baseUrl;
-        url.pathname = path.slice(0, end);
-        url.search = "";
-        url.hash = "";
-        return url.toString().replace(/\/+$/, "");
-    } catch {
-        return baseUrl;
-    }
 }

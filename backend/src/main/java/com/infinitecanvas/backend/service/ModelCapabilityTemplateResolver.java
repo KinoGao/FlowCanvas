@@ -51,17 +51,7 @@ public class ModelCapabilityTemplateResolver {
     }
 
     private List<String> normalizeVideoModes(ModelCapabilitiesProperties.Video template) {
-        LinkedHashSet<String> modes = new LinkedHashSet<>();
-        boolean seedance = template.getRequestAdapter() != null
-                && template.getRequestAdapter().startsWith("seedance");
-        for (String mode : template.getModes()) {
-            if (seedance && ("image-reference".equals(mode) || "multi-frame".equals(mode))) {
-                modes.add("all-in-one-reference");
-            } else {
-                modes.add(mode);
-            }
-        }
-        return List.copyOf(modes);
+        return List.copyOf(new LinkedHashSet<>(template.getModes()));
     }
 
     Optional<ModelCapabilitiesProperties.Video> resolveVideo(String requestModel) {

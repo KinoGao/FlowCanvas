@@ -21,9 +21,6 @@ const FALLBACK_PROTOCOLS: ModelProtocol[] = [
     { id: "openai", name: "OpenAI 直连", description: "OpenAI 兼容的同步或异步接口" },
     { id: "gemini", name: "Gemini 协议", description: "Gemini 原生接口" },
     { id: "agnes-v2", name: "异步协议 · Agnes Video V2", description: "Agnes 视频任务接口" },
-    { id: "seedance-v1", name: "方舟 / Ark 任务协议 · Seedance 1.0", description: "火山方舟异步视频任务" },
-    { id: "seedance-v1.5", name: "方舟 / Ark 任务协议 · Seedance 1.5", description: "火山方舟异步视频任务" },
-    { id: "seedance-v2", name: "方舟 / Ark 任务协议 · Seedance 2.0", description: "火山方舟异步视频任务" },
 ];
 
 type Props = { authToken: string; config: PlatformConfigDocument; onChange: (config: PlatformConfigDocument) => void };
@@ -159,16 +156,16 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
 function ProviderDrawer(props: { draft: PlatformProvider | null; onChange: (value: PlatformProvider | null) => void; onClose: () => void; onSave: () => void }) {
     const update = (patch: Partial<PlatformProvider>) => props.draft && props.onChange({ ...props.draft, ...patch });
     return <Drawer size="default" title="模型厂商" open={Boolean(props.draft)} onClose={props.onClose} extra={<Button type="primary" onClick={props.onSave}>保存</Button>}>{props.draft ? <Form layout="vertical">
-        <Form.Item label="厂商 ID" required><Input value={props.draft.id} placeholder="例如 volcengine" onChange={(event) => update({ id: event.target.value })} /></Form.Item>
-        <Form.Item label="厂商名称" required><Input value={props.draft.name} placeholder="例如 火山方舟" onChange={(event) => update({ name: event.target.value })} /></Form.Item>
-        <Form.Item label="接口地址" required><Input value={props.draft.baseUrl} placeholder={props.draft.apiFormat === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1 或火山方舟 https://ark.cn-beijing.volces.com/api/v3"} onChange={(event) => update({ baseUrl: event.target.value })} /></Form.Item>
+        <Form.Item label="厂商 ID" required><Input value={props.draft.id} placeholder="例如 openai" onChange={(event) => update({ id: event.target.value })} /></Form.Item>
+        <Form.Item label="厂商名称" required><Input value={props.draft.name} placeholder="例如 OpenAI" onChange={(event) => update({ name: event.target.value })} /></Form.Item>
+        <Form.Item label="接口地址" required><Input value={props.draft.baseUrl} placeholder={props.draft.apiFormat === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1"} onChange={(event) => update({ baseUrl: event.target.value })} /></Form.Item>
         <Form.Item label="API Key" required><Input.Password value={props.draft.apiKey} onChange={(event) => update({ apiKey: event.target.value })} /></Form.Item>
         <div className="grid gap-x-4 sm:grid-cols-2"><Form.Item label="协议"><Select value={props.draft.apiFormat} options={[{ value: "openai", label: "OpenAI Compatible" }, { value: "gemini", label: "Gemini" }]} onChange={(apiFormat) => {
             const currentDefault = props.draft?.apiFormat === "gemini" ? "/v1beta/models" : "/models";
             const nextDefault = apiFormat === "gemini" ? "/v1beta/models" : "/models";
             update({ apiFormat, modelsPath: !props.draft?.modelsPath || props.draft.modelsPath === currentDefault ? nextDefault : props.draft.modelsPath });
         }} /></Form.Item><Form.Item label="模型列表路径"><Input value={props.draft.modelsPath} placeholder={props.draft.apiFormat === "gemini" ? "/v1beta/models" : "/models"} onChange={(event) => update({ modelsPath: event.target.value })} /></Form.Item></div>
-        <div className="-mt-2 mb-3 text-xs leading-5 text-gray-500">厂商级协议用于拉取模型列表（OpenAI 兼容或 Gemini 原生）。每个模型的调用协议（OpenAI 直连 / Seedance 方舟任务 / Agnes 异步等）在「已配置模型」的模型抽屉中按模型单独选择。</div>
+        <div className="-mt-2 mb-3 text-xs leading-5 text-gray-500">厂商级协议用于拉取模型列表（OpenAI 兼容或 Gemini 原生）。每个模型的调用协议（OpenAI 直连 / Agnes 异步等）在「已配置模型」的模型抽屉中按模型单独选择。</div>
         <Toggle label="启用该厂商" checked={props.draft.enabled} onChange={(enabled) => update({ enabled })} />
     </Form> : null}</Drawer>;
 }

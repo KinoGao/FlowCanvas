@@ -2,9 +2,11 @@ import type { CanvasConnection, CanvasNodeData } from "../types";
 
 export type ConnectionSide = "source" | "target";
 
+export const CONNECTION_HANDLE_OFFSET = 34;
+
 export function getNodeConnectionPoint(node: CanvasNodeData, side: ConnectionSide) {
     return {
-        x: node.position.x + (side === "source" ? node.width : 0),
+        x: node.position.x + (side === "source" ? node.width + CONNECTION_HANDLE_OFFSET : -CONNECTION_HANDLE_OFFSET),
         y: node.position.y + node.height / 2,
     };
 }

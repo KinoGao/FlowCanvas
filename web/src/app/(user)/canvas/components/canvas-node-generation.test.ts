@@ -1,7 +1,32 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { buildComposerConfirmation, buildGenerationConfirmation, type NodeGenerationContext } from "./canvas-node-generation.ts";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types.ts";
+import { buildComposerConfirmation, buildGenerationConfirmation, buildNodeGenerationContext, type NodeGenerationContext } from "./canvas-node-generation.ts";
+
+const textNode: CanvasNodeData = {
+    id: "text-1",
+    type: CanvasNodeType.Text,
+    title: "上游文本",
+    position: { x: 0, y: 0 },
+    width: 320,
+    height: 180,
+    metadata: { content: "space station interior, astronaut floating slowly" },
+};
+
+const connection: CanvasConnection = { id: "edge-1", fromNodeId: textNode.id, toNodeId: "target-1" };
+
+function targetNode(composerContent = ""): CanvasNodeData {
+    return {
+        id: "target-1",
+        type: CanvasNodeType.Config,
+        title: "配置节点",
+        position: { x: 500, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: { composerContent },
+    };
+}
 
 function context(overrides: Partial<NodeGenerationContext> = {}): NodeGenerationContext {
     return {
@@ -77,6 +102,30 @@ test("keeps the exact prompt that the shared generation context would consume", 
     const result = buildGenerationConfirmation(context({ prompt: "夜景城市航拍，缓慢推进" }), { modelLabel: "m", count: 1 });
 
     assert.equal(result.prompt, "夜景城市航拍，缓慢推进");
+});
+
+test("keeps one label when a visible text mention is repeated", () => {
+    const result = buildNodeGenerationContext(
+        "target-1",
+        [textNode, targetNode()],
+        [connection],
+        "【文本1】 【文本1】 cold teal-blue color grade",
+    );
+
+    assert.equal(result.prompt, "cold teal-blue color grade\n\n【文本1】\nspace station interior, astronaut floating slowly");
+    assert.equal(result.prompt.match(/【文本1】/g)?.length, 1);
+});
+
+test("keeps one label when the same composer text token appears twice", () => {
+    const result = buildNodeGenerationContext(
+        "target-1",
+        [textNode, targetNode("@[node:text-1]")],
+        [connection],
+        "@[node:text-1] @[node:text-1] cold teal-blue color grade",
+    );
+
+    assert.equal(result.prompt, "cold teal-blue color grade\n\n【文本1】\nspace station interior, astronaut floating slowly");
+    assert.equal(result.prompt.match(/【文本1】/g)?.length, 1);
 });
 
 // ── buildComposerConfirmation（Composer 手动确认卡片的数据来源） ──────────────

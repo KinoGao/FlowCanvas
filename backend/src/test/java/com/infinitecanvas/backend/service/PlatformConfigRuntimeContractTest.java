@@ -1,7 +1,6 @@
 package com.infinitecanvas.backend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infinitecanvas.backend.config.ModelCapabilitiesProperties;
 import com.infinitecanvas.backend.dto.ImageModelCapabilityResponse;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
 import com.infinitecanvas.backend.dto.RuntimeConfigResponse;
@@ -328,56 +327,6 @@ class PlatformConfigRuntimeContractTest {
         assertEquals("agnes-v2", service.requireRuntimeModel("agnes-video").model().getRequestAdapter());
     }
 
-    @Test
-    void officialSeedanceTemplateIsPublishedAndKeepsSmartDuration() throws Exception {
-        PlatformConfigRepository repository = mock(PlatformConfigRepository.class);
-        ObjectMapper objectMapper = new ObjectMapper();
-        PlatformConfigDocument document = document();
-        PlatformConfigDocument.Model seedance = document.getModels().stream()
-                .filter(model -> "seedance-canonical".equals(model.getId()))
-                .findFirst()
-                .orElseThrow();
-        seedance.setRequestModel("doubao-seedance-2-0-260128");
-        seedance.setRequestAdapter("openai");
-        seedance.setVideoCapabilities(new PlatformConfigDocument.VideoCapabilities());
-        PlatformConfigEntity entity = new PlatformConfigEntity();
-        entity.setData(objectMapper.writeValueAsString(document));
-        when(repository.findById(1L)).thenReturn(Optional.of(entity));
-
-        ModelCapabilitiesProperties properties = new ModelCapabilitiesProperties();
-        ModelCapabilitiesProperties.Video template = new ModelCapabilitiesProperties.Video();
-        template.setRequestAdapter("seedance-v2");
-        template.setModelPatterns(List.of("doubao-seedance-2-0-*"));
-        template.setModes(List.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame"));
-        template.setRatios(List.of("adaptive", "16:9"));
-        template.setResolutions(List.of("480p", "720p", "1080p", "4k"));
-        template.setDurations(List.of(-1, 4, 15));
-        template.setCounts(List.of(1));
-        template.setGenerateAudio(true);
-        template.setWatermark(true);
-        template.setMaxImages(9);
-        template.setMaxVideos(3);
-        template.setMaxAudios(3);
-        properties.setVideo(List.of(template));
-        PlatformConfigService service = new PlatformConfigService(
-                repository,
-                objectMapper,
-                "",
-                new ModelCapabilityTemplateResolver(properties)
-        );
-
-        RuntimeConfigResponse.Model runtimeModel = service.runtimeConfig().providers().getFirst().models().stream()
-                .filter(model -> "seedance-canonical".equals(model.id()))
-                .findFirst()
-                .orElseThrow();
-
-        assertEquals("seedance-v2", runtimeModel.requestAdapter());
-        assertEquals(List.of(-1, 4, 15), runtimeModel.videoCapabilities().durations());
-        assertEquals(9, runtimeModel.videoCapabilities().maxImages());
-        assertEquals(3, runtimeModel.videoCapabilities().maxVideos());
-        assertEquals(3, runtimeModel.videoCapabilities().maxAudios());
-        assertTrue(runtimeModel.videoCapabilities().generateAudio());
-    }
     private static PlatformConfigDocument document() {
         PlatformConfigDocument.Provider provider = new PlatformConfigDocument.Provider();
         provider.setId("provider");

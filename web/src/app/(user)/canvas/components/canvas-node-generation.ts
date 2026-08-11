@@ -94,7 +94,7 @@ function buildMentionLabelGenerationContext(inputs: NodeGenerationInput[], promp
         .forEach(({ input, label }) => {
             if (!hasLabelToken(nextPrompt, label)) return;
             hasLabel = true;
-            nextPrompt = replaceLabelToken(nextPrompt, label, input.type === "text" ? `【${label}】` : label);
+            nextPrompt = replaceLabelToken(nextPrompt, label, input.type === "text" ? "" : label);
             if (input.type === "text") {
                 textBlocks.push(`【${label}】\n${input.text || ""}`);
             } else {
@@ -103,7 +103,7 @@ function buildMentionLabelGenerationContext(inputs: NodeGenerationInput[], promp
         });
 
     if (!hasLabel) return null;
-    if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
+    if (textBlocks.length) nextPrompt = appendTextBlocks(nextPrompt, textBlocks);
     const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
@@ -144,13 +144,13 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
                 if (input.type === "text") textBlocks.push(`【${label}】\n${input.text || ""}`);
                 else selectedInputs.push(input);
             }
-            nextPrompt += input.type === "text" ? `【${label}】` : label;
+            if (input.type !== "text") nextPrompt += label;
         }
         lastIndex = match.index + match[0].length;
     }
 
     nextPrompt += prompt.slice(lastIndex);
-    if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
+    if (textBlocks.length) nextPrompt = appendTextBlocks(nextPrompt, textBlocks);
     const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
@@ -280,6 +280,15 @@ function replaceLabelToken(value: string, label: string, replacement: string) {
 function hasLabelToken(value: string, label: string) {
     const escaped = escapeRegExp(label);
     return new RegExp(`【${escaped}】|(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "u").test(value);
+}
+
+function appendTextBlocks(prompt: string, blocks: string[]) {
+    const normalizedPrompt = prompt
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n[ \t]+/g, "\n")
+        .trim();
+    return [normalizedPrompt, blocks.join("\n\n")].filter(Boolean).join("\n\n");
 }
 
 function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {

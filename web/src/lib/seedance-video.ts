@@ -1,4 +1,4 @@
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -31,11 +31,9 @@ export const seedanceRatioOptions = [
 export const seedanceDurationOptions = [-1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 type SeedanceResolution = (typeof seedanceResolutionOptions)[number]["value"];
 type SeedanceMode = "t2v" | "i2v_first" | "i2v_first_tail" | "reference";
-type SeedanceRequestAdapter = "seedance-v1" | "seedance-v1.5" | "seedance-v2";
 type SeedanceGenerationMode = "text-to-video" | "all-in-one-reference" | "image-to-video" | "first-last-frame";
 
 export type SeedanceCapabilities = {
-    requestAdapter: SeedanceRequestAdapter;
     modes: SeedanceGenerationMode[];
     ratios: string[];
     durations: number[];
@@ -93,11 +91,6 @@ const seedancePixels = {
     },
 } as const;
 
-export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">) {
-    const requestConfig = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
-    return isSeedanceVideoModel(modelOptionName(requestConfig.model || requestConfig.videoModel)) || isArkPlanBaseUrl(requestConfig.baseUrl);
-}
-
 export function isSeedanceVideoModel(model: string) {
     const value = model.toLowerCase();
     return value.includes("seedance") || value.includes("doubao-seedance");
@@ -128,7 +121,6 @@ export function seedanceGenerationMode(images: ReferenceImage[], videos: Referen
 export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilities {
     const value = normalizedSeedanceModel(model);
     const capability = (overrides: Partial<SeedanceCapabilities>): SeedanceCapabilities => ({
-        requestAdapter: "seedance-v1",
         modes: ["text-to-video", "image-to-video"],
         ratios: [...seedanceRatios],
         durations: [...seedance10Durations],
@@ -148,7 +140,6 @@ export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilitie
     });
     if (value.includes("2-0-fast") || value.includes("2-0-mini")) {
         return capability({
-            requestAdapter: "seedance-v2",
             modes: ["text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame"],
             durations: [...seedance20Durations],
             watermark: true,
@@ -163,7 +154,6 @@ export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilitie
     }
     if (value.includes("2-0")) {
         return capability({
-            requestAdapter: "seedance-v2",
             modes: ["text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame"],
             durations: [...seedance20Durations],
             watermark: true,
@@ -179,7 +169,6 @@ export function seedanceCapabilitiesForModel(model: string): SeedanceCapabilitie
     }
     if (value.includes("1-5")) {
         return capability({
-            requestAdapter: "seedance-v1.5",
             modes: ["text-to-video", "image-to-video", "first-last-frame"],
             durations: [...seedance15Durations],
             watermark: true,
@@ -232,10 +221,6 @@ export function seedanceCapabilityError(model: string, images: ReferenceImage[],
 
 export function seedanceSupportsGenerateAudio(model: string) {
     return seedanceCapabilitiesForModel(model).generateAudio;
-}
-
-export function isArkPlanBaseUrl(baseUrl: string) {
-    return baseUrl.toLowerCase().includes("ark.cn-beijing.volces.com/api/plan/v3") || baseUrl.toLowerCase().includes("/api/plan/v3");
 }
 
 export function isAgnesVideoModel(model: string) {

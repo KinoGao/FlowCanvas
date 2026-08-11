@@ -37,8 +37,8 @@ export type ImageModelCapability = {
 
 export type VideoModelCapability = {
     id: string;
-    provider: 'agnes' | 'seedance' | 'openai' | string;
-    requestAdapter: 'agnes-v2' | 'seedance-v1' | 'seedance-v1.5' | 'seedance-v2' | 'openai' | string;
+    provider: string;
+    requestAdapter: string;
     modelPatterns: string[];
     modes: VideoGenerationMode[];
     ratios: string[];
@@ -98,22 +98,16 @@ export function resolveAudioModelCapability(capabilities: AudioModelCapability[]
 
 export function normalizeVideoGenerationMode(
     mode: VideoGenerationMode,
-    capability: Pick<VideoModelCapability, 'requestAdapter'> | null | undefined,
+    _capability: Pick<VideoModelCapability, 'requestAdapter'> | null | undefined,
 ): VideoGenerationMode {
-    return capability?.requestAdapter.startsWith('seedance')
-        && (mode === 'image-reference' || mode === 'multi-frame')
-        ? 'all-in-one-reference'
-        : mode;
+    return mode;
 }
 
 export function videoRatiosForMode(
     capability: Pick<VideoModelCapability, 'requestAdapter' | 'ratios'>,
     mode: VideoGenerationMode | undefined,
 ) {
-    const normalizedMode = mode ? normalizeVideoGenerationMode(mode, capability) : undefined;
-    return capability.requestAdapter === 'seedance-v1' && normalizedMode === 'text-to-video'
-        ? capability.ratios.filter((ratio) => ratio !== 'adaptive')
-        : capability.ratios;
+    return capability.ratios;
 }
 
 export async function resolveImageModelCapabilityForRequest(model: string) {

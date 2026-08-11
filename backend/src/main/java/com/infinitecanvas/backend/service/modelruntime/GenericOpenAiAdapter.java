@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * Fallback adapter that proxies any model request to a vendor speaking the
  * OpenAI or Gemini HTTP conventions, validating against the model's
  * configured capabilities. It is registered with the highest {@link #order}
- * value so vendor-specific adapters (Agnes, Seedance, Seedream, ...) get
+ * value so vendor-specific adapters (such as Agnes) get
  * the first chance to claim a request.
  *
  * <p>Capability validation here is intentionally generic: it checks that the

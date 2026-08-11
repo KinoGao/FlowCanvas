@@ -7,98 +7,33 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelCapabilityTemplateResolverTest {
     @Test
-    void standardSeedance20UsesOfficialMultimodalAnd4kCapabilities() {
-        ModelCapabilitiesProperties.Video standard = template(
-                "seedance-2", "doubao-seedance-2-0-*",
-                List.of("480p", "720p", "1080p", "4k"), true, false, 9, 3, 3
-        );
-        standard.setModes(List.of(
-                "text-to-video", "image-reference", "multi-frame",
-                "all-in-one-reference", "image-to-video", "first-last-frame"
-        ));
-        ModelCapabilityTemplateResolver resolver = resolver(
-                template("seedance-2-fast", "doubao-seedance-2-0-fast-*", List.of("480p", "720p"), true, false, 9, 3, 3),
-                standard
-        );
-        PlatformConfigDocument.Model model = model("doubao-seedance-2-0-260128");
-
-        assertTrue(resolver.applyOfficialVideoTemplate(model));
-
-        assertEquals("seedance-v2", model.getRequestAdapter());
-        assertEquals(
-                List.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame"),
-                model.getVideoCapabilities().getModes()
-        );
-        assertEquals(List.of("480p", "720p", "1080p", "4k"), model.getVideoCapabilities().getResolutions());
-        assertTrue(model.getVideoCapabilities().getDurations().contains(-1));
-        assertEquals(9, model.getVideoCapabilities().getMaxImages());
-        assertEquals(3, model.getVideoCapabilities().getMaxVideos());
-        assertEquals(3, model.getVideoCapabilities().getMaxAudios());
-        assertTrue(model.getVideoCapabilities().isGenerateAudio());
-    }
-
-    @Test
-    void seedance20FastWinsOverGenericPattern() {
-        ModelCapabilityTemplateResolver resolver = resolver(
-                template("seedance-2", "doubao-seedance-2-0-*", List.of("480p", "720p", "1080p", "4k"), true, false, 9, 3, 3),
-                template("seedance-2-fast", "doubao-seedance-2-0-fast-*", List.of("480p", "720p"), true, false, 9, 3, 3)
-        );
-        PlatformConfigDocument.Model model = model("doubao-seedance-2-0-fast-260128");
-
-        assertTrue(resolver.applyOfficialVideoTemplate(model));
-
-        assertEquals(List.of("480p", "720p"), model.getVideoCapabilities().getResolutions());
-    }
-
-    @Test
-    void seedance15SupportsAudioDraftAndSmartDurationWithoutReferenceMedia() {
-        ModelCapabilitiesProperties.Video template = template(
-                "seedance-1-5-pro", "doubao-seedance-1-5-pro-*",
-                List.of("480p", "720p", "1080p"), true, true, 2, 0, 0
-        );
-        template.setRequestAdapter("seedance-v1.5");
-        template.setModes(List.of("text-to-video", "image-to-video", "first-last-frame"));
-        PlatformConfigDocument.Model model = model("doubao-seedance-1-5-pro-251215");
+    void appliesConfiguredVideoTemplateWithoutVendorSpecificRewrites() {
+        ModelCapabilitiesProperties.Video template = template("agnes-video-v2*", "agnes-v2", List.of("image-reference", "multi-frame"));
+        PlatformConfigDocument.Model model = model("agnes-video-v2.0");
 
         assertTrue(resolver(template).applyOfficialVideoTemplate(model));
 
-        assertTrue(model.getVideoCapabilities().isGenerateAudio());
-        assertTrue(model.getVideoCapabilities().isDraft());
-        assertTrue(model.getVideoCapabilities().getDurations().contains(-1));
-        assertEquals(0, model.getVideoCapabilities().getMaxVideos());
-        assertEquals(0, model.getVideoCapabilities().getMaxAudios());
+        assertEquals("agnes-v2", model.getRequestAdapter());
+        assertEquals(List.of("image-reference", "multi-frame"), model.getVideoCapabilities().getModes());
+        assertEquals(List.of("720p", "1080p"), model.getVideoCapabilities().getResolutions());
     }
 
     @Test
-    void seedance10VariantsExposeOnlyTheirDocumentedModes() {
-        ModelCapabilitiesProperties.Video pro = template(
-                "seedance-1-pro", "doubao-seedance-1-0-pro-*",
-                List.of("480p", "720p", "1080p"), false, false, 2, 0, 0
+    void mostSpecificPatternWins() {
+        ModelCapabilityTemplateResolver resolver = resolver(
+                template("video-*", "openai", List.of("text-to-video")),
+                template("video-fast-*", "agnes-v2", List.of("text-to-video", "image-to-video"))
         );
-        pro.setRequestAdapter("seedance-v1");
-        pro.setModes(List.of("text-to-video", "image-to-video", "first-last-frame"));
-        ModelCapabilitiesProperties.Video fast = template(
-                "seedance-1-pro-fast", "doubao-seedance-1-0-pro-fast-*",
-                List.of("480p", "720p", "1080p"), false, false, 1, 0, 0
-        );
-        fast.setRequestAdapter("seedance-v1");
-        fast.setModes(List.of("text-to-video", "image-to-video"));
-        ModelCapabilityTemplateResolver resolver = resolver(pro, fast);
-        PlatformConfigDocument.Model proModel = model("doubao-seedance-1-0-pro-250528");
-        PlatformConfigDocument.Model fastModel = model("doubao-seedance-1-0-pro-fast-251015");
+        PlatformConfigDocument.Model model = model("video-fast-v2");
 
-        assertTrue(resolver.applyOfficialVideoTemplate(proModel));
-        assertTrue(resolver.applyOfficialVideoTemplate(fastModel));
+        assertTrue(resolver.applyOfficialVideoTemplate(model));
 
-        assertTrue(proModel.getVideoCapabilities().getModes().contains("first-last-frame"));
-        assertFalse(proModel.getVideoCapabilities().isGenerateAudio());
-        assertFalse(fastModel.getVideoCapabilities().getModes().contains("first-last-frame"));
-        assertFalse(fastModel.getVideoCapabilities().isGenerateAudio());
+        assertEquals("agnes-v2", model.getRequestAdapter());
+        assertEquals(List.of("text-to-video", "image-to-video"), model.getVideoCapabilities().getModes());
     }
 
     private static ModelCapabilityTemplateResolver resolver(ModelCapabilitiesProperties.Video... templates) {
@@ -107,32 +42,18 @@ class ModelCapabilityTemplateResolverTest {
         return new ModelCapabilityTemplateResolver(properties);
     }
 
-    private static ModelCapabilitiesProperties.Video template(
-            String id,
-            String pattern,
-            List<String> resolutions,
-            boolean generateAudio,
-            boolean draft,
-            int maxImages,
-            int maxVideos,
-            int maxAudios
-    ) {
+    private static ModelCapabilitiesProperties.Video template(String pattern, String adapter, List<String> modes) {
         ModelCapabilitiesProperties.Video template = new ModelCapabilitiesProperties.Video();
-        template.setId(id);
-        template.setProvider("seedance");
-        template.setRequestAdapter("seedance-v2");
+        template.setId(pattern);
+        template.setProvider("video");
+        template.setRequestAdapter(adapter);
         template.setModelPatterns(List.of(pattern));
-        template.setModes(List.of("text-to-video", "all-in-one-reference", "image-to-video", "first-last-frame"));
-        template.setRatios(List.of("adaptive", "16:9", "9:16"));
-        template.setResolutions(resolutions);
-        template.setDurations(List.of(-1, 4, 5, 15));
+        template.setModes(modes);
+        template.setRatios(List.of("16:9", "9:16"));
+        template.setResolutions(List.of("720p", "1080p"));
+        template.setDurations(List.of(5, 10));
         template.setCounts(List.of(1));
-        template.setGenerateAudio(generateAudio);
-        template.setWatermark(true);
-        template.setDraft(draft);
-        template.setMaxImages(maxImages);
-        template.setMaxVideos(maxVideos);
-        template.setMaxAudios(maxAudios);
+        template.setMaxImages(2);
         return template;
     }
 

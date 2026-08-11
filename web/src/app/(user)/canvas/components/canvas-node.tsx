@@ -1780,11 +1780,37 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
     const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
+    const magnetRef = useRef<HTMLSpanElement>(null);
     const plusVisibility = active
         ? "opacity-100 scale-110"
         : visible
           ? "opacity-100 scale-100"
           : "opacity-0 scale-75 group-hover/connection-handle:opacity-100 group-hover/connection-handle:scale-100";
+
+    const resetMagnet = () => {
+        const magnet = magnetRef.current;
+        if (!magnet) return;
+        magnet.style.transition = "transform 180ms cubic-bezier(.2,.8,.2,1)";
+        magnet.style.transform = "translate3d(0,0,0)";
+    };
+
+    const handleMagnetMove = (event: React.PointerEvent<HTMLSpanElement>) => {
+        if (downRef.current) return;
+        const magnet = magnetRef.current;
+        if (!magnet) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const dx = event.clientX - (bounds.left + bounds.width / 2);
+        const dy = event.clientY - (bounds.top + bounds.height / 2);
+        const distance = Math.hypot(dx, dy);
+        if (distance > 48) {
+            resetMagnet();
+            return;
+        }
+        const travel = Math.min(distance, 24);
+        const ratio = distance ? travel / distance : 0;
+        magnet.style.transition = "transform 70ms linear";
+        magnet.style.transform = `translate3d(${dx * ratio}px, ${dy * ratio}px, 0)`;
+    };
 
     // TapNow 右侧 +：单击（按下-抬起位移 ≤5px）触发创建下游节点。
     // 拖拽连线由 leafer-canvas 通过 data-handle 消费 pointerdown（preventDefault + setPointerCapture，
@@ -1813,6 +1839,7 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             finishRef.current = null;
             const down = downRef.current;
             downRef.current = null;
+            resetMagnet();
             if (upEvent.type === "pointerup" && down && Math.hypot(upEvent.clientX - down.x, upEvent.clientY - down.y) <= 5) {
                 onClickCreate();
             }
@@ -1829,19 +1856,26 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
             style={{ [side]: "-58px", width: "48px" }}
         >
-            {/* 扩大命中区域，并把可见连接点放在节点外侧，避免遮挡内容和缩放手柄。 */}
-            <span onPointerDown={handlePointerDown} className="pointer-events-auto absolute left-1/2 top-1/2 flex size-12 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center">
-                <span
-                    className={`canvas-node-connection-dot pointer-events-none relative grid size-8 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
-                    style={{
-                        background: active ? theme.ui.accent : theme.ui.materialElevated,
-                        borderColor: active ? theme.ui.accent : theme.node.stroke,
-                        color: active ? theme.canvas.background : theme.node.muted,
-                        boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
-                    }}
-                >
-                    <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-                    <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+            {/* 96px 磁吸区只在端口可见时接管事件；圆球最多跟随 24px，离开 48px 半径后回弹。 */}
+            <span
+                onPointerDown={handlePointerDown}
+                onPointerMove={handleMagnetMove}
+                onPointerLeave={resetMagnet}
+                className={`${visible || active ? "pointer-events-auto" : "pointer-events-none"} absolute left-1/2 top-1/2 flex size-24 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center`}
+            >
+                <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
+                    <span
+                        className={`canvas-node-connection-dot pointer-events-none relative grid size-8 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                        style={{
+                            background: active ? theme.ui.accent : theme.ui.materialElevated,
+                            borderColor: active ? theme.ui.accent : theme.node.stroke,
+                            color: active ? theme.canvas.background : theme.node.muted,
+                            boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
+                        }}
+                    >
+                        <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    </span>
                 </span>
             </span>
         </div>

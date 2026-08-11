@@ -187,6 +187,7 @@ export function LeaferCanvas({
     const relatedNodeIdsRef = useRef(relatedNodeIds ?? EMPTY_ID_SET); relatedNodeIdsRef.current = relatedNodeIds ?? EMPTY_ID_SET;
     const relatedConnectionIdsRef = useRef(relatedConnectionIds ?? EMPTY_ID_SET); relatedConnectionIdsRef.current = relatedConnectionIds ?? EMPTY_ID_SET;
     const connectingParamsRef = useRef(connectingParams); connectingParamsRef.current = connectingParams;
+    const connectionStartCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId); connectionTargetNodeIdRef.current = connectionTargetNodeId;
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
@@ -643,9 +644,7 @@ export function LeaferCanvas({
                 pointFill: themeRef.current.node.panel,
                 pointSize: 9,
                 pointRadius: 14,
-                // 隐藏四边中间缩放点视觉（竞品 TapNow/小云雀左右两侧只显示 ⊕ 连接点，无中间手柄）；
-                // 透明命中层 resizeLine 保留，四边单边拉伸交互不受影响，四角缩放手柄保留。
-                middlePoint: { visible: 0 },
+                // 仅保留四角缩放点；四边透明 resizeLine 继续支持单边拉伸。
                 hideRotatePoints: true,
                 hideResizeLines: false,
                 keyEvent: true,
@@ -1223,7 +1222,7 @@ export function LeaferCanvas({
         const node = nodesRef.current.find((item) => item.id === connection.nodeId);
         if (!path || !node) return;
 
-        const fixedCanvasPoint = getNodeConnectionPoint(node, connection.handleType);
+        const fixedCanvasPoint = connectionStartCanvasPointRef.current ?? getNodeConnectionPoint(node, connection.handleType);
         const fixedScreenPoint = canvasToScreen(fixedCanvasPoint.x, fixedCanvasPoint.y, viewportRef.current);
         const pointerScreenPoint = canvasToScreen(pointerCanvasPoint.x, pointerCanvasPoint.y, viewportRef.current);
         const sourcePoint = connection.handleType === "source" ? fixedScreenPoint : pointerScreenPoint;
@@ -1357,6 +1356,10 @@ export function LeaferCanvas({
                 frozenTempEdgeRef.current = null;
                 connectingParamsRef.current = nextConnection;
                 connectStartScreenRef.current = { x: event.clientX, y: event.clientY };
+                const dotRect = handleEl.querySelector<HTMLElement>(".canvas-node-connection-dot")?.getBoundingClientRect();
+                connectionStartCanvasPointRef.current = dotRect
+                    ? getCanvasPos(dotRect.left + dotRect.width / 2, dotRect.top + dotRect.height / 2)
+                    : getCanvasPos(event.clientX, event.clientY);
                 cb.onConnectStart?.(nodeId, handleType);
                 renderTempEdge(nextConnection, event.clientX, event.clientY);
                 event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1508,6 +1511,7 @@ export function LeaferCanvas({
         }
         connectingParamsRef.current = null;
         connectStartScreenRef.current = null;
+        connectionStartCanvasPointRef.current = null;
 
         dragRef.current = {
             type: null, startScreenX: 0, startScreenY: 0,
@@ -1529,6 +1533,7 @@ export function LeaferCanvas({
         if (!frozenTempEdgeRef.current) clearTempEdge();
         if (connectingParamsRef.current) callbacksRef.current.onConnectEnd?.();
         connectingParamsRef.current = null;
+        connectionStartCanvasPointRef.current = null;
         connectionTargetNodeIdRef.current = null;
         callbacksRef.current.onConnectionTargetChange?.(null);
         document.body.style.userSelect = "";

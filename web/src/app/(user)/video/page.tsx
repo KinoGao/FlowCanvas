@@ -12,7 +12,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { boolConfig, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationTask, type VideoGenerationTask } from "@/services/api/video";
@@ -914,12 +914,11 @@ function buildLog({
 }
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
-    const seedance = isSeedanceVideoConfig({ ...config, model });
     return {
         ...config,
         model,
         videoModel: model,
-        size: seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
+        size: normalizeVideoSize(config.size),
         videoSeconds: normalizeVideoSeconds(config.videoSeconds),
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
