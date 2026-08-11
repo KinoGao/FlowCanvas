@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Bot, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Trash2, Undo2, Video, X } from "lucide-react";
+import { Bot, Clapperboard, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Sparkles, Trash2, Undo2, Video, WandSparkles, X } from "lucide-react";
 import { Button, Modal, Segmented, Select, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 
@@ -16,7 +16,6 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { DiaTextReveal } from "@/components/ui/dia-text-reveal";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
@@ -43,7 +42,28 @@ const ONLINE_AGENT_PROMPT = [
     "规则：不要输出 JSON ops，不要编造执行结果；工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择，不要猜测；高成本操作（批量生成、整组执行、合成导出）前先简要说明将要执行的动作；工具返回结果后，再根据真实结果回答用户。",
 ].join("\n");
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
-const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
+
+/** Agent 对话空态建议卡片：点击把文案填入输入 Composer（对齐 TapNow 建议卡片交互）。 */
+const SUGGESTION_CARDS = [
+    {
+        icon: Sparkles,
+        title: "头脑风暴",
+        description: "打开故事方向，提出适合影像化的多种可能性",
+        prompt: "帮我头脑风暴一个适合做成短视频的故事方向，给出 3 个具体点子",
+    },
+    {
+        icon: Clapperboard,
+        title: "分镜推演",
+        description: "把想法拆成镜头脚本，规划画面与节奏",
+        prompt: "帮我写一个 30 秒短视频的镜头脚本，包含分镜与画面描述",
+    },
+    {
+        icon: WandSparkles,
+        title: "画面优化",
+        description: "分析选中节点的画面与参数，给出优化建议",
+        prompt: "分析当前画布上选中的节点，给出画面与参数优化建议",
+    },
+];const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
 const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "comfyui", "video", "audio"] };
 const GENERATION_MODE_SCHEMA = { type: "string", enum: ["text", "image", "video", "audio"] };
@@ -729,12 +749,28 @@ export function CanvasAssistantPanel({
                             {isRunning ? <AgentWorkingMessage theme={theme} /> : null}
                         </>
                     ) : (
-                        <div className="flex h-full flex-col items-center justify-center px-1 text-center">
-                            <div className="relative font-serif text-4xl font-bold italic tracking-normal" style={{ color: theme.node.text }}>
-                                <span>Infinite Canvas</span>
-                                <DiaTextReveal className="absolute inset-0" colors={["#A97CF8", "#F38CB8", "#FDCC92"]} textColor="transparent" duration={1.8} startOnView={false} text="Infinite Canvas" />
+                        <div className="flex h-full flex-col items-center justify-center px-2 text-center">
+                            <div className="font-serif text-2xl font-bold italic" style={{ color: theme.node.text }}>
+                                Hi，今天想创作点什么？
                             </div>
-                            <div className="mt-3 font-serif text-base italic tracking-wide opacity-60">One canvas, infinite ideas</div>
+                            <div className="mt-2 text-xs opacity-50">点一张建议卡片，或直接描述你的想法</div>
+                            <div className="mt-4 grid w-full gap-2">
+                                {SUGGESTION_CARDS.map((card) => (
+                                    <button
+                                        key={card.title}
+                                        type="button"
+                                        className="rounded-lg border px-3 py-2.5 text-left transition hover:opacity-80"
+                                        style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
+                                        onClick={() => setPrompt(card.prompt)}
+                                    >
+                                        <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: theme.ui.accent }}>
+                                            <card.icon className="size-3.5" />
+                                            {card.title}
+                                        </span>
+                                        <span className="mt-1 block text-[11px] leading-relaxed opacity-60">{card.description}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>

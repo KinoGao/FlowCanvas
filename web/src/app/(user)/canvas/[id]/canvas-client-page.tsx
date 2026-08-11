@@ -216,6 +216,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
+    showConnections: boolean;
 };
 
 type CanvasGenerationRequest = {
@@ -773,6 +774,7 @@ function LeaferCanvasPage() {
     const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
     const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
     const [showImageInfo, setShowImageInfo] = useState(false);
+    const [showConnections, setShowConnections] = useState(true);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTargetNodeId, setAssetPickerTargetNodeId] = useState<string | null>(null);
@@ -896,8 +898,9 @@ function LeaferCanvasPage() {
             snapToGrid,
             alignmentGuidesEnabled,
             showImageInfo,
+            showConnections,
         }),
-        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, showImageInfo, snapToGrid],
+        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, showConnections, showImageInfo, snapToGrid],
     );
 
     const cleanupCanvasFiles = useCallback(
@@ -1123,6 +1126,7 @@ function LeaferCanvasPage() {
             setSnapToGrid(project.snapToGrid || false);
             setAlignmentGuidesEnabled(project.alignmentGuidesEnabled !== false);
             setShowImageInfo(project.showImageInfo || false);
+            setShowConnections(project.showConnections !== false);
             setViewport({ ...project.viewport, k: clampCanvasZoom(project.viewport.k) });
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
@@ -1138,6 +1142,7 @@ function LeaferCanvasPage() {
                 snapToGrid: project.snapToGrid || false,
                 alignmentGuidesEnabled: project.alignmentGuidesEnabled !== false,
                 showImageInfo: project.showImageInfo || false,
+                showConnections: project.showConnections !== false,
             };
             restoredProjectKeyRef.current = restoreKey;
             setHistoryState({ canUndo: false, canRedo: false });
@@ -1162,7 +1167,8 @@ function LeaferCanvasPage() {
             previous.backgroundMode === next.backgroundMode &&
             previous.snapToGrid === next.snapToGrid &&
             previous.alignmentGuidesEnabled === next.alignmentGuidesEnabled &&
-            previous.showImageInfo === next.showImageInfo
+            previous.showImageInfo === next.showImageInfo &&
+            previous.showConnections === next.showConnections
         )
             return;
 
@@ -1184,7 +1190,7 @@ function LeaferCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo, snapToGrid]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showConnections, showImageInfo, snapToGrid]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1213,7 +1219,7 @@ function LeaferCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
             setSaveState("saved");
         }, 300);
         return () => {
@@ -1222,7 +1228,7 @@ function LeaferCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showImageInfo, snapToGrid, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject]);
 
     // 后端工作区不可用时标记「离线」，恢复后回到已保存态。
     useEffect(() => {
@@ -1232,7 +1238,7 @@ function LeaferCanvasPage() {
 
     const retrySave = useCallback(async () => {
         setSaveState("saving");
-        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo });
+        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
         if (saveMode === "backend" && token) {
             try {
                 const latest = useCanvasStore.getState();
@@ -1244,7 +1250,7 @@ function LeaferCanvasPage() {
         } else {
             setSaveState("saved");
         }
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showImageInfo, snapToGrid, token, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -5412,8 +5418,11 @@ function LeaferCanvasPage() {
         [createConnectedGenerationNode, createScriptNarrationNode, createScriptStoryboard, createScriptVideoNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
     );
     const visibleConnections = useMemo(
-        () => connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)),
-        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections],
+        () =>
+            showConnections
+                ? connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId))
+                : [],
+        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, showConnections],
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const dialogNode = useMemo(() => {
@@ -5853,6 +5862,7 @@ function LeaferCanvasPage() {
                     snapToGrid={snapToGrid}
                     alignmentGuidesEnabled={alignmentGuidesEnabled}
                     showImageInfo={showImageInfo}
+                    showConnections={showConnections}
                     onCreateAction={(action) => handleCreateMenuAction(action)}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
@@ -5866,6 +5876,7 @@ function LeaferCanvasPage() {
                     onSnapToGridChange={setSnapToGrid}
                     onAlignmentGuidesEnabledChange={handleAlignmentGuidesEnabledChange}
                     onShowImageInfoChange={setShowImageInfo}
+                    onShowConnectionsChange={setShowConnections}
                     assetPanelOpen={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
                         setCanvasAssetPanelInitialTab("assets");
@@ -5887,6 +5898,27 @@ function LeaferCanvasPage() {
                         setDialogNodeId(null);
                     }}
                 />
+
+                <button
+                    type="button"
+                    className="creative-os-agent-fab absolute bottom-6 right-6 z-50 flex size-11 items-center justify-center rounded-full border transition"
+                    style={{
+                        background: theme.ui.materialElevated,
+                        borderColor: theme.ui.hairline,
+                        color: assistantOpen ? theme.ui.accent : theme.toolbar.item,
+                        boxShadow: theme.ui.shadow,
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (assistantOpen) closeAgent();
+                        else openAgent();
+                    }}
+                    aria-label={assistantOpen ? "关闭创作 Agent" : "打开创作 Agent"}
+                >
+                    <Bot className="size-5" />
+                </button>
 
                 {isMiniMapOpen ? (
                     <CanvasMiniMap

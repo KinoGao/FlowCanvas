@@ -20,10 +20,11 @@ export type CanvasProject = {
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
+    showConnections: boolean;
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -52,6 +53,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         snapToGrid: false,
         alignmentGuidesEnabled: true,
         showImageInfo: false,
+        showConnections: true,
         viewport: initialViewport,
     };
 }
@@ -76,6 +78,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
+        showConnections: source.showConnections !== false,
         viewport: source.viewport || initialViewport,
     };
 }

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -758,6 +758,9 @@ function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; th
         { label: "I", title: "斜体", active: Boolean(format.italic), onClick: () => update({ italic: !format.italic }) },
         { label: "U", title: "下划线", active: Boolean(format.underline), onClick: () => update({ underline: !format.underline }) },
         { label: "S", title: "删除线", active: Boolean(format.strike), onClick: () => update({ strike: !format.strike }) },
+        { label: <List className="size-3.5" />, title: "无序列表", active: format.list === "unordered", onClick: () => update({ list: format.list === "unordered" ? undefined : "unordered" }) },
+        { label: <ListOrdered className="size-3.5" />, title: "有序列表", active: format.list === "ordered", onClick: () => update({ list: format.list === "ordered" ? undefined : "ordered" }) },
+        { label: <Link className="size-3.5" />, title: "链接样式", active: Boolean(format.link), onClick: () => update({ link: !format.link }) },
     ];
 
     return (
@@ -807,11 +810,11 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
         fontSize: `${fontSize}px`,
         lineHeight: `${Math.round(fontSize * (format.quote ? 1.6 : 1.72))}px`,
         letterSpacing: 0,
-        color: theme.node.text,
+        color: format.link ? theme.ui.accent : theme.node.text,
         boxSizing: "border-box",
         fontWeight: format.bold ? 700 : format.heading ? 650 : 400,
         fontStyle: format.italic ? "italic" : "normal",
-        textDecoration: [format.underline ? "underline" : "", format.strike ? "line-through" : ""].filter(Boolean).join(" ") || "none",
+        textDecoration: format.link ? "underline" : [format.underline ? "underline" : "", format.strike ? "line-through" : ""].filter(Boolean).join(" ") || "none",
         borderLeft: format.quote ? `3px solid ${theme.ui.accent}` : undefined,
         paddingLeft: format.quote ? 14 : undefined,
     } as React.CSSProperties;
@@ -887,7 +890,16 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
                     }}
                     onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 >
-                    {node.metadata?.content}
+                    {format.list ? (
+                        (node.metadata?.content || "").split("\n").map((line, index) => (
+                            <div key={index} className="flex gap-1.5">
+                                <span className="shrink-0 opacity-60">{format.list === "ordered" ? `${index + 1}.` : "\u2022"}</span>
+                                <span className="min-w-0 flex-1">{line || "\u00A0"}</span>
+                            </div>
+                        ))
+                    ) : (
+                        node.metadata?.content
+                    )}
                 </div>
             )}
         </div>

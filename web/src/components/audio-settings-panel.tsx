@@ -82,6 +82,15 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         onMouseDown={(event) => event.stopPropagation()}
                     />
                 </SettingGroup>}
+                <SettingGroup title="采样率" color={theme.node.muted}>
+                    <div
+                        className="flex h-9 items-center justify-center rounded-full border px-3 text-sm"
+                        style={{ borderColor: theme.node.stroke, color: theme.node.text, opacity: 0.85 }}
+                        onMouseDown={(event) => event.stopPropagation()}
+                    >
+                        44100 Hz
+                    </div>
+                </SettingGroup>
             </div>
         </ImageSettingsTheme>
     );

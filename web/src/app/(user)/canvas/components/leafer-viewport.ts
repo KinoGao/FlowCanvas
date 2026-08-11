@@ -4,9 +4,9 @@ import type { ViewportTransform } from "../types";
 
 export type LeaferViewport = ViewportTransform;
 
-export const MIN_CANVAS_ZOOM = 0.2;
-export const MAX_CANVAS_ZOOM = 1.25;
-const CANVAS_ZOOM_STEP_FACTOR = 1.2;
+export const MIN_CANVAS_ZOOM = 0.1;
+export const MAX_CANVAS_ZOOM = 3.0;
+const CANVAS_ZOOM_STEP_FACTOR = 1.25;
 
 export function clampCanvasZoom(scale: number): number {
     const finiteScale = Number.isFinite(scale) ? scale : 1;

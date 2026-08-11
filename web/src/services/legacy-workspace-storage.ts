@@ -103,6 +103,7 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
+        showConnections: source.showConnections !== false,
         viewport: source.viewport || { x: 0, y: 0, k: 1 },
     };
 }

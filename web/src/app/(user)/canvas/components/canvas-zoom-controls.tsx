@@ -51,6 +51,9 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                     <ZoomMenuButton theme={theme} label="缩放至50%" onClick={() => setPercent(50)} />
                     <ZoomMenuButton theme={theme} label="缩放至100%" onClick={() => setPercent(100)} />
                     <ZoomMenuButton theme={theme} label="缩放至125%" onClick={() => setPercent(125)} />
+                    <ZoomMenuButton theme={theme} label="缩放至150%" onClick={() => setPercent(150)} />
+                    <ZoomMenuButton theme={theme} label="缩放至200%" onClick={() => setPercent(200)} />
+                    <ZoomMenuButton theme={theme} label="缩放至300%" onClick={() => setPercent(300)} />
                 </div>
             ) : null}
 

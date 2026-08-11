@@ -12,6 +12,7 @@ import {
     Info,
     Keyboard,
     Layers3,
+    Link2,
     Moon,
     Palette,
     Plus,
@@ -40,6 +41,7 @@ export function CanvasToolbar({
     snapToGrid,
     alignmentGuidesEnabled,
     showImageInfo,
+    showConnections,
     onCreateAction,
     onUndo,
     onRedo,
@@ -52,6 +54,7 @@ export function CanvasToolbar({
     onSnapToGridChange,
     onAlignmentGuidesEnabledChange,
     onShowImageInfoChange,
+    onShowConnectionsChange,
     onOpenMyAssets,
     onOpenMaterialLibrary,
     onOpenWorkflowToolbox,
@@ -64,6 +67,7 @@ export function CanvasToolbar({
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
+    showConnections: boolean;
     onCreateAction: (action: CanvasCreateMenuAction) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -77,6 +81,7 @@ export function CanvasToolbar({
     onSnapToGridChange: (enabled: boolean) => void;
     onAlignmentGuidesEnabledChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
+    onShowConnectionsChange: (show: boolean) => void;
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
     onOpenWorkflowToolbox: () => void;
@@ -114,7 +119,7 @@ export function CanvasToolbar({
         setPanelPosition(getDockPosition(wrapRef.current, event.currentTarget));
         if (panel === "add") {
             const box = event.currentTarget.getBoundingClientRect();
-            setAddMenuAnchor({ x: box.left - 216, y: box.top + box.height / 2 });
+            setAddMenuAnchor({ x: box.right + 8, y: box.top + box.height / 2 });
         }
         setAddMenuOpen(panel === "add" ? (value) => !value : false);
         setAppearanceOpen(panel === "appearance" ? (value) => !value : false);
@@ -145,7 +150,7 @@ export function CanvasToolbar({
     }, [dockPanelOpen, panelPosition.y]);
 
     return (
-        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-end p-4 max-md:items-end max-md:justify-center max-md:px-4 max-md:pb-4">
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-start p-4 max-md:items-end max-md:justify-center max-md:px-4 max-md:pb-4">
             {tip ? <DockTip label={tip} position={tipPosition} theme={theme} /> : null}
             <div ref={wrapRef} className="creative-os-dock pointer-events-auto flex w-14 max-h-[calc(100vh-160px)] flex-col items-center gap-1 overflow-x-hidden overflow-y-auto border px-1 py-2 [&>*]:shrink-0 max-md:h-14 max-md:w-auto max-md:max-w-full max-md:flex-row max-md:overflow-x-auto max-md:overflow-y-hidden max-md:px-2 max-md:py-0" style={dockStyle}>
                 <ToolbarButton id="tool-add" label="添加节点" active={addMenuOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "add")}>
@@ -292,6 +297,13 @@ export function CanvasToolbar({
                             图片信息
                         </span>
                         <Switch size="small" checked={showImageInfo} onChange={onShowImageInfoChange} />
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium opacity-65">
+                            <Link2 className="size-3.5" />
+                            显示连线
+                        </span>
+                        <Switch size="small" checked={showConnections} onChange={onShowConnectionsChange} />
                     </div>
                 </div>
             ) : null}
