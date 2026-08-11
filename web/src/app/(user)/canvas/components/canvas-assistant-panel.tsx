@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Bot, Clapperboard, Copy, Cpu, History, PanelRightClose, Plus, Settings2, Sparkles, Trash2, Undo2, Video, WandSparkles, X } from "lucide-react";
-import { Button, Modal, Segmented, Select, Switch, Tooltip } from "antd";
-import { motion } from "motion/react";
+import { Bot, ChevronDown, Clapperboard, Copy, Cpu, History, PanelRightClose, Settings2, ShieldCheck, Sparkles, Trash2, Undo2, Video, WandSparkles, X } from "lucide-react";
+import { Button, Modal, Segmented, Select, Tooltip } from "antd";
+import { motion, useReducedMotion } from "motion/react";
 
 import { modelOptionName, normalizeModelOptionValue, resolveModelChannel, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -17,7 +17,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
-import { AgentChatComposer, AgentChatMessage, AgentModeSwitch, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
+import { AgentChatComposer, AgentChatMessage, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
@@ -108,6 +108,21 @@ const CANVAS_OP_SCHEMA = {
     additionalProperties: false,
 };
 const ONLINE_READ_TOOLS = new Set(["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot", "canvas_list_templates"]);
+const HIGH_COST_ONLINE_TOOL_NAMES = new Set([
+    "canvas_apply_ops",
+    "canvas_generate_text",
+    "canvas_generate_image",
+    "canvas_generate_video",
+    "canvas_generate_audio",
+    "canvas_run_generation",
+    "canvas_retry_node",
+    "canvas_execute_group",
+    "canvas_image_edit",
+    "canvas_image_quick_command",
+    "canvas_grid_storyboard",
+    "canvas_video_analyze",
+    "canvas_video_compose",
+]);
 
 function toolDefinition(name: string, description: string, properties: Record<string, unknown>, required: string[] = [], strict = false): ResponseFunctionTool {
     return { type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false }, strict } };
@@ -301,6 +316,7 @@ export function CanvasAssistantPanel({
     onCollapse,
 }: CanvasAssistantPanelProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const reducedMotion = useReducedMotion();
     const user = useUserStore((state) => state.user);
     const effectiveConfig = useEffectiveConfig();
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
@@ -309,7 +325,7 @@ export function CanvasAssistantPanel({
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const confirmTools = useCanvasAgentStore((state) => state.confirmTools);
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
-    const [width, setWidth] = useState(520);
+    const [width, setWidth] = useState(480);
     const [view, setView] = useState<OnlineAgentTab>("chat");
     const [prompt, setPrompt] = useState("");
     const [isRunning, setIsRunning] = useState(false);
@@ -340,7 +356,6 @@ export function CanvasAssistantPanel({
     const activeSession = useMemo(() => safeSessions.find((session) => session.id === localActiveSessionId) || safeSessions[0] || null, [localActiveSessionId, safeSessions]);
     const historySessions = safeSessions.filter((session) => session.messages.length > 0);
     const messages = activeSession?.messages || [];
-    const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
     const allSelectedReferences = useMemo(() => buildAssistantReferences(nodes, selectedNodeIds), [nodes, selectedNodeIds]);
@@ -469,11 +484,11 @@ export function CanvasAssistantPanel({
             addOnlineLog("模型工具回复", result);
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
-                if (confirmTools && writableCalls.length) {
+                if (writableCalls.length && requiresOnlineApproval(result.toolCalls, confirmTools)) {
                     upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
                     const toolMessageId = nanoid();
                     pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step });
-                    const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls } };
+                    const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls, impact: buildToolImpact(result.toolCalls, snapshotRef.current) } };
                     appendMessage(sessionId, toolMessage);
                     addOnlineLog("等待用户确认", result.toolCalls);
                     return;
@@ -521,11 +536,11 @@ export function CanvasAssistantPanel({
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, next);
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
-            if (confirmTools && writableCalls.length) {
+            if (writableCalls.length && requiresOnlineApproval(next.toolCalls, confirmTools)) {
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
                 const toolMessageId = nanoid();
                 pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1 });
-                appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls } });
+                appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls, impact: buildToolImpact(next.toolCalls, snapshotRef.current) } });
                 addOnlineLog("等待用户确认", next.toolCalls);
                 return;
             }
@@ -671,52 +686,6 @@ export function CanvasAssistantPanel({
 
     const onlineContent = (
         <>
-            <AgentPanelTabs
-                value={view}
-                theme={theme}
-                items={[
-                    { value: "setup", label: "连接配置", icon: <Settings2 className="size-3.5" /> },
-                    { value: "chat", label: "对话" },
-                    { value: "history", label: "历史", icon: <History className="size-3.5" />, count: historySessions.length },
-                    { value: "log", label: "日志", count: onlineLogs.length },
-                ]}
-                onChange={setView}
-                right={
-                    <>
-                        {view === "history" ? (
-                            <Tooltip title="删除全部">
-                                <Button
-                                    type="text"
-                                    shape="circle"
-                                    className="!h-8 !w-8 !min-w-8"
-                                    style={iconButtonStyle}
-                                    icon={<X className="size-4" />}
-                                    disabled={!historySessions.length}
-                                    onClick={() => setDeleteChatIds(historySessions.map((session) => session.id))}
-                                />
-                            </Tooltip>
-                        ) : null}
-                        <Tooltip title="新对话">
-                            <Button
-                                type="text"
-                                shape="circle"
-                                className="!h-8 !w-8 !min-w-8"
-                                style={iconButtonStyle}
-                                icon={<Plus className="size-4" />}
-                                disabled={!hasMessages}
-                                onClick={() => {
-                                    startChatSession();
-                                    setView("chat");
-                                }}
-                            />
-                        </Tooltip>
-                        <Tooltip title="配置">
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => openConfigDialog(false)} />
-                        </Tooltip>
-                    </>
-                }
-            />
-
             {view === "setup" ? (
                 <OnlineAgentSetupView theme={theme} activeModel={activeModel} onOpenConfig={() => openConfigDialog(true)} />
             ) : (
@@ -749,18 +718,18 @@ export function CanvasAssistantPanel({
                             {isRunning ? <AgentWorkingMessage theme={theme} /> : null}
                         </>
                     ) : (
-                        <div className="flex h-full flex-col items-center justify-center px-2 text-center">
-                            <div className="font-serif text-2xl font-bold italic" style={{ color: theme.node.text }}>
+                        <div className="flex h-full flex-col justify-end px-2 pb-6 text-left">
+                            <div className="text-2xl font-semibold tracking-[-0.035em]" style={{ color: theme.node.text }}>
                                 Hi，今天想创作点什么？
                             </div>
-                            <div className="mt-2 text-xs opacity-50">点一张建议卡片，或直接描述你的想法</div>
+                            <div className="mt-2 text-xs leading-5 opacity-50">从项目记忆、风格延续开始，或直接描述你要做的事。</div>
                             <motion.div
-                                className="mt-4 grid w-full gap-2"
+                                className="mt-4 grid w-full grid-cols-2 gap-2"
                                 initial="hidden"
                                 animate="show"
                                 variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09 } } }}
                             >
-                                {SUGGESTION_CARDS.map((card) => (
+                                {SUGGESTION_CARDS.slice(0, 2).map((card) => (
                                     <motion.button
                                         key={card.title}
                                         type="button"
@@ -768,7 +737,7 @@ export function CanvasAssistantPanel({
                                             hidden: { opacity: 0, x: 18 },
                                             show: { opacity: 1, x: 0, transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } },
                                         }}
-                                        className="rounded-lg border px-3 py-2.5 text-left transition hover:opacity-80"
+                                        className="min-h-[112px] rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5 hover:opacity-90"
                                         style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
                                         onClick={() => setPrompt(card.prompt)}
                                     >
@@ -856,38 +825,50 @@ export function CanvasAssistantPanel({
 
     return (
         <motion.div
-            className="flex shrink-0"
+            className="canvas-agent-overlay pointer-events-none fixed inset-y-0 right-0 z-[160] flex shrink-0"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
-            transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
-            style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
+            transition={{ duration: resizing || reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+            style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined, maxWidth: "calc(100vw - 12px)" }}
         >
             <motion.aside
-                className="relative flex shrink-0 flex-col border-l"
+                className="canvas-agent-drawer pointer-events-auto relative flex min-w-0 shrink-0 flex-col border-l"
                 initial={{ x: 48 }}
                 animate={{ x: closing ? 28 : 0 }}
-                transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
-                style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+                transition={{ duration: resizing || reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+                style={{ width, maxWidth: "100%", background: theme.ui.materialElevated, borderColor: theme.node.stroke, boxShadow: theme.ui.shadow, color: theme.node.text }}
             >
                 <button type="button" className="absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize" onMouseDown={startResize} aria-label="调整右侧面板宽度" />
-                <header className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: theme.node.stroke }}>
+                <header className="flex h-12 items-center justify-between border-b px-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex min-w-0 items-center gap-2">
-                        <span className="grid size-8 place-items-center rounded-lg">
-                            <Bot className="size-4" />
-                        </span>
+                        <Tooltip title={agentMode === "online" ? "切换到本地 Agent" : "切换到网站 Agent"}>
+                            <button type="button" className="grid size-8 place-items-center rounded-lg transition hover:bg-white/10" style={{ color: theme.node.muted }} onClick={() => onAgentModeChange(agentMode === "online" ? "local" : "online")} aria-label={agentMode === "online" ? "切换到本地 Agent" : "切换到网站 Agent"}>
+                                <Bot className="size-4" />
+                            </button>
+                        </Tooltip>
                         <div className="min-w-0">
-                            <div className="text-base font-semibold leading-5">Agent</div>
-                            <div className="truncate text-xs" style={{ color: theme.node.muted }}>
+                            <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold leading-5 transition hover:opacity-70" onClick={() => { startChatSession(); setView("chat"); }}>
+                                新建对话
+                                <ChevronDown className="size-3.5 opacity-55" />
+                            </button>
+                            <div className="hidden truncate text-xs" style={{ color: theme.node.muted }}>
                                 画布助手
                             </div>
                         </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                        <AgentModeSwitch value={agentMode} theme={theme} onChange={onAgentModeChange} />
-                        <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
-                            <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
-                            工具确认
-                        </label>
+                        <Tooltip title="对话历史">
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<History className="size-4" />} onClick={() => setView((current) => (current === "history" ? "chat" : "history"))} aria-label="打开对话历史" />
+                        </Tooltip>
+                        <Tooltip title={confirmTools ? "已开启所有操作确认" : "高成本操作仍会要求确认"}>
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ ...iconButtonStyle, color: confirmTools ? theme.ui.accent : theme.node.muted }} icon={<ShieldCheck className="size-4" />} onClick={() => setAgentState({ confirmTools: !confirmTools })} aria-pressed={confirmTools} aria-label="切换 Agent 操作确认" />
+                        </Tooltip>
+                        <Tooltip title="Agent 设置">
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => setView((current) => (current === "setup" ? "chat" : "setup"))} aria-label="打开 Agent 设置" />
+                        </Tooltip>
+                        <Tooltip title="执行日志">
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Cpu className="size-4" />} onClick={() => setView((current) => (current === "log" ? "chat" : "log"))} aria-label="打开 Agent 执行日志" />
+                        </Tooltip>
                         <Tooltip title="收起对话">
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PanelRightClose className="size-4" />} onClick={collapse} />
                         </Tooltip>
@@ -1341,6 +1322,21 @@ function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "aud
 
 function isWritableToolCall(call: ResponseToolCall) {
     return !ONLINE_READ_TOOLS.has(call.function.name);
+}
+
+function requiresOnlineApproval(calls: ResponseToolCall[], confirmTools: boolean) {
+    return confirmTools || calls.some((call) => HIGH_COST_ONLINE_TOOL_NAMES.has(call.function.name));
+}
+
+function buildToolImpact(calls: ResponseToolCall[], snapshot: CanvasAgentSnapshot) {
+    return {
+        canvasTitle: snapshot.title || "未命名画布",
+        operationCount: calls.length,
+        selectedCount: snapshot.selectedNodeIds.length,
+        nodeCount: snapshot.nodes.length,
+        connectionCount: snapshot.connections.length,
+        labels: Array.from(new Set(calls.map((call) => toolCallLabel(call.function.name)))),
+    };
 }
 
 function toolCallsFromDetail(detail: Record<string, unknown>): ResponseToolCall[] {

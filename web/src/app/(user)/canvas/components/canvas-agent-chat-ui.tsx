@@ -72,6 +72,7 @@ export function AgentChatMessage({
 }
 
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
+    const impact = pendingToolImpact(detail);
     return (
         <div className="flex items-start gap-3">
             <AgentAvatar theme={theme} />
@@ -97,6 +98,13 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                                 <div className="mt-2 text-sm leading-6" style={{ color: theme.node.text }}>
                                     {summary}
                                 </div>
+                                {impact ? (
+                                    <div className="mt-3 grid gap-1.5 rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
+                                        <span>目标：{impact.canvasTitle}</span>
+                                        <span>影响范围：{impact.operationCount} 项操作 · 当前选中 {impact.selectedCount} 个节点</span>
+                                        <span className="truncate">计划：{impact.labels.join("、")}</span>
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
                     </summary>
@@ -412,6 +420,17 @@ function normalizeText(value: unknown) {
     if (value instanceof Error) return value.message;
     if (value == null) return "";
     return JSON.stringify(value, null, 2);
+}
+
+function pendingToolImpact(detail: unknown) {
+    const impact = objectField(detail, "impact");
+    if (!impact || typeof impact !== "object") return null;
+    const value = impact as Record<string, unknown>;
+    const canvasTitle = typeof value.canvasTitle === "string" ? value.canvasTitle : "当前画布";
+    const operationCount = typeof value.operationCount === "number" ? value.operationCount : 0;
+    const selectedCount = typeof value.selectedCount === "number" ? value.selectedCount : 0;
+    const labels = Array.isArray(value.labels) ? value.labels.filter((item): item is string => typeof item === "string") : [];
+    return { canvasTitle, operationCount, selectedCount, labels };
 }
 
 function objectField(value: unknown, key: string) {
