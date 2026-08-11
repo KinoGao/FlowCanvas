@@ -253,7 +253,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     ),
     toolDefinition(
         "canvas_grid_storyboard",
-        "把脚本节点拆成宫格连贯分镜：four-grid 2×2、nine-grid 3×3、twentyfive-grid 5×5，生成占位图节点并自动连线。",
+        "把脚本节点拆成宫格连贯分镜：four-grid 2×2、nine-grid 3×3、twentyfive-grid 5×5，生成分镜节点并自动连线、立即调用模型生成。",
         { id: { type: "string" }, commandId: { type: "string", enum: ["four-grid", "nine-grid", "twentyfive-grid"] } },
         ["id", "commandId"],
     ),

@@ -4733,8 +4733,7 @@ function LeaferCanvasPage() {
                         CanvasNodeType.Image,
                         { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
                         {
-                            content: scriptStoryboardDataUrl(beat.title, index),
-                            status: NODE_STATUS_SUCCESS,
+                            status: NODE_STATUS_IDLE,
                             prompt: beat.prompt,
                             generationMode: "image",
                             generationType: "generation",
@@ -4746,6 +4745,8 @@ function LeaferCanvasPage() {
                 } satisfies CanvasNodeData;
             });
             const outputIds = beatNodes.map((node) => node.id);
+            nodesRef.current = [...nodesRef.current, ...beatNodes];
+            connectionsRef.current = [...connectionsRef.current, ...beatNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
             setNodes((prev) => [
                 ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: beats, scriptOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)),
                 ...beatNodes,
@@ -4754,9 +4755,10 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
-            message.success(`已拆出 ${beatNodes.length} 个分镜`);
+            message.success(`已拆出 ${beatNodes.length} 个分镜，开始生成…`);
+            beatNodes.forEach((node) => void handleGenerateNode(node.id, "image", node.metadata?.prompt || ""));
         },
-        [createCanvasConnection, createCanvasNode, message],
+        [createCanvasConnection, createCanvasNode, handleGenerateNode, message],
     );
 
     const createScriptBeatNode = useCallback(
@@ -4768,8 +4770,7 @@ function LeaferCanvasPage() {
                     CanvasNodeType.Image,
                     { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
                     {
-                        content: scriptStoryboardDataUrl(beat.title, beatIndex),
-                        status: NODE_STATUS_SUCCESS,
+                        status: NODE_STATUS_IDLE,
                         prompt: beat.prompt,
                         generationMode: "image",
                         generationType: "generation",
@@ -4779,13 +4780,16 @@ function LeaferCanvasPage() {
                 width: spec.width,
                 height: spec.height,
             };
+            nodesRef.current = [...nodesRef.current, node];
+            connectionsRef.current = [...connectionsRef.current, createCanvasConnection(scriptNode.id, node.id)];
             setNodes((prev) => [...prev, node]);
             setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
+            void handleGenerateNode(node.id, "image", node.metadata?.prompt || "");
         },
-        [createCanvasConnection, createCanvasNode],
+        [createCanvasConnection, createCanvasNode, handleGenerateNode],
     );
 
     const createScriptGridStoryboard = useCallback(
@@ -4807,8 +4811,7 @@ function LeaferCanvasPage() {
                         CanvasNodeType.Image,
                         { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
                         {
-                            content: scriptStoryboardDataUrl(`${command.label} ${index + 1}`, index),
-                            status: NODE_STATUS_SUCCESS,
+                            status: NODE_STATUS_IDLE,
                             prompt: buildGridBeatPrompt(body, beat, index, count),
                             generationMode: "image",
                             generationType: "generation",
@@ -4820,6 +4823,8 @@ function LeaferCanvasPage() {
                 } satisfies CanvasNodeData;
             });
             const outputIds = gridNodes.map((node) => node.id);
+            nodesRef.current = [...nodesRef.current, ...gridNodes];
+            connectionsRef.current = [...connectionsRef.current, ...gridNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
             setNodes((prev) => [
                 ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: baseBeats, scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []), ...outputIds], status: NODE_STATUS_SUCCESS } } : node)),
                 ...gridNodes,
@@ -4828,9 +4833,10 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
-            message.success(`已生成 ${count} 格${command.label}`);
+            message.success(`已生成 ${count} 格${command.label}，开始生成…`);
+            gridNodes.forEach((node) => void handleGenerateNode(node.id, "image", node.metadata?.prompt || ""));
         },
-        [createCanvasConnection, createCanvasNode, message],
+        [createCanvasConnection, createCanvasNode, handleGenerateNode, message],
     );
 
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
@@ -6371,23 +6377,6 @@ function CanvasPanelInput({ label, value, placeholder, onChange, style }: { labe
             <input className="nodrag nopan h-9 w-full rounded-lg border px-3 text-sm outline-none placeholder:opacity-35 select-text" value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} style={style} />
         </label>
     );
-}
-
-function escapeSvgText(value: string) {
-    return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char] || char);
-}
-
-
-function scriptStoryboardDataUrl(title: string, index: number) {
-    const palettes = [
-        ["#101010", "#374151", "#f9fafb"],
-        ["#111827", "#1d4ed8", "#bfdbfe"],
-        ["#18181b", "#9f1239", "#fecdd3"],
-        ["#172554", "#854d0e", "#fde68a"],
-    ];
-    const [bg, block, accent] = palettes[index % palettes.length];
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><rect width="640" height="640" fill="${bg}"/><rect x="76" y="92" width="488" height="340" rx="24" fill="${block}" opacity=".78"/><path d="M126 382 240 244l92 104 62-76 120 110H126Z" fill="${accent}" opacity=".76"/><rect x="76" y="92" width="488" height="340" rx="24" fill="none" stroke="rgba(255,255,255,.20)" stroke-width="2"/><text x="92" y="506" fill="white" font-family="Arial, sans-serif" font-size="30" font-weight="700">${escapeSvgText(title)}</text><text x="92" y="544" fill="rgba(255,255,255,.58)" font-family="Arial, sans-serif" font-size="17">Script Storyboard ${index + 1}</text></svg>`;
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 function materialPresetBackground(index: number, tab: "styles" | "effects" | "assets") {
