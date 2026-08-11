@@ -616,8 +616,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 />
             ) : null}
 
-            {!isGroup ? <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && !isGenerationConfigNode(data.type) && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
+            {!isGroup && !shouldUseOverview ? <ConnectionHandleDot side="left" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
+            {!isGroup && !shouldUseOverview && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
 
             {showPanel && renderPanel ? (
                 <div
@@ -1856,12 +1856,12 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
             style={{ [side]: "-58px", width: "48px" }}
         >
-            {/* 96px 磁吸区只在端口可见时接管事件；圆球最多跟随 24px，离开 48px 半径后回弹。 */}
+            {/* 96px 磁吸区始终响应鼠标，无需先选中节点；圆球最多跟随 24px，离开 48px 半径后回弹。 */}
             <span
                 onPointerDown={handlePointerDown}
                 onPointerMove={handleMagnetMove}
                 onPointerLeave={resetMagnet}
-                className={`${visible || active ? "pointer-events-auto" : "pointer-events-none"} absolute left-1/2 top-1/2 flex size-24 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center`}
+                className="pointer-events-auto absolute left-1/2 top-1/2 flex size-24 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center"
             >
                 <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
                     <span
