@@ -672,6 +672,200 @@
         display: none;
     }
 
+    .canvas-text-format-float {
+        animation: canvas-node-toolbar-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .canvas-text-format-toolbar button:focus-visible,
+    .canvas-node-media-action-bar button:focus-visible,
+    .canvas-audio-player button:focus-visible {
+        outline: 2px solid var(--creative-accent);
+        outline-offset: 2px;
+    }
+
+    .canvas-text-content-expanded {
+        position: absolute;
+        z-index: 110;
+        top: 50%;
+        left: 50%;
+        width: min(760px, 78vw);
+        height: min(520px, 68vh);
+        padding-top: 3.25rem;
+        overflow: hidden;
+        border: 1px solid var(--creative-accent);
+        border-radius: 18px;
+        background: var(--creative-material-elevated);
+        box-shadow: 0 24px 70px color-mix(in srgb, var(--creative-text) 24%, transparent), 0 0 0 5px var(--creative-accent-soft);
+        transform: translate(-50%, -50%);
+        animation: canvas-text-focus-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .canvas-node-media-action-bar {
+        animation: canvas-node-toolbar-in 220ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .canvas-node-media-action-bar button:hover {
+        background: var(--creative-control-fill);
+        color: var(--creative-accent);
+    }
+
+    .canvas-media-placeholder-icon {
+        animation: canvas-media-placeholder-breathe 3.2s ease-in-out infinite;
+    }
+
+    .canvas-node-status-badge {
+        transform-origin: right bottom;
+        animation: canvas-node-status-in 180ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .node-element[data-node-status="loading"] .creative-os-node {
+        animation: canvas-node-loading-glow 1.8s ease-in-out infinite;
+    }
+
+    .node-element[data-node-status="error"] .creative-os-node {
+        animation: canvas-node-error-shake 360ms ease-out both;
+    }
+
+    .canvas-audio-player {
+        min-width: 0;
+    }
+
+    .canvas-audio-player input[type="range"] {
+        accent-color: var(--creative-accent);
+    }
+
+    .canvas-audio-waveform {
+        min-width: 0;
+        opacity: .7;
+    }
+
+    .canvas-audio-wave-bar {
+        flex: 1 1 0;
+        min-width: 2px;
+        max-width: 6px;
+        border-radius: 999px;
+        opacity: .72;
+        transform-origin: center;
+    }
+
+    .canvas-audio-waveform.is-playing .canvas-audio-wave-bar {
+        animation: canvas-audio-wave 720ms ease-in-out infinite alternate;
+    }
+
+    .canvas-audio-play {
+        box-shadow: 0 0 0 0 var(--creative-accent-soft);
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), box-shadow 220ms ease;
+    }
+
+    .canvas-audio-play:hover {
+        box-shadow: 0 0 0 6px var(--creative-accent-soft);
+    }
+
+    @keyframes canvas-node-toolbar-in {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes canvas-text-focus-in {
+        from {
+            opacity: 0;
+            transform: translate(-50%, -48%) scale(.985);
+        }
+
+        to {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+    }
+
+    @keyframes canvas-media-placeholder-breathe {
+        0%,
+        100% {
+            transform: translateY(0);
+            opacity: .8;
+        }
+
+        50% {
+            transform: translateY(-3px);
+            opacity: 1;
+        }
+    }
+
+    @keyframes canvas-node-status-in {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes canvas-node-selected-ring {
+        0%,
+        100% {
+            opacity: .28;
+        }
+
+        50% {
+            opacity: .62;
+        }
+    }
+
+    @keyframes canvas-handle-breathe {
+        0%,
+        100% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.12);
+        }
+    }
+
+    @keyframes canvas-node-loading-glow {
+        0%,
+        100% {
+            filter: saturate(1);
+        }
+
+        50% {
+            filter: saturate(1.12) brightness(1.03);
+        }
+    }
+
+    @keyframes canvas-node-error-shake {
+        0%,
+        100% {
+            transform: translateX(0);
+        }
+
+        35% {
+            transform: translateX(-2px);
+        }
+
+        70% {
+            transform: translateX(2px);
+        }
+    }
+
+    @keyframes canvas-audio-wave {
+        from {
+            transform: scaleY(.58);
+            opacity: .48;
+        }
+
+        to {
+            transform: scaleY(1.08);
+            opacity: 1;
+        }
+    }
+
     @keyframes canvas-empty-rise {
         from {
             opacity: 0;
@@ -699,7 +893,18 @@
 
     @media (prefers-reduced-motion: reduce) {
         .canvas-empty-state,
-        .canvas-empty-kicker-dot {
+        .canvas-empty-kicker-dot,
+        .canvas-text-format-float,
+        .canvas-node-media-action-bar,
+        .canvas-media-placeholder-icon,
+        .canvas-node-status-badge,
+        .node-element[data-node-status="loading"] .creative-os-node,
+        .node-element[data-node-status="error"] .creative-os-node,
+        .node-element[data-node-selected="true"] .creative-os-node::after,
+        .node-element[data-node-selected="true"] [data-handle] > span > span,
+        .node-element[data-node-status="loading"] [data-handle] > span > span,
+        .canvas-audio-waveform.is-playing .canvas-audio-wave-bar,
+        .canvas-text-content-expanded {
             animation: none;
         }
     }
@@ -737,6 +942,24 @@
 
     .node-element[data-node-selected="true"] .canvas-node-render-surface {
         filter: brightness(1.015) saturate(1.015);
+    }
+
+    .node-element[data-node-selected="true"] .creative-os-node::after {
+        position: absolute;
+        z-index: 90;
+        inset: -5px;
+        border: 1px solid var(--creative-accent);
+        border-radius: calc(var(--canvas-node-radius) + 4px);
+        box-shadow: 0 0 0 4px var(--creative-accent-soft);
+        content: "";
+        pointer-events: none;
+        opacity: .46;
+        animation: canvas-node-selected-ring 2.4s ease-in-out infinite;
+    }
+
+    .node-element[data-node-selected="true"] [data-handle] > span > span,
+    .node-element[data-node-status="loading"] [data-handle] > span > span {
+        animation: canvas-handle-breathe 1.8s ease-in-out infinite;
     }
 
     .node-element[data-node-dragging="true"] .canvas-node-render-surface {
