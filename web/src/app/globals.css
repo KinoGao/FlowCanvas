@@ -610,6 +610,63 @@
         transform: translateX(1px);
     }
 
+    .creative-os-agent-fab {
+        -webkit-tap-highlight-color: transparent;
+        animation: canvas-agent-fab-in 240ms cubic-bezier(.2, .8, .2, 1) both;
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, background-color 180ms ease, box-shadow 220ms ease, color 180ms ease;
+    }
+
+    .creative-os-agent-fab:hover {
+        border-color: var(--creative-text) !important;
+        transform: translateY(-2px) scale(1.06);
+    }
+
+    .creative-os-agent-fab:active {
+        transform: translateY(0) scale(.94);
+    }
+
+    .creative-os-agent-fab:focus-visible {
+        outline: 1px solid var(--creative-text);
+        outline-offset: 3px;
+    }
+
+    .canvas-agent-fab-icon {
+        transition: transform 220ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .creative-os-agent-fab:hover .canvas-agent-fab-icon,
+    .creative-os-agent-fab[aria-expanded="true"] .canvas-agent-fab-icon {
+        transform: rotate(-10deg) scale(1.08);
+    }
+
+    .canvas-agent-fab-tooltip {
+        opacity: 0;
+        transform: translateY(5px) scale(.96);
+        transition: opacity 140ms ease 120ms, transform 160ms cubic-bezier(.2, .8, .2, 1) 120ms;
+    }
+
+    .creative-os-agent-fab:hover .canvas-agent-fab-tooltip,
+    .creative-os-agent-fab:focus-visible .canvas-agent-fab-tooltip {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+
+    .canvas-agent-drawer {
+        background-image: radial-gradient(circle at 8% 12%, color-mix(in srgb, var(--creative-text) 3%, transparent), transparent 32%);
+    }
+
+    .canvas-agent-composer {
+        animation: canvas-agent-composer-in 520ms cubic-bezier(.16, 1, .3, 1) 80ms both;
+    }
+
+    .canvas-agent-suggestion-card {
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, background-color 180ms ease;
+    }
+
+    .canvas-agent-suggestion-card:hover {
+        border-color: color-mix(in srgb, var(--creative-text) 28%, var(--creative-hairline)) !important;
+    }
+
     .canvas-empty-state {
         animation: canvas-empty-rise 420ms cubic-bezier(.2, .8, .2, 1) both;
     }
@@ -711,6 +768,16 @@
         }
     }
 
+    @keyframes canvas-agent-fab-in {
+        from { opacity: 0; transform: translateY(8px) scale(.9) rotate(8deg); }
+        to { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+    }
+
+    @keyframes canvas-agent-composer-in {
+        from { opacity: 0; transform: translateY(28px) scale(.985); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
     @keyframes canvas-empty-pulse {
         0%,
         100% {
@@ -738,8 +805,16 @@
         .canvas-empty-state,
         .canvas-empty-kicker-dot,
         .canvas-empty-action-pill,
-        .canvas-empty-double-click {
+        .canvas-empty-double-click,
+        .creative-os-agent-fab,
+        .canvas-agent-composer {
             animation: none;
+        }
+
+        .canvas-agent-fab-tooltip,
+        .canvas-agent-fab-icon,
+        .creative-os-agent-fab {
+            transition: none;
         }
     }
 

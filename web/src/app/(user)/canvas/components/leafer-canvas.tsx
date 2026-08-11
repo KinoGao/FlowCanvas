@@ -80,7 +80,7 @@ export function LeaferCanvas({
     viewport,
     nodes = EMPTY_NODES,
     connections = EMPTY_CONNECTIONS,
-    backgroundMode = "lines",
+    backgroundMode = "dots",
     alignmentGuides,
     selectedNodeIds,
     selectedConnectionId,

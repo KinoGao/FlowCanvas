@@ -219,7 +219,7 @@ export function AgentChatComposer({
         void onAddFiles(images);
     };
     return (
-        <div className="px-2 pb-2 pt-2" onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}>
+        <div className="canvas-agent-composer px-2 pb-2 pt-2" onWheelCapture={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}>
             <div className="rounded-[24px] border px-3 pb-3 pt-3 shadow-lg" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
                 {attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">

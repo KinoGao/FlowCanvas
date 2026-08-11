@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowUp, Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -288,7 +288,7 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
 
 const VIDEO_NODE_MAX_WIDTH = VIDEO_NODE_SIZE_RANGE.maxWidth;
 const VIDEO_NODE_MAX_HEIGHT = VIDEO_NODE_SIZE_RANGE.maxHeight;
-const CANVAS_AGENT_PANEL_MOTION_MS = 500;
+const CANVAS_AGENT_PANEL_MOTION_MS = 240;
 const CANVAS_OVERVIEW_SCALE = 0.5;
 const NODE_TOOLBAR_HIDE_DELAY_MS = 320;
 
@@ -765,11 +765,9 @@ function LeaferCanvasPage() {
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [createMenu, setCreateMenu] = useState<{ x: number; y: number; canvasPosition: Position } | null>(null);
-    const [inspiration, setInspiration] = useState("");
-    const [agentPromptRequest, setAgentPromptRequest] = useState<{ text: string; nonce: number } | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
-    const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
+    const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
     const [snapToGrid, setSnapToGrid] = useState(false);
     const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
     const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
@@ -2448,18 +2446,6 @@ function LeaferCanvasPage() {
             setAssistantMounted(false);
             setAssistantClosing(false);
         }, CANVAS_AGENT_PANEL_MOTION_MS);
-    };
-
-    /** 空画布「输入灵感」：打开在线 Agent 并直接发送，由 Agent 搭建初始创作工作流（小云雀式入口）。 */
-    const submitInspiration = (text: string) => {
-        const trimmed = text.trim();
-        if (!trimmed) return;
-        openAgent("online");
-        setAgentPromptRequest({
-            text: `灵感：${trimmed}\n请基于这句灵感在当前画布搭建初始创作工作流（脚本 / 分镜 / 生成节点等），并简要说明每个节点的用途。`,
-            nonce: Date.now(),
-        });
-        setInspiration("");
     };
 
     useEffect(() => {
@@ -5749,12 +5735,14 @@ function LeaferCanvasPage() {
                 {projectLoaded && canvasVisualReady && nodes.length === 0 ? (
                     <CanvasEmptyState
                         theme={theme}
-                        inspiration={inspiration}
-                        onInspirationChange={setInspiration}
-                        onSubmitInspiration={submitInspiration}
                         onCreateNode={quickCreateFromEmpty}
                         onOpenTemplates={() => setWorkflowToolboxOpen(true)}
-                        onOpenAgent={() => openAgent("online")}
+                        onOpenCreateMenu={() => {
+                            const rect = containerRef.current?.getBoundingClientRect();
+                            const x = (rect?.left || 0) + (rect?.width || size.width) / 2;
+                            const y = (rect?.top || 0) + (rect?.height || size.height) / 2;
+                            setCreateMenu({ x, y, canvasPosition: screenToCanvas(x, y) });
+                        }}
                     />
                 ) : null}
 
@@ -5919,26 +5907,29 @@ function LeaferCanvasPage() {
                     }}
                 />
 
-                <button
+                {!assistantOpen ? <button
                     type="button"
-                    className="creative-os-agent-fab absolute bottom-6 right-6 z-50 flex size-11 items-center justify-center rounded-full border transition hover:scale-105 active:scale-95"
+                    className="creative-os-agent-fab group absolute bottom-6 right-6 z-50 flex size-12 items-center justify-center rounded-full border"
                     style={{
                         background: theme.ui.materialElevated,
                         borderColor: theme.ui.hairline,
-                        color: assistantOpen ? theme.ui.accent : theme.toolbar.item,
+                        color: theme.toolbar.item,
                         boxShadow: theme.ui.shadow,
                     }}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                         event.stopPropagation();
-                        if (assistantOpen) closeAgent();
-                        else openAgent();
+                        openAgent();
                     }}
-                    aria-label={assistantOpen ? "关闭创作 Agent" : "打开创作 Agent"}
+                    aria-label="打开创作 Agent"
+                    aria-expanded={false}
                 >
-                    <Bot className="size-5" />
-                </button>
+                    <span className="canvas-agent-fab-tooltip pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}>
+                        打开 Agent
+                    </span>
+                    <Bot className="canvas-agent-fab-icon size-5" />
+                </button> : null}
 
                 {isMiniMapOpen ? (
                     <CanvasMiniMap
@@ -6110,7 +6101,6 @@ function LeaferCanvasPage() {
                     onPasteImage={pasteAssistantImage}
                     agentMode={agentMode}
                     onAgentModeChange={setAgentMode}
-                    promptRequest={agentPromptRequest}
                     workflowTemplates={workflowTemplates}
                     closing={assistantClosing}
                     onCollapse={closeAgent}
@@ -6564,15 +6554,12 @@ function nodeIcon(type: CanvasNodeType) {
 
 type CanvasEmptyStateProps = {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    inspiration: string;
-    onInspirationChange: (value: string) => void;
-    onSubmitInspiration: (value: string) => void;
     onCreateNode: (type: CanvasNodeType, metadata?: CanvasNodeMetadata) => void;
     onOpenTemplates: () => void;
-    onOpenAgent: () => void;
+    onOpenCreateMenu: () => void;
 };
 
-function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitInspiration, onCreateNode, onOpenTemplates, onOpenAgent }: CanvasEmptyStateProps) {
+function CanvasEmptyState({ theme, onCreateNode, onOpenTemplates, onOpenCreateMenu }: CanvasEmptyStateProps) {
     const actions: Array<{ id: string; label: string; description: string; icon: ReactNode; type?: CanvasNodeType; metadata?: CanvasNodeMetadata; onClick?: () => void }> = [
         { id: "text-to-video", label: "文字生视频", description: "从一句话开始创作镜头", icon: <Video className="size-4.5" />, type: CanvasNodeType.Video, metadata: { generationMode: "video", videoGenerationMode: "text-to-video" } },
         { id: "image-background", label: "图片换背景", description: "保留主体，快速换场景", icon: <ImageIcon className="size-4.5" />, type: CanvasNodeType.Image, metadata: { generationMode: "image", generationType: "edit", prompt: "保留主体，替换背景环境" } },
@@ -6587,9 +6574,9 @@ function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitIns
 
     return (
         <div className="pointer-events-none absolute inset-0 z-[40] flex items-center justify-center px-4 py-20">
-            <div className="canvas-empty-state pointer-events-auto flex w-[min(860px,calc(100vw-32px))] flex-col items-center text-center">
+            <div className="canvas-empty-state pointer-events-auto flex w-[min(900px,calc(100vw-32px))] flex-col items-center text-center">
                 <div className="canvas-empty-guidance flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[15px] leading-7" style={{ color: theme.node.muted }}>
-                    <button type="button" className="canvas-empty-double-click inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-semibold" style={{ color: theme.node.text, background: theme.ui.materialElevated, borderColor: theme.ui.hairline }} onClick={onOpenAgent}>
+                    <button type="button" className="canvas-empty-double-click inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-semibold" style={{ color: theme.node.text, background: theme.ui.materialElevated, borderColor: theme.ui.hairline }} onClick={onOpenCreateMenu}>
                         <Sparkles className="size-3.5" style={{ color: theme.ui.accent }} />
                         双击画布
                     </button>
@@ -6605,44 +6592,13 @@ function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitIns
                             style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text, animationDelay: `${80 + index * 45}ms` }}
                             onClick={() => (action.onClick ? action.onClick() : action.type ? onCreateNode(action.type, action.metadata) : undefined)}
                         >
-                            <span className="canvas-empty-action-icon grid size-4 shrink-0 place-items-center" style={{ color: theme.ui.accent }}>
+                            <span className="canvas-empty-action-icon grid size-4 shrink-0 place-items-center" style={{ color: theme.node.muted }}>
                                 {action.icon}
                             </span>
                             <span>{action.label}</span>
                         </button>
                     ))}
                 </div>
-                <form
-                    className="canvas-empty-composer mt-4 flex w-full max-w-[480px] items-center gap-2 rounded-xl border p-1.5 pl-3"
-                    style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}
-                    onSubmit={(event) => {
-                        event.preventDefault();
-                        onSubmitInspiration(inspiration);
-                    }}
-                >
-                    <Sparkles className="size-4 shrink-0" style={{ color: theme.ui.accent }} />
-                    <input
-                        value={inspiration}
-                        onChange={(event) => onInspirationChange(event.target.value)}
-                        placeholder="输入一句灵感，Agent 帮你搭建工作流"
-                        className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-45"
-                        style={{ color: theme.node.text }}
-                        aria-label="输入灵感"
-                    />
-                    <button
-                        type="submit"
-                        disabled={!inspiration.trim()}
-                        className="creative-os-primary-action grid size-9 shrink-0 place-items-center rounded-xl transition disabled:opacity-40"
-                        aria-label="发送灵感"
-                    >
-                        <ArrowUp className="size-3.5" />
-                    </button>
-                </form>
-                <button type="button" className="canvas-empty-agent-button mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] transition" style={{ borderColor: theme.ui.hairline, background: theme.ui.controlFill, color: theme.node.text }} onClick={onOpenAgent}>
-                    <Bot className="size-3.5" style={{ color: theme.ui.accent }} />
-                    让 Agent 搭建工作流
-                </button>
-                <div className="mt-3 text-[11px] opacity-35" style={{ color: theme.node.muted }}>也可以双击空白处，或使用右键菜单添加节点</div>
             </div>
         </div>
     );

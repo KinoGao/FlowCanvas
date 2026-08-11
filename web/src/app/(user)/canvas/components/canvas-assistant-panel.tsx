@@ -26,7 +26,7 @@ import { summarizeCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type Canvas
 import { buildCanvasResourceReferences } from "../utils/canvas-resource-references";
 import type { CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 
-export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
+export const CANVAS_AGENT_PANEL_MOTION_MS = 240;
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 8;
 const ONLINE_AGENT_PROMPT = [
@@ -325,7 +325,7 @@ export function CanvasAssistantPanel({
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const confirmTools = useCanvasAgentStore((state) => state.confirmTools);
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
-    const [width, setWidth] = useState(480);
+    const [width, setWidth] = useState(() => (typeof window === "undefined" ? 560 : Math.min(960, Math.max(480, Math.round(window.innerWidth * 0.48)))));
     const [view, setView] = useState<OnlineAgentTab>("chat");
     const [prompt, setPrompt] = useState("");
     const [isRunning, setIsRunning] = useState(false);
@@ -665,7 +665,7 @@ export function CanvasAssistantPanel({
     };
 
     const startResize = () => {
-        const move = (event: MouseEvent) => setWidth(Math.min(760, Math.max(320, window.innerWidth - event.clientX)));
+        const move = (event: MouseEvent) => setWidth(Math.min(960, Math.max(320, window.innerWidth - event.clientX)));
         const stop = () => {
             setResizing(false);
             document.body.style.cursor = "";
@@ -718,26 +718,34 @@ export function CanvasAssistantPanel({
                             {isRunning ? <AgentWorkingMessage theme={theme} /> : null}
                         </>
                     ) : (
-                        <div className="flex h-full flex-col justify-end px-2 pb-6 text-left">
-                            <div className="text-2xl font-semibold tracking-[-0.035em]" style={{ color: theme.node.text }}>
-                                Hi，今天想创作点什么？
-                            </div>
-                            <div className="mt-2 text-xs leading-5 opacity-50">从项目记忆、风格延续开始，或直接描述你要做的事。</div>
+                        <motion.div
+                            className="canvas-agent-empty-intro flex h-full flex-col justify-center px-2 pb-12 text-left"
+                            initial="hidden"
+                            animate="show"
+                            variants={{ hidden: {}, show: { transition: { delayChildren: 0.12, staggerChildren: 0.1 } } }}
+                        >
+                            <motion.div variants={{ hidden: { opacity: 0, y: 72 }, show: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1] } } }}>
+                                <div className="flex items-center gap-2 text-sm font-medium opacity-65" style={{ color: theme.node.text }}>
+                                    <Bot className="size-4" />
+                                    你好，{user?.displayName || user?.username || "创作者"}！
+                                </div>
+                                <h2 className="mt-1 text-[28px] font-semibold leading-tight tracking-[-0.045em]" style={{ color: theme.node.text }}>
+                                    今天想创作什么？
+                                </h2>
+                            </motion.div>
                             <motion.div
-                                className="mt-4 grid w-full grid-cols-2 gap-2"
-                                initial="hidden"
-                                animate="show"
-                                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09 } } }}
+                                className="mt-5 grid w-full grid-cols-2 gap-2"
+                                variants={{ hidden: {}, show: { transition: { delayChildren: 0.25, staggerChildren: 0.1 } } }}
                             >
                                 {SUGGESTION_CARDS.slice(0, 2).map((card) => (
                                     <motion.button
                                         key={card.title}
                                         type="button"
                                         variants={{
-                                            hidden: { opacity: 0, x: 18 },
-                                            show: { opacity: 1, x: 0, transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } },
+                                            hidden: { opacity: 0, y: 42, scale: 0.98 },
+                                            show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.52, ease: [0.16, 1, 0.3, 1] } },
                                         }}
-                                        className="min-h-[112px] rounded-xl border px-3 py-3 text-left transition hover:-translate-y-0.5 hover:opacity-90"
+                                        className="canvas-agent-suggestion-card min-h-[120px] rounded-xl border px-4 py-3.5 text-left transition hover:-translate-y-0.5 hover:opacity-90"
                                         style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
                                         onClick={() => setPrompt(card.prompt)}
                                     >
@@ -749,7 +757,7 @@ export function CanvasAssistantPanel({
                                     </motion.button>
                                 ))}
                             </motion.div>
-                        </div>
+                        </motion.div>
                     )}
                 </div>
             )}
@@ -833,8 +841,8 @@ export function CanvasAssistantPanel({
         >
             <motion.aside
                 className="canvas-agent-drawer pointer-events-auto relative flex min-w-0 shrink-0 flex-col border-l"
-                initial={{ x: 48 }}
-                animate={{ x: closing ? 28 : 0 }}
+                initial={{ x: 72 }}
+                animate={{ x: closing ? 48 : 0 }}
                 transition={{ duration: resizing || reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
                 style={{ width, maxWidth: "100%", background: theme.ui.materialElevated, borderColor: theme.node.stroke, boxShadow: theme.ui.shadow, color: theme.node.text }}
             >
@@ -870,7 +878,7 @@ export function CanvasAssistantPanel({
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Cpu className="size-4" />} onClick={() => setView((current) => (current === "log" ? "chat" : "log"))} aria-label="打开 Agent 执行日志" />
                         </Tooltip>
                         <Tooltip title="收起对话">
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PanelRightClose className="size-4" />} onClick={collapse} />
+                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PanelRightClose className="size-4" />} onClick={collapse} aria-label="收起 Agent" />
                         </Tooltip>
                     </div>
                 </header>
