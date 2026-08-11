@@ -143,9 +143,10 @@ export function LeaferCanvas({
     const backgroundSizeRef = useRef({ width: 0, height: 0 });
     const verticalGuideRef = useRef<LUI.Line | null>(null);
     const horizontalGuideRef = useRef<LUI.Line | null>(null);
-    const tempEdgeGlowPathRef = useRef<LUI.Path | null>(null);
+    const tempEdgeFlowPathRef = useRef<LUI.Path | null>(null);
     const tempEdgePathRef = useRef<LUI.Path | null>(null);
     const connectionFlowFrameRef = useRef<number | null>(null);
+    const connectionFlowLastPaintRef = useRef(0);
     const readyFrameRef = useRef<number | null>(null);
     const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyReportedRef = useRef(false);
@@ -298,15 +299,28 @@ export function LeaferCanvas({
 
     const ensureConnectionFlowAnimation = useCallback(() => {
         if (connectionFlowFrameRef.current !== null) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
         const animate = (time: number) => {
+            if (time - connectionFlowLastPaintRef.current < 32) {
+                connectionFlowFrameRef.current = requestAnimationFrame(animate);
+                return;
+            }
+            connectionFlowLastPaintRef.current = time;
             let hasVisibleFlow = false;
+            const dash = themeRef.current.connection.dash;
+            const offset = -((time * 0.035) % (dash[0] + dash[1]));
             connectionVisualMapRef.current.forEach((visual) => {
-                visual.flow.forEach((path, index) => {
+                visual.flow.forEach((path) => {
                     if (!path.visible) return;
                     hasVisibleFlow = true;
-                    path.dashOffset = -((time * 0.055 + index * 14) % 44);
+                    path.dashOffset = offset;
                 });
             });
+            const tempFlow = tempEdgeFlowPathRef.current;
+            if (tempFlow?.visible) {
+                hasVisibleFlow = true;
+                tempFlow.dashOffset = offset;
+            }
             connectionFlowFrameRef.current = hasVisibleFlow ? requestAnimationFrame(animate) : null;
         };
         connectionFlowFrameRef.current = requestAnimationFrame(animate);
@@ -317,25 +331,26 @@ export function LeaferCanvas({
         if (!visual) return;
         const selected = selectedConnectionIdRef.current === connectionId;
         const related = relatedConnectionIdsRef.current.has(connectionId);
-        const styleSignature = `${selected}|${related}|${visual.hovered}`;
+        const styleSignature = `${selected}|${related}|${visual.hovered}|${theme.connection.color}|${theme.connection.activeColor}`;
         if (visual.styleSignature === styleSignature) return;
         visual.styleSignature = styleSignature;
         visual.line.set({
-            stroke: selected ? theme.connection.activeColor : related ? theme.connection.activeColor : visual.hovered ? theme.connection.activeColor : theme.connection.color,
-            strokeWidth: selected ? 3 : visual.hovered ? 3.2 : 2.4,
-            opacity: selected ? 1 : related ? 0.88 : visual.hovered ? 0.96 : 0.78,
+            stroke: theme.connection.color,
+            strokeWidth: selected || related || visual.hovered ? theme.connection.activeWidth : theme.connection.width,
+            opacity: selected ? 1 : related ? 0.94 : visual.hovered ? 0.96 : 0.86,
             dashPattern: undefined,
         });
-        const flowCount = selected || related ? 3 : visual.hovered ? 1 : 0;
+        const flowCount = 1;
         const app = leaferRef.current;
         while (app && visual.flow.length < flowCount) {
             const flow = new LUI.Path({
                 path: visual.path,
                 fill: "",
                 stroke: theme.connection.activeColor,
-                strokeWidth: 3.6,
+                strokeWidth: theme.connection.activeWidth,
                 strokeCap: "round",
-                dashPattern: [10, 34],
+                dashPattern: [...theme.connection.dash],
+                shadow: { x: 0, y: 0, blur: 8, spread: 1, color: withAlpha(theme.connection.activeColor, 0.62) },
                 hittable: false,
                 zIndex: 11,
             });
@@ -347,9 +362,10 @@ export function LeaferCanvas({
                 path: visual.path,
                 visible: index < flowCount,
                 stroke: theme.connection.activeColor,
-                strokeWidth: selected || related ? 3.6 : 3.2,
-                dashPattern: selected || related ? [10, 34] : [8, 42],
-                opacity: selected ? 1 : related ? 0.9 : 0.96,
+                strokeWidth: theme.connection.activeWidth,
+                dashPattern: [...theme.connection.dash],
+                shadow: { x: 0, y: 0, blur: 8, spread: 1, color: withAlpha(theme.connection.activeColor, 0.62) },
+                opacity: selected ? 1 : related || visual.hovered ? 0.98 : 0.9,
             });
         });
         if (flowCount) ensureConnectionFlowAnimation();
@@ -719,35 +735,33 @@ export function LeaferCanvas({
             dashPattern: [5, 5],
             hittable: false,
         });
-        const tempEdgeGlow = new LUI.Path({
+        const tempEdgeFlow = new LUI.Path({
             path: "",
             visible: false,
             fill: "",
             stroke: themeRef.current.connection.activeColor,
-            strokeWidth: themeRef.current.connection.tempWidth + 4.5,
+            strokeWidth: themeRef.current.connection.activeWidth,
             strokeCap: "round",
             dashPattern: [...themeRef.current.connection.dash],
-            opacity: 0.18,
-            shadow: { x: 0, y: 0, blur: 9, spread: 1, color: withAlpha(themeRef.current.connection.activeColor, 0.42) },
+            opacity: 0.94,
+            shadow: { x: 0, y: 0, blur: 8, spread: 1, color: withAlpha(themeRef.current.connection.activeColor, 0.62) },
             hittable: false,
         });
         const tempEdge = new LUI.Path({
             path: "",
             visible: false,
             fill: "",
-            stroke: themeRef.current.connection.activeColor,
+            stroke: themeRef.current.connection.color,
             strokeWidth: themeRef.current.connection.tempWidth,
             strokeCap: "round",
-            dashPattern: [...themeRef.current.connection.dash],
-            shadow: { x: 0, y: 0, blur: 3, spread: 0, color: withAlpha(themeRef.current.connection.activeColor, 0.36) },
             hittable: false,
         });
         verticalGuideRef.current = verticalGuide;
         horizontalGuideRef.current = horizontalGuide;
-        tempEdgeGlowPathRef.current = tempEdgeGlow;
+        tempEdgeFlowPathRef.current = tempEdgeFlow;
         tempEdgePathRef.current = tempEdge;
-        app.sky.addAt(tempEdgeGlow, 0);
-        app.sky.addAt(tempEdge, 1);
+        app.sky.addAt(tempEdgeFlow, 1);
+        app.sky.addAt(tempEdge, 0);
         app.sky.addAt(horizontalGuide, 0);
         app.sky.addAt(verticalGuide, 0);
         drawBackground(viewportRef.current);
@@ -797,6 +811,7 @@ export function LeaferCanvas({
             window.removeEventListener("pagehide", finishTransform);
             if (connectionFlowFrameRef.current !== null) cancelAnimationFrame(connectionFlowFrameRef.current);
             connectionFlowFrameRef.current = null;
+            connectionFlowLastPaintRef.current = 0;
             if (readyFrameRef.current !== null) cancelAnimationFrame(readyFrameRef.current);
             readyFrameRef.current = null;
             if (readyTimeoutRef.current !== null) clearTimeout(readyTimeoutRef.current);
@@ -820,7 +835,7 @@ export function LeaferCanvas({
             backgroundCanvasRef.current = null;
             verticalGuideRef.current = null;
             horizontalGuideRef.current = null;
-            tempEdgeGlowPathRef.current = null;
+            tempEdgeFlowPathRef.current = null;
             tempEdgePathRef.current = null;
             app.destroy();
             leaferRef.current = null;
@@ -1168,17 +1183,17 @@ export function LeaferCanvas({
         editor.config.stroke = theme.ui.accent;
         editor.config.pointFill = theme.node.panel;
         editor.update();
-        tempEdgeGlowPathRef.current?.set({
+        tempEdgeFlowPathRef.current?.set({
             stroke: theme.connection.activeColor,
-            strokeWidth: theme.connection.tempWidth + 4.5,
+            strokeWidth: theme.connection.activeWidth,
             dashPattern: [...theme.connection.dash],
-            shadow: { x: 0, y: 0, blur: 9, spread: 1, color: withAlpha(theme.connection.activeColor, 0.42) },
+            shadow: { x: 0, y: 0, blur: 8, spread: 1, color: withAlpha(theme.connection.activeColor, 0.62) },
         });
         tempEdgePathRef.current?.set({
-            stroke: theme.connection.activeColor,
+            stroke: theme.connection.color,
             strokeWidth: theme.connection.tempWidth,
-            dashPattern: [...theme.connection.dash],
-            shadow: { x: 0, y: 0, blur: 3, spread: 0, color: withAlpha(theme.connection.activeColor, 0.36) },
+            dashPattern: undefined,
+            shadow: undefined,
         });
     }, [theme]);
 
@@ -1248,9 +1263,9 @@ export function LeaferCanvas({
 
     const renderTempEdgeAtCanvasPoint = useCallback((connection: { nodeId: string; handleType: "source" | "target" }, pointerCanvasPoint: { x: number; y: number }) => {
         const path = tempEdgePathRef.current;
-        const glowPath = tempEdgeGlowPathRef.current;
+        const flowPath = tempEdgeFlowPathRef.current;
         const node = nodesRef.current.find((item) => item.id === connection.nodeId);
-        if (!path || !glowPath || !node) return;
+        if (!path || !flowPath || !node) return;
 
         const fixedCanvasPoint = connectionStartCanvasPointRef.current ?? getNodeConnectionPoint(node, connection.handleType);
         const fixedScreenPoint = canvasToScreen(fixedCanvasPoint.x, fixedCanvasPoint.y, viewportRef.current);
@@ -1259,7 +1274,7 @@ export function LeaferCanvas({
         const targetPoint = connection.handleType === "source" ? pointerScreenPoint : fixedScreenPoint;
 
         const connectionPath = buildConnectionPathFromPoints(sourcePoint, targetPoint);
-        glowPath.set({
+        flowPath.set({
             path: connectionPath,
             visible: true,
         });
@@ -1267,7 +1282,8 @@ export function LeaferCanvas({
             path: connectionPath,
             visible: true,
         });
-    }, []);
+        ensureConnectionFlowAnimation();
+    }, [ensureConnectionFlowAnimation]);
 
     const renderTempEdge = useCallback((connection: { nodeId: string; handleType: "source" | "target" }, clientX: number, clientY: number) => {
         renderTempEdgeAtCanvasPoint(connection, getCanvasPos(clientX, clientY));
@@ -1304,9 +1320,9 @@ export function LeaferCanvas({
 
     const clearTempEdge = useCallback(() => {
         const path = tempEdgePathRef.current;
-        const glowPath = tempEdgeGlowPathRef.current;
+        const flowPath = tempEdgeFlowPathRef.current;
         path?.set({ visible: false, path: "" });
-        glowPath?.set({ visible: false, path: "" });
+        flowPath?.set({ visible: false, path: "" });
     }, []);
 
     useEffect(() => {
