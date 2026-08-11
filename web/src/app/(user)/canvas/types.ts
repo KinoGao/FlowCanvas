@@ -82,6 +82,22 @@ export type CanvasScriptBeat = {
     shotType?: string;
     /** 分镜时长（秒），默认 3s */
     duration?: string;
+    /** 本镜主要角色（引用资产名，可为空） */
+    character?: string;
+    /** 本镜场景（引用资产名，可为空） */
+    scene?: string;
+    /** 机位/运镜，如「中景跟拍」「特写推近」 */
+    camera?: string;
+    /** 本镜台词/对白，无则空 */
+    dialogue?: string;
+};
+
+/** 脚本拆解出的可复用资产（角色/场景/道具），生成提示词时引用其描述 */
+export type CanvasScriptAsset = {
+    id: string;
+    kind: "character" | "scene" | "prop";
+    name: string;
+    description: string;
 };
 
 export type CanvasScriptMetadata = {
@@ -89,6 +105,7 @@ export type CanvasScriptMetadata = {
     scriptLogline?: string;
     scriptBody?: string;
     scriptBeats?: CanvasScriptBeat[];
+    scriptAssets?: CanvasScriptAsset[];
     scriptOutputIds?: string[];
 };
 

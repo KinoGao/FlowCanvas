@@ -1,0 +1,123 @@
+import type { CanvasScriptAsset, CanvasScriptBeat } from "../types";
+
+/**
+ * 脚本节点 AI 拆解与提示词合成（对标 LibTV 脚本节点 v2 的"剧本拆解 + 资产提取"）：
+ * 用文本/识图模型把剧本解析为「资产（角色/场景/道具）+ 分镜（内容/景别/时长/角色/场景/机位/台词）」，
+ * 生成图片/视频提示词时引用资产描述，保证角色与场景一致性。
+ */
+
+/** 脚本 AI 拆解提示词：要求模型返回资产与分镜 JSON。 */
+export function buildScriptAiPrompt(body: string): string {
+    return [
+        "你是专业影视分镜师，请把下面的剧本拆解为可拍摄的分镜脚本。",
+        "先提取资产：角色（人物名称 + 外貌/服装/气质描述）、场景（地点 + 环境/氛围描述）、道具（关键物品 + 外观描述）。",
+        "再按剧情推进拆成连续分镜，每个分镜给出：标题（2-8 字）、画面描述（主体、动作、场景、氛围，写可拍的具体画面）、景别（大远景/远景/全景/中景/近景/特写）、时长（如 \"3s\"）、角色（引用资产名）、场景（引用资产名）、机位（如 中景跟拍、特写推近）、台词（本镜对白，无则空字符串）。",
+        "画面优先：写\"人怎么干\"而非\"人干什么\"，避免抽象隐喻；镜头数量适中（短剧本 4-10 镜）。",
+        '只输出一个 JSON 对象，不要输出其他内容，格式：{"assets":[{"kind":"character"|"scene"|"prop","name":"...","description":"..."}],"beats":[{"title":"...","content":"...","shotType":"中景","duration":"3s","character":"","scene":"","camera":"","dialogue":""}]}',
+        "",
+        "剧本：",
+        body.trim().slice(0, 4000),
+    ].join("\n");
+}
+
+/** 解析模型返回的拆解 JSON（容忍代码围栏与前后说明文字）；失败返回空结构。 */
+export function parseScriptAiResponse(text: string): { beats: CanvasScriptBeat[]; assets: CanvasScriptAsset[] } {
+    const json = extractJsonObject(text);
+    if (!json) return { beats: [], assets: [] };
+    let raw: unknown;
+    try {
+        raw = JSON.parse(json);
+    } catch {
+        return { beats: [], assets: [] };
+    }
+    if (!raw || typeof raw !== "object") return { beats: [], assets: [] };
+    const record = raw as Record<string, unknown>;
+    const assets = (Array.isArray(record.assets) ? record.assets : []).slice(0, 40).map((item, index): CanvasScriptAsset | null => {
+        if (!item || typeof item !== "object") return null;
+        const asset = item as Record<string, unknown>;
+        const name = typeof asset.name === "string" ? asset.name.trim() : "";
+        const kind = typeof asset.kind === "string" && ["character", "scene", "prop"].includes(asset.kind) ? asset.kind : "character";
+        if (!name) return null;
+        return {
+            id: `asset-${index + 1}`,
+            kind: kind as CanvasScriptAsset["kind"],
+            name: name.slice(0, 24),
+            description: typeof asset.description === "string" ? asset.description.trim().slice(0, 200) : "",
+        };
+    }).filter((asset): asset is CanvasScriptAsset => Boolean(asset));
+    const beats = (Array.isArray(record.beats) ? record.beats : []).slice(0, 24).map((item, index): CanvasScriptBeat | null => {
+        if (!item || typeof item !== "object") return null;
+        const beat = item as Record<string, unknown>;
+        const content = typeof beat.content === "string" ? beat.content.trim() : "";
+        const title = (typeof beat.title === "string" && beat.title.trim()) || content.slice(0, 12) || `分镜 ${index + 1}`;
+        if (!content && !title) return null;
+        const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+        const draft: CanvasScriptBeat = {
+            id: `beat-${index + 1}`,
+            title: title.slice(0, 24),
+            content: content || title,
+            shotType: text(beat.shotType) || undefined,
+            duration: text(beat.duration) || undefined,
+            character: text(beat.character) || undefined,
+            scene: text(beat.scene) || undefined,
+            camera: text(beat.camera) || undefined,
+            dialogue: text(beat.dialogue) || undefined,
+            prompt: "",
+        };
+        return { ...draft, prompt: buildScriptBeatPrompt(draft, assets) };
+    }).filter((beat): beat is CanvasScriptBeat => Boolean(beat));
+    return { beats, assets };
+}
+
+/** 从模型回复中提取第一个 JSON 对象（容忍代码围栏与前后说明文字）。 */
+function extractJsonObject(text: string): string | null {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const candidate = fenced ? fenced[1] : text;
+    const start = candidate.indexOf("{");
+    if (start < 0) return null;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < candidate.length; index += 1) {
+        const char = candidate[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === "\\") {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === "{") depth += 1;
+        else if (char === "}") {
+            depth -= 1;
+            if (depth === 0) return candidate.slice(start, index + 1);
+        }
+    }
+    return null;
+}
+
+/** 合成单个分镜的生成提示词：镜头内容 + 景别/机位 + 角色/场景资产描述 + 台词。 */
+export function buildScriptBeatPrompt(
+    beat: Pick<CanvasScriptBeat, "title" | "content" | "shotType" | "camera" | "character" | "scene" | "dialogue">,
+    assets: CanvasScriptAsset[] = [],
+): string {
+    const parts: string[] = [`根据脚本分镜生成画面：${beat.content || beat.title}`];
+    if (beat.shotType) parts.push(`景别：${beat.shotType}`);
+    if (beat.camera) parts.push(`机位：${beat.camera}`);
+    const findAsset = (name: string | undefined) => (name ? assets.find((asset) => asset.name === name) : undefined);
+    const character = findAsset(beat.character);
+    if (character?.description) parts.push(`角色「${character.name}」：${character.description}`);
+    else if (beat.character) parts.push(`角色：${beat.character}`);
+    const scene = findAsset(beat.scene);
+    if (scene?.description) parts.push(`场景「${scene.name}」：${scene.description}`);
+    else if (beat.scene) parts.push(`场景：${beat.scene}`);
+    if (beat.dialogue) parts.push(`台词：${beat.dialogue}`);
+    parts.push("要求画面有清晰主体、镜头景别、动作和氛围，电影感构图。");
+    return parts.join("；");
+}
