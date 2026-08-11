@@ -58,6 +58,8 @@ import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasG
 import { buildGroupExecutionPlan, collectGroupMemberIds, isGroupExecutableNode } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
 import { buildScriptAiPrompt, buildScriptBeatPrompt, parseScriptAiResponse } from "../utils/canvas-script-ai";
+import { buildAssetPrompt } from "../utils/canvas-script-ai";
+import { ScriptDeskStudio, type ScriptOutputState } from "../components/script-desk-studio";
 import { canvasSelectionCenter, cloneCanvasSelection, CANVAS_SLASH_COMMANDS, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, CANVAS_IMAGE_QUICK_COMMANDS, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import { resolveVideoSubject, videoSubjectReferenceImages } from "../utils/canvas-video-subjects";
@@ -763,6 +765,7 @@ function LeaferCanvasPage() {
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
     const [materialLibraryTab, setMaterialLibraryTab] = useState<"styles" | "effects" | "assets">("styles");
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
+    const [scriptStudioNodeId, setScriptStudioNodeId] = useState<string | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [canvasVisualReady, setCanvasVisualReady] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
@@ -4755,10 +4758,9 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
-            message.success(`已拆出 ${beatNodes.length} 个分镜，开始生成…`);
-            beatNodes.forEach((node) => void handleGenerateNode(node.id, "image", node.metadata?.prompt || ""));
+            message.success(`已拆出 ${beatNodes.length} 个分镜，可在工作台逐镜微调后生成`);
         },
-        [createCanvasConnection, createCanvasNode, handleGenerateNode, message],
+        [createCanvasConnection, createCanvasNode, message],
     );
 
     const createScriptBeatNode = useCallback(
@@ -4782,6 +4784,7 @@ function LeaferCanvasPage() {
             };
             nodesRef.current = [...nodesRef.current, node];
             connectionsRef.current = [...connectionsRef.current, createCanvasConnection(scriptNode.id, node.id)];
+            handleConfigNodeChange(scriptNode.id, { scriptBeatOutputs: { ...(scriptNode.metadata?.scriptBeatOutputs ?? {}), [beat.id]: node.id }, scriptOutputIds: [...(scriptNode.metadata?.scriptOutputIds ?? []), node.id] });
             setNodes((prev) => [...prev, node]);
             setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
             setSelectedNodeIds(new Set([node.id]));
@@ -4789,7 +4792,7 @@ function LeaferCanvasPage() {
             setDialogNodeId(null);
             void handleGenerateNode(node.id, "image", node.metadata?.prompt || "");
         },
-        [createCanvasConnection, createCanvasNode, handleGenerateNode],
+        [createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
     );
 
     const createScriptGridStoryboard = useCallback(
@@ -4833,10 +4836,37 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
-            message.success(`已生成 ${count} 格${command.label}，开始生成…`);
-            gridNodes.forEach((node) => void handleGenerateNode(node.id, "image", node.metadata?.prompt || ""));
+            message.success(`已生成 ${count} 格${command.label}，可在工作台逐格微调后生成`);
         },
-        [createCanvasConnection, createCanvasNode, handleGenerateNode, message],
+        [createCanvasConnection, createCanvasNode, message],
+    );
+
+    const generateScriptAssetNode = useCallback(
+        (scriptNode: CanvasNodeData, asset: CanvasScriptAsset) => {
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const outputCount = Object.keys(scriptNode.metadata?.scriptAssetOutputs ?? {}).length;
+            const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + 200 + outputCount * (spec.height + 36) };
+            const prompt = buildAssetPrompt(asset);
+            const node: CanvasNodeData = {
+                ...createCanvasNode(
+                    CanvasNodeType.Image,
+                    { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
+                    { status: NODE_STATUS_IDLE, prompt, generationMode: "image", generationType: "generation" },
+                ),
+                position,
+                width: spec.width,
+                height: spec.height,
+            };
+            nodesRef.current = [...nodesRef.current, node];
+            connectionsRef.current = [...connectionsRef.current, createCanvasConnection(scriptNode.id, node.id)];
+            handleConfigNodeChange(scriptNode.id, { scriptAssetOutputs: { ...(scriptNode.metadata?.scriptAssetOutputs ?? {}), [asset.id]: node.id }, scriptOutputIds: [...(scriptNode.metadata?.scriptOutputIds ?? []), node.id] });
+            setNodes((prev) => [...prev, node]);
+            setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            void handleGenerateNode(node.id, "image", prompt);
+        },
+        [createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
     );
 
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
@@ -4995,28 +5025,7 @@ function LeaferCanvasPage() {
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
-            panelNode.metadata?.canvasTool === "script" ? (
-                <ScriptDeskPanel
-                    node={panelNode}
-                    theme={theme}
-                    onChange={(patch) => handleConfigNodeChange(panelNode.id, patch)}
-                    onAiAnalyze={() => void analyzeScriptNode(panelNode)}
-                    onImportUpstream={() => void handleImportScriptUpstream(panelNode)}
-                    hasUpstreamText={Boolean(upstreamScriptText(panelNode))}
-                    onBeatChange={(beat) => handleScriptBeatChange(panelNode, beat)}
-                    onBeatAdd={(index) => handleScriptBeatAdd(panelNode, index)}
-                    onBeatRemove={(index) => handleScriptBeatRemove(panelNode, index)}
-                    onBeatMove={(index, direction) => handleScriptBeatMove(panelNode, index, direction)}
-                    onAssetChange={(asset) => handleScriptAssetChange(panelNode, asset)}
-                    onAssetAdd={(asset) => handleScriptAssetAdd(panelNode, asset)}
-                    onAssetRemove={(assetId) => handleScriptAssetRemove(panelNode, assetId)}
-                    onCreateStoryboard={() => createScriptStoryboard(panelNode)}
-                    onCreateNarration={() => createScriptNarrationNode(panelNode)}
-                    onCreateVideo={() => createScriptVideoNode(panelNode)}
-                    onCreateBeat={(beat, index) => createScriptBeatNode(panelNode, beat, index)}
-                    onClose={() => setDialogNodeId(null)}
-                />
-            ) : isGenerationConfigNode(panelNode.type) ? (
+            isGenerationConfigNode(panelNode.type) ? (
                 <CanvasConfigComposer
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
@@ -5355,6 +5364,12 @@ function LeaferCanvasPage() {
                 setEditingNodeId(null);
                 return;
             }
+            if (node.metadata?.canvasTool === "script") {
+                setDialogNodeId(null);
+                setScriptStudioNodeId(node.id);
+                setEditingNodeId(null);
+                return;
+            }
             setDialogNodeId(node.id);
             setEditingNodeId(null);
         },
@@ -5499,6 +5514,23 @@ function LeaferCanvasPage() {
         [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, showConnections],
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
+    const scriptStudioNode = useMemo(() => (scriptStudioNodeId ? nodes.find((node) => node.id === scriptStudioNodeId && node.metadata?.canvasTool === "script") || null : null), [scriptStudioNodeId, nodes]);
+    const scriptOutputStates = useMemo(() => {
+        const result: Record<string, ScriptOutputState> = {};
+        if (scriptStudioNode) {
+            const byId = new Map(nodes.map((node) => [node.id, node]));
+            const stateOf = (node: CanvasNodeData | undefined): ScriptOutputState => {
+                const status = node?.metadata?.status;
+                if (status === NODE_STATUS_LOADING) return "loading";
+                if (status === NODE_STATUS_ERROR) return "error";
+                if (status === NODE_STATUS_SUCCESS && node?.metadata?.content) return "success";
+                return "idle";
+            };
+            for (const [beatId, nodeId] of Object.entries(scriptStudioNode.metadata?.scriptBeatOutputs ?? {})) result[beatId] = stateOf(byId.get(nodeId));
+            for (const [assetId, nodeId] of Object.entries(scriptStudioNode.metadata?.scriptAssetOutputs ?? {})) result[assetId] = stateOf(byId.get(nodeId));
+        }
+        return result;
+    }, [scriptStudioNode, nodes]);
     const dialogNode = useMemo(() => {
         const node = dialogNodeId ? mountedNodeItems.find((item) => item.id === dialogNodeId) || null : null;
         return node?.metadata?.canvasTool === "director" ? null : node;
@@ -5869,6 +5901,28 @@ function LeaferCanvasPage() {
                         </Suspense>
                     </ErrorBoundary>
                 ) : null}
+                {scriptStudioNode ? (
+                    <ScriptDeskStudio
+                        key={scriptStudioNode.id}
+                        node={scriptStudioNode}
+                        theme={theme}
+                        onClose={() => setScriptStudioNodeId(null)}
+                        onChange={(patch) => handleConfigNodeChange(scriptStudioNode.id, patch)}
+                        onAiAnalyze={() => void analyzeScriptNode(scriptStudioNode)}
+                        onImportUpstream={() => void handleImportScriptUpstream(scriptStudioNode)}
+                        hasUpstreamText={Boolean(upstreamScriptText(scriptStudioNode))}
+                        onBeatChange={(beat) => handleScriptBeatChange(scriptStudioNode, beat)}
+                        onBeatAdd={(index) => handleScriptBeatAdd(scriptStudioNode, index)}
+                        onBeatRemove={(index) => handleScriptBeatRemove(scriptStudioNode, index)}
+                        onBeatMove={(index, direction) => handleScriptBeatMove(scriptStudioNode, index, direction)}
+                        onAssetChange={(asset) => handleScriptAssetChange(scriptStudioNode, asset)}
+                        onAssetAdd={(asset) => handleScriptAssetAdd(scriptStudioNode, asset)}
+                        onAssetRemove={(assetId) => handleScriptAssetRemove(scriptStudioNode, assetId)}
+                        onGenerateBeat={(beat, index) => createScriptBeatNode(scriptStudioNode, beat, index)}
+                        onGenerateAsset={(asset) => generateScriptAssetNode(scriptStudioNode, asset)}
+                        outputStates={scriptOutputStates}
+                    />
+                ) : null}
 
                 <CanvasAssetManagerPanel
                     open={canvasAssetPanelOpen}
@@ -6173,232 +6227,6 @@ function LeaferCanvasPage() {
 function stopCanvasPanelInteraction(event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>) {
     event.stopPropagation();
 }
-
-function ScriptDeskPanel({
-    node,
-    theme,
-    onChange,
-    onAiAnalyze,
-    onImportUpstream,
-    hasUpstreamText,
-    onBeatChange,
-    onBeatAdd,
-    onBeatRemove,
-    onBeatMove,
-    onAssetChange,
-    onAssetAdd,
-    onAssetRemove,
-    onCreateStoryboard,
-    onCreateNarration,
-    onCreateVideo,
-    onCreateBeat,
-    onClose,
-}: {
-    node: CanvasNodeData;
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    onChange: (patch: Partial<CanvasNodeMetadata>) => void;
-    onAiAnalyze: () => void;
-    onImportUpstream: () => void;
-    hasUpstreamText: boolean;
-    onBeatChange: (beat: CanvasScriptBeat) => void;
-    onBeatAdd: (index: number) => void;
-    onBeatRemove: (index: number) => void;
-    onBeatMove: (index: number, direction: -1 | 1) => void;
-    onAssetChange: (asset: CanvasScriptAsset) => void;
-    onAssetAdd: (asset: CanvasScriptAsset) => void;
-    onAssetRemove: (assetId: string) => void;
-    onCreateStoryboard: () => void;
-    onCreateNarration: () => void;
-    onCreateVideo: () => void;
-    onCreateBeat: (beat: CanvasScriptBeat, index: number) => void;
-    onClose: () => void;
-}) {
-    const body = node.metadata?.scriptBody ?? node.metadata?.content ?? DEFAULT_SCRIPT_BODY;
-    const beats = node.metadata?.scriptBeats?.length ? node.metadata.scriptBeats : buildScriptBeats(body);
-    const assets = node.metadata?.scriptAssets ?? [];
-    const fieldStyle = { background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text };
-    const [editingIndex, setEditingIndex] = useState<number | null>(null);
-    const [draft, setDraft] = useState<CanvasScriptBeat | null>(null);
-    const updateBody = (scriptBody: string) => onChange({ scriptBody, content: scriptBody, status: scriptBody.trim() ? NODE_STATUS_SUCCESS : NODE_STATUS_IDLE });
-
-    const startEdit = (beat: CanvasScriptBeat, index: number) => {
-        setEditingIndex(index);
-        setDraft({ ...beat });
-    };
-    const saveEdit = () => {
-        if (draft) onBeatChange(draft);
-        setEditingIndex(null);
-        setDraft(null);
-    };
-    const patchDraft = (patch: Partial<CanvasScriptBeat>) => setDraft((current) => (current ? { ...current, ...patch } : current));
-
-    return (
-        <div
-            className="nodrag nopan pointer-events-auto w-[760px] max-w-[calc(100vw-32px)] rounded-2xl border p-4 shadow-[0_18px_48px_rgba(0,0,0,.34)] backdrop-blur-xl"
-            style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
-            data-canvas-no-zoom
-        >
-            <div className="mb-4 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                    <div className="text-sm font-semibold">脚本</div>
-                    <div className="mt-1 text-xs opacity-55">编辑剧本正文，AI 拆解为分镜 + 资产，再生成分镜、旁白或视频节点</div>
-                </div>
-                <button type="button" className="grid size-8 shrink-0 place-items-center rounded-lg transition hover:bg-white/10" onClick={onClose} aria-label="关闭脚本">
-                    <X className="size-4" />
-                </button>
-            </div>
-            <div className="grid grid-cols-[1fr_360px] gap-4">
-                <div className="min-w-0 space-y-3">
-                    <CanvasPanelInput label="标题" value={node.metadata?.scriptTitle || node.title || ""} placeholder="短片标题 / 分镜脚本名" onChange={(scriptTitle) => onChange({ scriptTitle })} style={fieldStyle} />
-                    <CanvasPanelInput label="一句话梗概" value={node.metadata?.scriptLogline || ""} placeholder="角色、目标、冲突和转折" onChange={(scriptLogline) => onChange({ scriptLogline })} style={fieldStyle} />
-                    <label className="nodrag nopan block min-w-0" onMouseDownCapture={stopCanvasPanelInteraction} onPointerDownCapture={stopCanvasPanelInteraction} onClickCapture={(event) => event.stopPropagation()}>
-                        <span className="mb-1 block text-xs opacity-55">脚本正文</span>
-                        <textarea
-                            className="thin-scrollbar h-40 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-6 outline-none placeholder:opacity-35"
-                            value={body}
-                            placeholder="按幕、段落或镜头写下脚本内容"
-                            onChange={(event) => updateBody(event.target.value)}
-                            style={fieldStyle}
-                        />
-                    </label>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                            <Button type="primary" icon={<Sparkles className="size-4" />} onClick={onAiAnalyze} disabled={!body.trim()}>
-                                AI 拆解
-                            </Button>
-                            {hasUpstreamText ? (
-                                <Button onClick={onImportUpstream}>
-                                    从上游导入
-                                </Button>
-                            ) : null}
-                        </div>
-                        <span className="text-[11px] opacity-45">连接上游文本节点可自动读取剧本；AI 拆解按「资产（人物/道具/场景）→ 分镜」顺序解析</span>
-                    </div>
-                    {assets.length ? (
-                        <div className="rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
-                            <div className="mb-2 text-xs font-medium opacity-65">资产（角色 / 场景 / 道具）</div>
-                            <div className="thin-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1">
-                                {assets.map((asset) => (
-                                    <div key={asset.id} className="flex items-center gap-2">
-                                        <span className="w-14 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px]" style={{ background: theme.node.fill }}>
-                                            {asset.kind === "character" ? "角色" : asset.kind === "scene" ? "场景" : "道具"}
-                                        </span>
-                                        <input className="h-7 w-24 min-w-0 rounded border px-2 text-xs outline-none" value={asset.name} placeholder="名称" onChange={(event) => onAssetChange({ ...asset, name: event.target.value })} style={fieldStyle} />
-                                        <input className="h-7 min-w-0 flex-1 rounded border px-2 text-xs outline-none" value={asset.description} placeholder="外观/环境描述" onChange={(event) => onAssetChange({ ...asset, description: event.target.value })} style={fieldStyle} />
-                                        <button type="button" className="shrink-0 text-xs opacity-50 transition hover:opacity-100" onClick={() => onAssetRemove(asset.id)}>
-                                            删除
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    ) : null}
-                </div>
-                <div className="min-w-0 rounded-xl border p-3" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
-                    <div className="mb-2 flex items-center justify-between">
-                        <div className="text-xs font-medium opacity-65">分镜表</div>
-                        <div className="text-[11px] opacity-45">{beats.length} 个分镜</div>
-                    </div>
-                    <div className="thin-scrollbar max-h-[400px] overflow-y-auto pr-1">
-                        <table className="w-full border-collapse text-left text-xs">
-                            <thead>
-                                <tr className="opacity-50">
-                                    <th className="w-6 pb-1.5 pr-1.5 font-medium">#</th>
-                                    <th className="w-12 pb-1.5 pr-1.5 font-medium">景别</th>
-                                    <th className="w-10 pb-1.5 pr-1.5 font-medium">时长</th>
-                                    <th className="pb-1.5 pr-1.5 font-medium">画面描述</th>
-                                    <th className="w-28 pb-1.5 font-medium">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {beats.map((beat, index) => (
-                                    <Fragment key={beat.id}>
-                                        <tr className="border-t align-top" style={{ borderColor: theme.toolbar.border }}>
-                                            <td className="py-2 pr-1.5 opacity-55">{index + 1}</td>
-                                            <td className="py-2 pr-1.5">{beat.shotType || "—"}</td>
-                                            <td className="py-2 pr-1.5">{beat.duration || "—"}</td>
-                                            <td className="py-2 pr-1.5">
-                                                <div className="font-medium">{beat.title}</div>
-                                                <div className="mt-0.5 line-clamp-2 leading-5 opacity-60">{beat.content}</div>
-                                                {beat.character || beat.scene || beat.camera ? (
-                                                    <div className="mt-0.5 truncate opacity-45">{[beat.character, beat.scene, beat.camera].filter(Boolean).join(" · ")}</div>
-                                                ) : null}
-                                            </td>
-                                            <td className="py-2">
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                    <Button size="small" onClick={() => onCreateBeat(beat, index)} title={`生成「${beat.title}」分镜图片`}>
-                                                        生成
-                                                    </Button>
-                                                    <Button size="small" onClick={() => startEdit(beat, index)}>
-                                                        编辑
-                                                    </Button>
-                                                    <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === 0} onClick={() => onBeatMove(index, -1)} aria-label="上移">
-                                                        ↑
-                                                    </button>
-                                                    <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === beats.length - 1} onClick={() => onBeatMove(index, 1)} aria-label="下移">
-                                                        ↓
-                                                    </button>
-                                                    <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100" onClick={() => onBeatRemove(index)} aria-label="删除分镜">
-                                                        删
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        {editingIndex === index && draft ? (
-                                            <tr className="border-t" style={{ borderColor: theme.toolbar.border }}>
-                                                <td colSpan={5} className="py-2">
-                                                    <div className="space-y-1.5">
-                                                        <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.title} placeholder="分镜标题" onChange={(event) => patchDraft({ title: event.target.value })} style={fieldStyle} />
-                                                        <textarea className="h-16 w-full resize-none rounded border px-2 py-1 text-xs leading-5 outline-none" value={draft.content} placeholder="画面描述" onChange={(event) => patchDraft({ content: event.target.value })} style={fieldStyle} />
-                                                        <div className="grid grid-cols-3 gap-1.5">
-                                                            <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.shotType || ""} placeholder="景别" onChange={(event) => patchDraft({ shotType: event.target.value })} style={fieldStyle} />
-                                                            <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.duration || ""} placeholder="时长 3s" onChange={(event) => patchDraft({ duration: event.target.value })} style={fieldStyle} />
-                                                            <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.camera || ""} placeholder="机位" onChange={(event) => patchDraft({ camera: event.target.value })} style={fieldStyle} />
-                                                        </div>
-                                                        <div className="grid grid-cols-2 gap-1.5">
-                                                            <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.character || ""} placeholder="角色（引用资产名）" onChange={(event) => patchDraft({ character: event.target.value })} style={fieldStyle} />
-                                                            <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.scene || ""} placeholder="场景（引用资产名）" onChange={(event) => patchDraft({ scene: event.target.value })} style={fieldStyle} />
-                                                        </div>
-                                                        <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.dialogue || ""} placeholder="台词（无则留空）" onChange={(event) => patchDraft({ dialogue: event.target.value })} style={fieldStyle} />
-                                                        <div className="flex justify-end gap-2">
-                                                            <Button size="small" onClick={() => setEditingIndex(null)}>
-                                                                取消
-                                                            </Button>
-                                                            <Button size="small" type="primary" onClick={saveEdit}>
-                                                                保存
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ) : null}
-                                    </Fragment>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="mt-2">
-                        <Button size="small" block onClick={() => onBeatAdd(beats.length - 1)}>
-                            + 新增分镜
-                        </Button>
-                    </div>
-                </div>
-            </div>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <Button onClick={onCreateStoryboard} disabled={!body.trim()}>
-                    拆成分镜
-                </Button>
-                <Button onClick={onCreateNarration} disabled={!body.trim()}>
-                    生成旁白节点
-                </Button>
-                <Button type="primary" onClick={onCreateVideo} disabled={!body.trim()}>
-                    脚本生视频
-                </Button>
-            </div>
-        </div>
-    );
-}
-
 
 function findCanvasNodeElement(root: HTMLElement | null, nodeId: string) {
     if (!root) return null;

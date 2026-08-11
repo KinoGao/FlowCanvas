@@ -121,3 +121,10 @@ export function buildScriptBeatPrompt(
     parts.push("要求画面有清晰主体、镜头景别、动作和氛围，电影感构图。");
     return parts.join("；");
 }
+
+/** 资产设定图提示词：用资产名 + 描述生成人物/道具/场景设定图。 */
+export function buildAssetPrompt(asset: CanvasScriptAsset): string {
+    const kindLabel = asset.kind === "character" ? "角色" : asset.kind === "scene" ? "场景" : "道具";
+    const subject = kindLabel === "角色" ? "全身正面、动作自然、表情清晰" : "完整呈现、细节清晰";
+    return `${kindLabel}设定图：${asset.name}。${asset.description}。要求：${subject}，干净背景，风格统一，电影质感。`;
+}

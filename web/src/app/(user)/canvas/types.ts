@@ -107,6 +107,10 @@ export type CanvasScriptMetadata = {
     scriptBeats?: CanvasScriptBeat[];
     scriptAssets?: CanvasScriptAsset[];
     scriptOutputIds?: string[];
+    /** 分镜 id → 输出节点 id（脚本工作台生成状态回显） */
+    scriptBeatOutputs?: Record<string, string>;
+    /** 资产 id → 输出节点 id（资产生成状态回显） */
+    scriptAssetOutputs?: Record<string, string>;
 };
 
 export type CanvasDirectorMetadata = {
