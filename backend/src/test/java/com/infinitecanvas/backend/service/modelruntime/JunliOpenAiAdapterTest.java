@@ -95,6 +95,7 @@ class JunliOpenAiAdapterTest {
         assertEquals("A paper boat sailing down a rainy street", upstream.path("prompt").asText());
         assertEquals(4, upstream.path("seconds").asInt());
         assertEquals("1280x720", upstream.path("size").asText());
+        assertEquals("url", upstream.path("response_format").asText());
         assertFalse(upstream.has("_flowcanvas_mode"));
         assertFalse(upstream.has("reference_images"));
     }
@@ -156,6 +157,31 @@ class JunliOpenAiAdapterTest {
         assertEquals(8, upstream.path("seconds").asInt());
         assertEquals("1920x1080", upstream.path("size").asText());
         assertEquals("https://example.com/ref.png", upstream.path("reference_images").get(0).asText());
+    }
+
+    @Test
+    void downloadsCompletedMediaFromPublicUrlWhenPresent() throws Exception {
+        pollBody.set("{\"id\":\"task-1\",\"object\":\"video\",\"status\":\"completed\",\"url\":\"" + serverUrl + "/media/result.mp4\"}");
+        server.createContext("/media/result.mp4", exchange -> respond(exchange, 200, "video/mp4", new byte[]{9, 8, 7, 6}));
+
+        ResponseEntity<?> contentResponse = adapter().handle(new MockHttpServletRequest("GET", "/videos/task-1/content"), "/videos/task-1/content", runtime());
+
+        assertEquals(HttpStatus.OK, contentResponse.getStatusCode());
+        assertEquals("video/mp4", contentResponse.getHeaders().getContentType().toString());
+        assertArrayEquals(new byte[]{9, 8, 7, 6}, (byte[]) contentResponse.getBody());
+    }
+
+    @Test
+    void contentFailureSurfacesUpstreamDetail() throws Exception {
+        pollBody.set("{\"id\":\"task-1\",\"object\":\"video\",\"status\":\"completed\"}");
+        server.removeContext("/v1/videos/task-1/content");
+        server.createContext("/v1/videos/task-1/content", exchange ->
+                respond(exchange, 503, "application/json", "{\"detail\":\"provider temporary unavailable: upstream video status 401\"}".getBytes(StandardCharsets.UTF_8)));
+
+        ResponseEntity<?> contentResponse = adapter().handle(new MockHttpServletRequest("GET", "/videos/task-1/content"), "/videos/task-1/content", runtime());
+
+        assertEquals(HttpStatus.BAD_GATEWAY, contentResponse.getStatusCode());
+        assertTrue(responseJson(contentResponse).path("error").path("message").asText().contains("upstream video status 401"));
     }
 
     @Test

@@ -196,10 +196,23 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
         HttpResponse<byte[]> upstream = query(taskId, runtime);
         if (upstream.statusCode() == 429 || upstream.statusCode() >= 500) return error(HttpStatus.CONFLICT, "Junli 视频仍在生成中");
         if (upstream.statusCode() < 200 || upstream.statusCode() >= 300) return upstreamError("查询", upstream, runtime.provider().getApiKey());
-        ObjectNode task = normalizedTask(taskId, readObject(upstream.body(), "Junli 查询任务响应不是有效 JSON"));
+        JsonNode source = readObject(upstream.body(), "Junli 查询任务响应不是有效 JSON");
+        ObjectNode task = normalizedTask(taskId, source);
         if (!"completed".equals(task.path("status").asText())) {
             String message = task.path("error").path("message").asText("Junli 视频仍在生成中");
             return error(HttpStatus.CONFLICT, message);
+        }
+        // 优先使用完成态返回的公开 URL（创建时传 response_format=url，走 CDN 无需 Key）；
+        // /content 端点作为回退，失败时透出上游详情而不是笼统的网关错误。
+        String publicUrl = resultUrl(source);
+        if (!publicUrl.isBlank()) {
+            HttpResponse<byte[]> fromUrl = httpClient.send(
+                    HttpRequest.newBuilder(URI.create(publicUrl)).timeout(TIMEOUT).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray()
+            );
+            if (fromUrl.statusCode() >= 200 && fromUrl.statusCode() < 300) {
+                return videoResponse(fromUrl);
+            }
         }
         HttpResponse<byte[]> content = httpClient.send(
                 authorized(URI.create(joinUrl(runtime.provider().getBaseUrl(), "/videos/" + encode(taskId) + "/content")), runtime.provider().getApiKey())
@@ -208,8 +221,15 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
                 HttpResponse.BodyHandlers.ofByteArray()
         );
         if (content.statusCode() < 200 || content.statusCode() >= 300) {
-            return error(HttpStatus.BAD_GATEWAY, "Junli 视频文件下载失败 (HTTP " + content.statusCode() + ")");
+            String detail = upstreamMessage(content.body());
+            String message = "Junli 视频文件下载失败 (HTTP " + content.statusCode() + ")";
+            if (!detail.isBlank()) message += ": " + sanitize(detail, runtime.provider().getApiKey());
+            return error(HttpStatus.BAD_GATEWAY, message);
         }
+        return videoResponse(content);
+    }
+
+    private ResponseEntity<byte[]> videoResponse(HttpResponse<byte[]> content) {
         HttpHeaders headers = new HttpHeaders();
         String contentType = content.headers().firstValue("content-type").orElse("video/mp4");
         try {
@@ -268,6 +288,8 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
         payload.put("prompt", prompt);
         payload.put("seconds", seconds);
         payload.put("size", videoSize(size, resolution));
+        // 要求完成态返回公开 URL（走 CDN、无需 Key，24 小时有效），下载比 /content 更可靠。
+        payload.put("response_format", "url");
         if ("first-last-frame".equals(mode) && referenceUrls.size() >= 2) {
             payload.put("start_frame", referenceUrls.get(0));
             payload.put("end_frame", referenceUrls.get(1));
@@ -428,6 +450,30 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
     private static void addHttpUrl(List<String> target, String value) {
         String normalized = value == null ? "" : value.trim();
         if (normalized.startsWith("http://") || normalized.startsWith("https://")) target.add(normalized);
+    }
+
+    /** 从完成态任务响应中取公开视频 URL（创建时传 response_format=url 后返回）。 */
+    private static String resultUrl(JsonNode source) {
+        if (source == null || source.isNull()) return "";
+        if (source.isTextual() && isHttpUrl(source.asText())) return source.asText();
+        if (source.isObject()) {
+            String value = source.path("url").asText("");
+            if (isHttpUrl(value)) return value;
+            for (String field : List.of("video_url", "output", "content", "data")) {
+                String nested = resultUrl(source.get(field));
+                if (!nested.isBlank()) return nested;
+            }
+        } else if (source.isArray()) {
+            for (JsonNode value : source) {
+                String nested = resultUrl(value);
+                if (!nested.isBlank()) return nested;
+            }
+        }
+        return "";
+    }
+
+    private static boolean isHttpUrl(String value) {
+        return value != null && (value.startsWith("http://") || value.startsWith("https://"));
     }
 
     private static String normalizeStatus(String value) {
