@@ -92,6 +92,8 @@ export type CanvasNodeProps = {
     editorManaged?: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
+    inputCount?: number;
+    outputCount?: number;
     renderPanel?: (node: CanvasNodeData) => ReactNode;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     batchCount?: number;
@@ -176,6 +178,8 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.batchMotion !== next.batchMotion) return false;
     if (prev.resourceLabel !== next.resourceLabel) return false;
     if (prev.mentionReferences !== next.mentionReferences) return false;
+    if (prev.inputCount !== next.inputCount) return false;
+    if (prev.outputCount !== next.outputCount) return false;
     return true;
 }
 
@@ -195,6 +199,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     editorManaged = false,
     resourceLabel,
     mentionReferences = [],
+    inputCount = 0,
+    outputCount = 0,
     renderPanel,
     renderNodeContent,
     batchCount = 0,
@@ -576,7 +582,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />}
                 </div>
 
-                {!isGroup ? <NodeTitleBadge node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
+                {!isGroup ? <NodeTitleBadge node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
@@ -977,10 +983,14 @@ function DirectorContent({ theme, onOpenComposer }: NodeContentRendererProps) {
 function NodeTitleBadge({
     node,
     theme,
+    inputCount,
+    outputCount,
     onTitleChange,
 }: {
     node: CanvasNodeData;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    inputCount: number;
+    outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
     const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
@@ -1051,6 +1061,11 @@ function NodeTitleBadge({
                 </button>
             )}
             </div>
+            {inputCount > 0 || outputCount > 0 ? (
+                <span className="canvas-node-relation-count" title={`输入 ${inputCount} · 输出 ${outputCount}`}>
+                    {inputCount > 1 ? `${inputCount} 个参考` : outputCount > 1 ? `${outputCount} 个结果` : "已连接"}
+                </span>
+            ) : null}
             {imageResolution ? <span className="shrink-0 tabular-nums opacity-60">{imageResolution}</span> : null}
         </div>
     );

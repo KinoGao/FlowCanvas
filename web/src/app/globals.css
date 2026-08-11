@@ -639,6 +639,33 @@
         transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, background-color 180ms ease, box-shadow 220ms ease;
     }
 
+    .canvas-empty-action-pill {
+        min-height: 0;
+        box-shadow: none;
+        animation: canvas-empty-pill-in 340ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .canvas-empty-action-pill:hover {
+        transform: translateY(-2px);
+    }
+
+    .canvas-empty-action-pill .canvas-empty-action-icon {
+        width: 16px;
+        height: 16px;
+        background: transparent !important;
+    }
+
+    .canvas-empty-double-click {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--creative-accent) 0%, transparent);
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, box-shadow 220ms ease;
+        animation: canvas-empty-double-click 2.6s ease-in-out infinite;
+    }
+
+    .canvas-empty-double-click:hover {
+        border-color: var(--creative-accent) !important;
+        transform: translateY(-1px);
+    }
+
     .canvas-empty-action-card:hover {
         border-color: var(--creative-accent) !important;
         box-shadow: 0 14px 30px color-mix(in srgb, var(--creative-accent) 13%, transparent);
@@ -697,9 +724,21 @@
         }
     }
 
+    @keyframes canvas-empty-pill-in {
+        from { opacity: 0; transform: translateY(7px) scale(.97); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes canvas-empty-double-click {
+        0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--creative-accent) 0%, transparent); }
+        50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--creative-accent) 14%, transparent); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
         .canvas-empty-state,
-        .canvas-empty-kicker-dot {
+        .canvas-empty-kicker-dot,
+        .canvas-empty-action-pill,
+        .canvas-empty-double-click {
             animation: none;
         }
     }
@@ -714,6 +753,45 @@
         color: var(--creative-text);
         font-variant-numeric: tabular-nums;
         min-width: 58px;
+    }
+
+    .canvas-zoom-slider {
+        width: clamp(54px, 8vw, 88px);
+        height: 18px;
+        cursor: ew-resize;
+        background: transparent;
+    }
+
+    .canvas-zoom-slider::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--creative-text) 16%, transparent);
+    }
+
+    .canvas-zoom-slider::-webkit-slider-thumb {
+        width: 13px;
+        height: 13px;
+        margin-top: -4.5px;
+        appearance: none;
+        border: 2px solid var(--creative-material-elevated);
+        border-radius: 999px;
+        background: var(--creative-accent);
+        box-shadow: 0 2px 8px color-mix(in srgb, var(--creative-text) 22%, transparent);
+    }
+
+    .canvas-zoom-slider::-moz-range-track {
+        height: 4px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--creative-text) 16%, transparent);
+    }
+
+    .canvas-zoom-slider::-moz-range-thumb {
+        width: 10px;
+        height: 10px;
+        border: 2px solid var(--creative-material-elevated);
+        border-radius: 999px;
+        background: var(--creative-accent);
+        box-shadow: 0 2px 8px color-mix(in srgb, var(--creative-text) 22%, transparent);
     }
 
     .node-element {
@@ -746,6 +824,29 @@
     .canvas-node-title {
         opacity: .72;
         transition: color 160ms ease, opacity 160ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .canvas-node-relation-count {
+        display: inline-flex;
+        align-items: center;
+        min-height: 16px;
+        padding: 0 5px;
+        border: 1px solid color-mix(in srgb, var(--creative-accent) 28%, transparent);
+        border-radius: 999px;
+        color: var(--creative-accent);
+        font-size: 9px;
+        font-weight: 600;
+        line-height: 14px;
+        white-space: nowrap;
+        background: color-mix(in srgb, var(--creative-material-elevated) 84%, transparent);
+        opacity: .86;
+        transition: opacity 160ms ease, transform 180ms cubic-bezier(.2, .8, .2, 1);
+    }
+
+    .node-element[data-node-hovered="true"] .canvas-node-relation-count,
+    .node-element[data-node-selected="true"] .canvas-node-relation-count {
+        opacity: 1;
+        transform: translateY(-1px);
     }
 
     .node-element[data-node-hovered="true"] .canvas-node-title,

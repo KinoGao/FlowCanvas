@@ -69,6 +69,17 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                 <Tooltip title="重置视图">
                     <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={{ color: theme.toolbar.item }} icon={<Focus className="size-4" />} onClick={onReset} aria-label="重置视图" />
                 </Tooltip>
+                <input
+                    type="range"
+                    className="canvas-zoom-slider"
+                    min={10}
+                    max={300}
+                    step={5}
+                    value={zoomPercent}
+                    aria-label="缩放滑杆"
+                    style={{ accentColor: theme.ui.accent }}
+                    onChange={(event) => onScaleChange(clampCanvasZoom(Number(event.target.value) / 100))}
+                />
                 <button type="button" className="creative-os-zoom-value h-8 rounded-lg px-2 text-xs tabular-nums transition" style={zoomOpen ? activeStyle : { color: theme.toolbar.item }} onClick={() => setZoomOpen((value) => !value)} aria-label="缩放选项">
                     {zoomPercent}%
                 </button>

@@ -1413,6 +1413,10 @@ function LeaferCanvasPage() {
         [batchVisibilityIndex, nodes],
     );
     const canvasGraph = useMemo(() => createCanvasResourceGraph(nodes, connections, nodeById), [connections, nodeById, nodes]);
+    const nodeRelationCounts = useMemo(
+        () => new Map(nodes.map((node) => [node.id, { input: canvasGraph.incomingByNodeId.get(node.id)?.length || 0, output: canvasGraph.outgoingByNodeId.get(node.id)?.length || 0 }])),
+        [canvasGraph, nodes],
+    );
 
     useLayoutEffect(() => {
         nodeByIdRef.current = nodeById;
@@ -5700,6 +5704,8 @@ function LeaferCanvasPage() {
                                 editorManaged
                                 resourceLabel={resourceReferenceByNodeId.get(node.id)}
                                 mentionReferences={mentionReferencesByNodeId.get(node.id) || EMPTY_MENTION_REFERENCES}
+                                inputCount={nodeRelationCounts.get(node.id)?.input || 0}
+                                outputCount={nodeRelationCounts.get(node.id)?.output || 0}
                                 renderPanel={renderCanvasNodePanel}
                                 renderNodeContent={renderCanvasConfigNodeContent}
                                 onHoverStart={handleNodeHoverStart}
@@ -6563,22 +6569,38 @@ function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitIns
         { id: "template", label: "模板", description: "复用一套完整工作流", icon: <Workflow className="size-4.5" />, onClick: onOpenTemplates },
     ];
 
+    const quickActions = [actions[0], actions[1], actions[2], actions[3], actions[6]];
+
     return (
         <div className="pointer-events-none absolute inset-0 z-[40] flex items-center justify-center px-4 py-20">
-            <div className="canvas-empty-state pointer-events-auto flex w-[min(780px,calc(100vw-32px))] flex-col items-center text-center">
-                <div className="canvas-empty-kicker mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em]" style={{ color: theme.ui.accent }}>
-                    <span className="canvas-empty-kicker-dot" aria-hidden />
-                    Creative canvas
+            <div className="canvas-empty-state pointer-events-auto flex w-[min(860px,calc(100vw-32px))] flex-col items-center text-center">
+                <div className="canvas-empty-guidance flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[15px] leading-7" style={{ color: theme.node.muted }}>
+                    <button type="button" className="canvas-empty-double-click inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] font-semibold" style={{ color: theme.node.text, background: theme.ui.materialElevated, borderColor: theme.ui.hairline }} onClick={onOpenAgent}>
+                        <Sparkles className="size-3.5" style={{ color: theme.ui.accent }} />
+                        双击画布
+                    </button>
+                    <span>自由创作，或浏览模板。</span>
                 </div>
-                <h2 className="m-0 text-[clamp(24px,3vw,38px)] font-semibold tracking-[-0.04em]" style={{ color: theme.node.text }}>
-                    把灵感放进画布
-                </h2>
-                <p className="mt-2 max-w-[520px] text-[13px] leading-6 opacity-55" style={{ color: theme.node.muted }}>
-                    从一句话、一个节点或一套模板开始，让输入、过程和结果在同一空间里保持可追溯。
-                </p>
+                <div className="canvas-empty-actions mt-3 flex max-w-full flex-wrap justify-center gap-2">
+                    {quickActions.map((action, index) => (
+                        <button
+                            key={action.id}
+                            type="button"
+                            data-canvas-quick-action={action.id}
+                            className="canvas-empty-action-card canvas-empty-action-pill group inline-flex h-9 items-center gap-2 rounded-full border px-3 text-left text-[12px] font-medium"
+                            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text, animationDelay: `${80 + index * 45}ms` }}
+                            onClick={() => (action.onClick ? action.onClick() : action.type ? onCreateNode(action.type, action.metadata) : undefined)}
+                        >
+                            <span className="canvas-empty-action-icon grid size-4 shrink-0 place-items-center" style={{ color: theme.ui.accent }}>
+                                {action.icon}
+                            </span>
+                            <span>{action.label}</span>
+                        </button>
+                    ))}
+                </div>
                 <form
-                    className="canvas-empty-composer mt-6 flex w-full max-w-[560px] items-center gap-2 rounded-2xl border p-2 pl-4"
-                    style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
+                    className="canvas-empty-composer mt-4 flex w-full max-w-[480px] items-center gap-2 rounded-xl border p-1.5 pl-3"
+                    style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}
                     onSubmit={(event) => {
                         event.preventDefault();
                         onSubmitInspiration(inspiration);
@@ -6602,32 +6624,11 @@ function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitIns
                         <ArrowUp className="size-3.5" />
                     </button>
                 </form>
-                <div className="canvas-empty-actions mt-5 grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
-                    {actions.map((action) => (
-                        <button
-                            key={action.id}
-                            type="button"
-                            data-canvas-quick-action={action.id}
-                            className="canvas-empty-action-card group flex min-h-[76px] items-center gap-3 rounded-xl border p-3 text-left transition"
-                            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
-                            onClick={() => (action.onClick ? action.onClick() : action.type ? onCreateNode(action.type, action.metadata) : undefined)}
-                        >
-                            <span className="canvas-empty-action-icon grid size-9 shrink-0 place-items-center rounded-lg" style={{ background: theme.toolbar.activeBg, color: theme.ui.accent }}>
-                                {action.icon}
-                            </span>
-                            <span className="min-w-0">
-                                <span className="block truncate text-[12px] font-semibold">{action.label}</span>
-                                <span className="mt-1 block truncate text-[10px] leading-4 opacity-50">{action.description}</span>
-                            </span>
-                            <span className="ml-auto shrink-0 text-[16px] opacity-20 transition-transform group-hover:translate-x-0.5 group-hover:opacity-55">↗</span>
-                        </button>
-                    ))}
-                </div>
-                <button type="button" className="canvas-empty-agent-button mt-5 inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] transition" style={{ borderColor: theme.ui.hairline, background: theme.ui.controlFill, color: theme.node.text }} onClick={onOpenAgent}>
+                <button type="button" className="canvas-empty-agent-button mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] transition" style={{ borderColor: theme.ui.hairline, background: theme.ui.controlFill, color: theme.node.text }} onClick={onOpenAgent}>
                     <Bot className="size-3.5" style={{ color: theme.ui.accent }} />
-                    打开 Agent 侧栏
+                    让 Agent 搭建工作流
                 </button>
-                <div className="mt-4 text-[11px] opacity-35" style={{ color: theme.node.muted }}>也可以双击空白处，或使用右键菜单添加节点</div>
+                <div className="mt-3 text-[11px] opacity-35" style={{ color: theme.node.muted }}>也可以双击空白处，或使用右键菜单添加节点</div>
             </div>
         </div>
     );
