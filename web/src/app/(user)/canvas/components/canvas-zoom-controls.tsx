@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Tooltip } from "antd";
-import { Compass, Focus, FolderOpen, Minus, Plus } from "lucide-react";
+import { CircleHelp, Grid3X3, LocateFixed, Map, Minus, Plus } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -12,10 +12,11 @@ type CanvasZoomControlsProps = {
     onReset: () => void;
     isMiniMapOpen: boolean;
     onToggleMiniMap: () => void;
-    onOpenMyAssets: () => void;
+    gridEnabled: boolean;
+    onToggleGrid: () => void;
 };
 
-export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap, onOpenMyAssets }: CanvasZoomControlsProps) {
+export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap, gridEnabled, onToggleGrid }: CanvasZoomControlsProps) {
     const [zoomOpen, setZoomOpen] = useState(false);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -29,9 +30,9 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     };
 
     return (
-        <div className="absolute bottom-4 left-4 z-50 flex items-end gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <div className="canvas-viewport-controls absolute bottom-2 left-2 z-50 flex items-end gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             {zoomOpen ? (
-                <div className="creative-os-panel absolute bottom-14 left-0 w-[212px] rounded-2xl border p-2" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
+                <div className="creative-os-panel canvas-zoom-menu absolute bottom-14 left-0 w-[212px] rounded-2xl border p-2" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                     <div className="mb-2 flex h-8 items-center rounded-md border px-2 text-sm" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                         <input
                             className="min-w-0 flex-1 bg-transparent outline-none"
@@ -57,17 +58,15 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                 </div>
             ) : null}
 
-            <div className="creative-os-zoom-cluster flex h-11 items-center gap-1 border px-1.5" style={dockStyle}>
-                <Tooltip title="资产管理">
-                    <button type="button" className="creative-os-icon-button !size-8" style={{ color: theme.toolbar.item }} onClick={onOpenMyAssets} aria-label="资产管理">
-                        <FolderOpen className="size-4" />
-                    </button>
-                </Tooltip>
+            <div className="creative-os-zoom-cluster flex h-10 items-center gap-0.5 border px-1" style={dockStyle}>
                 <Tooltip title={isMiniMapOpen ? "关闭小地图" : "打开小地图"}>
-                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={isMiniMapOpen ? activeStyle : { color: theme.toolbar.item }} icon={<Compass className="size-4" />} onClick={onToggleMiniMap} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} />
+                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={isMiniMapOpen ? activeStyle : { color: theme.toolbar.item }} icon={<Map className="size-4" />} onClick={onToggleMiniMap} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} />
                 </Tooltip>
-                <Tooltip title="重置视图">
-                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={{ color: theme.toolbar.item }} icon={<Focus className="size-4" />} onClick={onReset} aria-label="重置视图" />
+                <Tooltip title={gridEnabled ? "隐藏画布网格" : "显示画布网格"}>
+                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={gridEnabled ? activeStyle : { color: theme.toolbar.item }} icon={<Grid3X3 className="size-4" />} onClick={onToggleGrid} aria-label={gridEnabled ? "隐藏画布网格" : "显示画布网格"} />
+                </Tooltip>
+                <Tooltip title="适合屏幕">
+                    <Button type="text" className="creative-os-icon-button !size-8 !min-w-8 !p-0" style={{ color: theme.toolbar.item }} icon={<LocateFixed className="size-4" />} onClick={onReset} aria-label="适合屏幕" />
                 </Tooltip>
                 <input
                     type="range"
@@ -80,10 +79,12 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
                     style={{ accentColor: theme.ui.accent }}
                     onChange={(event) => onScaleChange(clampCanvasZoom(Number(event.target.value) / 100))}
                 />
-                <button type="button" className="creative-os-zoom-value h-8 rounded-lg px-2 text-xs tabular-nums transition" style={zoomOpen ? activeStyle : { color: theme.toolbar.item }} onClick={() => setZoomOpen((value) => !value)} aria-label="缩放选项">
-                    {zoomPercent}%
-                </button>
             </div>
+            <Tooltip title={`缩放 ${zoomPercent}% · 点击打开选项`}>
+                <button type="button" className="creative-os-help-button grid size-10 place-items-center rounded-full border" style={{ ...dockStyle, color: zoomOpen ? theme.ui.accent : theme.toolbar.item }} onClick={() => setZoomOpen((value) => !value)} aria-label="缩放与帮助">
+                    <CircleHelp className="size-[18px]" />
+                </button>
+            </Tooltip>
         </div>
     );
 }

@@ -2,7 +2,6 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Modal, Segmented, Switch } from "antd";
 import {
-    Boxes,
     CircleDot,
     Clapperboard,
     Crosshair,
@@ -10,13 +9,15 @@ import {
     FolderOpen,
     Grid2x2,
     Info,
+    History,
     Keyboard,
     Layers3,
     Link2,
     Moon,
-    Palette,
     Plus,
     Redo2,
+    Search,
+    MessageCircle,
     Sparkles,
     Square,
     Sun,
@@ -58,6 +59,8 @@ export function CanvasToolbar({
     onOpenMyAssets,
     onOpenMaterialLibrary,
     onOpenWorkflowToolbox,
+    onSearch,
+    onOpenAgent,
     assetPanelOpen = false,
 }: {
     selectedCount: number;
@@ -85,6 +88,8 @@ export function CanvasToolbar({
     onOpenMyAssets: () => void;
     onOpenMaterialLibrary: (tab?: "styles" | "effects" | "assets") => void;
     onOpenWorkflowToolbox: () => void;
+    onSearch: () => void;
+    onOpenAgent: () => void;
     assetPanelOpen?: boolean;
 }) {
     const wrapRef = useRef<HTMLDivElement>(null);
@@ -98,6 +103,7 @@ export function CanvasToolbar({
     const [addMenuAnchor, setAddMenuAnchor] = useState<DockPosition>({ x: 0, y: 0 });
     const [appearanceOpen, setAppearanceOpen] = useState(false);
     const [materialOpen, setMaterialOpen] = useState(false);
+    const [historyOpen, setHistoryOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [panelPosition, setPanelPosition] = useState<DockPosition>({ x: 0, y: 0 });
     const [panelTop, setPanelTop] = useState(16);
@@ -105,16 +111,17 @@ export function CanvasToolbar({
     const hoverStyle = { background: theme.toolbar.itemHover, color: theme.toolbar.activeText };
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
     const tip = hovered ? toolLabel(hovered) : "";
-    const dockPanelOpen = addMenuOpen || appearanceOpen || materialOpen;
+    const dockPanelOpen = addMenuOpen || appearanceOpen || materialOpen || historyOpen;
 
     const closeDockPopovers = () => {
         setAddMenuOpen(false);
         setAppearanceOpen(false);
         setMaterialOpen(false);
+        setHistoryOpen(false);
         setShortcutsOpen(false);
     };
 
-    const openPanelAt = (event: ReactMouseEvent<HTMLElement>, panel: "add" | "appearance" | "material") => {
+    const openPanelAt = (event: ReactMouseEvent<HTMLElement>, panel: "add" | "appearance" | "material" | "history") => {
         setShortcutsOpen(false);
         setPanelPosition(getDockPosition(wrapRef.current, event.currentTarget));
         if (panel === "add") {
@@ -124,6 +131,7 @@ export function CanvasToolbar({
         setAddMenuOpen(panel === "add" ? (value) => !value : false);
         setAppearanceOpen(panel === "appearance" ? (value) => !value : false);
         setMaterialOpen(panel === "material" ? (value) => !value : false);
+        setHistoryOpen(panel === "history" ? (value) => !value : false);
     };
 
     useEffect(() => {
@@ -150,31 +158,26 @@ export function CanvasToolbar({
     }, [dockPanelOpen, panelPosition.y]);
 
     return (
-        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-start p-4 max-md:items-end max-md:justify-center max-md:px-4 max-md:pb-4">
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-start p-2 max-md:items-end max-md:justify-center max-md:px-4 max-md:pb-4">
             {tip ? <DockTip label={tip} position={tipPosition} theme={theme} /> : null}
-            <div ref={wrapRef} className="creative-os-dock pointer-events-auto flex w-14 max-h-[calc(100vh-160px)] flex-col items-center gap-1 overflow-x-hidden overflow-y-auto border px-1 py-2 [&>*]:shrink-0 max-md:h-14 max-md:w-auto max-md:max-w-full max-md:flex-row max-md:overflow-x-auto max-md:overflow-y-hidden max-md:px-2 max-md:py-0" style={dockStyle}>
-                <ToolbarButton id="tool-add" label="添加节点" active={addMenuOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "add")}>
+            <div ref={wrapRef} className="creative-os-dock pointer-events-auto flex w-12 max-h-[calc(100vh-132px)] flex-col items-center gap-0.5 overflow-x-hidden overflow-y-auto border px-1 py-1.5 [&>*]:shrink-0 max-md:h-12 max-md:w-auto max-md:max-w-full max-md:flex-row max-md:overflow-x-auto max-md:overflow-y-hidden max-md:px-1.5 max-md:py-1" style={dockStyle}>
+                <ToolbarButton primary id="tool-add" label="添加节点" active={addMenuOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "add")}>
                     <Plus className="size-5" />
                 </ToolbarButton>
-                <Divider theme={theme} />
+                <ToolbarButton id="tool-search" label="搜索节点" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onSearch(); }}>
+                    <Search className="size-4.5" />
+                </ToolbarButton>
                 <ToolbarButton id="tool-material" label="素材库" active={materialOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "material")}>
-                    <Boxes className="size-4.5" />
+                    <FolderOpen className="size-4.5" />
                 </ToolbarButton>
                 <ToolbarButton id="tool-workflow-toolbox" label="工具箱" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onOpenWorkflowToolbox(); }}>
                     <Workflow className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-undo" label="撤销" disabled={!canUndo} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onUndo(); }}>
-                    <Undo2 className="size-4.5" />
+                <ToolbarButton id="tool-agent" label="创作 Agent" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onOpenAgent(); }}>
+                    <MessageCircle className="size-4.5" />
                 </ToolbarButton>
-                <ToolbarButton id="tool-redo" label="重做" disabled={!canRedo} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onRedo(); }}>
-                    <Redo2 className="size-4.5" />
-                </ToolbarButton>
-                <ToolbarButton id="tool-clear" label="清空画布" danger hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onClear(); }}>
-                    <Eraser className="size-4.5" />
-                </ToolbarButton>
-                <Divider theme={theme} />
-                <ToolbarButton id="tool-shortcuts" label="快捷键" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); setShortcutsOpen(true); }}>
-                    <Keyboard className="size-4.5" />
+                <ToolbarButton id="tool-history" label="历史与快捷操作" active={historyOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "history")}>
+                    <History className="size-4.5" />
                 </ToolbarButton>
                 {selectedCount >= 2 ? (
                     <>
@@ -195,9 +198,8 @@ export function CanvasToolbar({
                         </ToolbarButton>
                     </>
                 ) : null}
-                <Divider theme={theme} />
-                <ToolbarButton id="tool-style" label="画布外观" active={appearanceOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "appearance")}>
-                    <Palette className="size-4.5" />
+                <ToolbarButton brand id="tool-style" label="画布外观" active={appearanceOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "appearance")}>
+                    <span className="canvas-flow-mark canvas-flow-mark--dock" aria-hidden />
                 </ToolbarButton>
             </div>
 
@@ -223,6 +225,20 @@ export function CanvasToolbar({
                     <DividerBlock theme={theme} />
                     <AddNodeOption theme={theme} icon={<FolderOpen className="size-4" />} label="我的素材" onClick={() => onOpenMaterialLibrary("assets")} onClose={() => setMaterialOpen(false)} />
                     <AddNodeOption theme={theme} icon={<Upload className="size-4" />} label="上传" onClick={onUpload} onClose={() => setMaterialOpen(false)} />
+                </div>
+            ) : null}
+
+            {!assetPanelOpen && historyOpen ? (
+                <div
+                    ref={panelRef}
+                    className="canvas-toolbar-popover creative-os-panel pointer-events-auto absolute z-30 w-[196px] rounded-[8px] border p-2"
+                    style={{ left: panelPosition.x || "50%", top: panelTop, background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+                >
+                    <AddNodeOption theme={theme} icon={<Undo2 className="size-4" />} label="撤销" disabled={!canUndo} onClick={onUndo} onClose={() => setHistoryOpen(false)} />
+                    <AddNodeOption theme={theme} icon={<Redo2 className="size-4" />} label="重做" disabled={!canRedo} onClick={onRedo} onClose={() => setHistoryOpen(false)} />
+                    <DividerBlock theme={theme} />
+                    <AddNodeOption theme={theme} icon={<Keyboard className="size-4" />} label="快捷键" onClick={() => setShortcutsOpen(true)} onClose={() => setHistoryOpen(false)} />
+                    <AddNodeOption theme={theme} icon={<Eraser className="size-4" />} label="清空画布" danger onClick={onClear} onClose={() => setHistoryOpen(false)} />
                 </div>
             ) : null}
 
@@ -347,6 +363,8 @@ function ToolbarButton({
     onClick,
     disabled = false,
     danger = false,
+    primary = false,
+    brand = false,
     children,
 }: {
     id: string;
@@ -361,6 +379,8 @@ function ToolbarButton({
     onClick?: (event: ReactMouseEvent<HTMLElement>) => void;
     disabled?: boolean;
     danger?: boolean;
+    primary?: boolean;
+    brand?: boolean;
     children: ReactNode;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -369,7 +389,7 @@ function ToolbarButton({
         <Button
             type="text"
             aria-label={label}
-            className="creative-os-dock-button !h-11 !w-11 !min-w-11 !p-0"
+            className={`creative-os-dock-button !h-9 !w-9 !min-w-9 !p-0 ${primary ? "is-primary" : ""} ${brand ? "is-brand" : ""}`}
             disabled={disabled}
             style={active ? activeStyle : hovered === id && !disabled ? hoverStyle : { color: danger ? theme.ui.danger : theme.toolbar.item, opacity: disabled ? 0.35 : 1 }}
             icon={children}
@@ -510,12 +530,11 @@ function toolLabel(id: string) {
     if (id === 'tool-group') return '成组';
     if (id === 'tool-storyboard-group') return '分镜组';
     if (id === "tool-add") return "添加节点";
+    if (id === "tool-search") return "搜索节点";
     if (id === "tool-material") return "素材库";
     if (id === "tool-workflow-toolbox") return "工具箱";
-    if (id === "tool-undo") return "撤销";
-    if (id === "tool-redo") return "重做";
-    if (id === "tool-clear") return "清空画布";
-    if (id === "tool-shortcuts") return "快捷键";
+    if (id === "tool-agent") return "创作 Agent";
+    if (id === "tool-history") return "历史与快捷操作";
     if (id === "tool-style") return "画布外观";
     if (id === "tool-delete") return "删除选中";
     return "";

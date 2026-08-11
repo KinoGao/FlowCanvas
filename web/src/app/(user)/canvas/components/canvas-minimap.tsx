@@ -81,7 +81,7 @@ export function CanvasMiniMap({
     return (
         <div
             ref={mapRef}
-            className="creative-os-panel absolute bottom-20 left-4 z-50 touch-none overflow-hidden rounded-xl border"
+            className="creative-os-panel absolute bottom-16 left-2 z-50 touch-none overflow-hidden rounded-xl border"
             style={{ width: MAP_WIDTH, height: MAP_HEIGHT, background: theme.ui.material, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
             onPointerDown={(event) => {
                 event.stopPropagation();
