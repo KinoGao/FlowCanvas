@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ART_SKILL_OPTIONS, STORY_SKILL_OPTIONS } from "../agent-skills/options";
 import { App, Button, Input, Segmented, Select, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
 import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
@@ -1240,34 +1241,6 @@ const MODE_OPTIONS = [
     { label: "视频制作", value: "production" },
 ] as const;
 
-const STORY_SKILL_OPTIONS = [
-    { label: "喜剧幽默", value: "Comedy_humor" },
-    { label: "成长青春", value: "Coming_of_age" },
-    { label: "家庭温情", value: "Family_warmth" },
-    { label: "历史史诗", value: "Historical_epic" },
-    { label: "恐怖灵异", value: "Horror_supernatural" },
-    { label: "热血动作", value: "Hot_blooded_action" },
-    { label: "悬疑惊悚", value: "Mystery_thriller" },
-    { label: "心理剧情", value: "Psychological_drama" },
-    { label: "科幻末世", value: "Scifi_post_apocalypse" },
-    { label: "甜宠言情", value: "Sweet_romance_novel" },
-    { label: "都市职场", value: "Urban_workplace_drama" },
-    { label: "古风仙侠", value: "Xianxia_fantasy" },
-];
-
-const ART_SKILL_OPTIONS = [
-    { label: "2D 日式动画", value: "2D_90s_japanese_anime" },
-    { label: "2D 中式古风", value: "2D_chinese_guofeng" },
-    { label: "2D 扁平设计", value: "2D_flat_design" },
-    { label: "2D 都市恋爱", value: "2D_mature_urban_romance" },
-    { label: "3D 动画渲染", value: "3D_anime_render" },
-    { label: "3D 国风传统", value: "3D_chinese_traditional" },
-    { label: "3D 黏土定格", value: "3D_clay_stopmotion" },
-    { label: "3D 国风赛博", value: "3D_guofeng_cyber" },
-    { label: "真人古装", value: "realpeople_ancient_chinese" },
-    { label: "真人现代都市", value: "realpeople_modern_city" },
-    { label: "真人都市现代", value: "realpeople_urban_modern" },
-];
 
 export function shouldResetPipeline(mode: AgentMode): boolean {
     return mode === "default";

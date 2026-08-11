@@ -24,6 +24,8 @@ import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantRefere
 import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildCanvasResourceReferences } from "../utils/canvas-resource-references";
+import { ART_SKILL_OPTIONS, STORY_SKILL_OPTIONS } from "../agent-skills/options";
+import { loadArtSkill, loadStorySkill } from "../agent-skills/loader";
 import type { CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 
 export const CANVAS_AGENT_PANEL_MOTION_MS = 240;
@@ -333,6 +335,8 @@ export function CanvasAssistantPanel({
     const [onlineLogs, setOnlineLogs] = useState<OnlineAgentLog[]>([]);
     const [resizing, setResizing] = useState(false);
     const [removedReferenceIds, setRemovedReferenceIds] = useState<Set<string>>(new Set());
+    const [artSkill, setArtSkill] = useState<string | null>(() => (typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-art-skill")));
+    const [storySkill, setStorySkill] = useState<string | null>(() => (typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-story-skill")));
     const [localSessions, setLocalSessions] = useState<CanvasAssistantSession[]>(() => (sessions.length ? sessions : [createSession()]));
     const [localActiveSessionId, setLocalActiveSessionId] = useState<string | null>(activeSessionId);
     const snapshotRef = useRef(snapshot);
@@ -474,7 +478,7 @@ export function CanvasAssistantPanel({
         const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         try {
             setIsRunning(true);
-            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage);
+            const messages = await buildToolAgentMessages(snapshotRef.current, history, userMessage, { artSkill: artSkill || undefined, storySkill: storySkill || undefined });
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "required" });
             let streamed = "";
             const result = await requestToolResponse({ ...requestConfig, systemPrompt: "" }, messages, ONLINE_AGENT_TOOLS, "required", (text) => {
@@ -799,6 +803,8 @@ export function CanvasAssistantPanel({
                                 ) : null}
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                                 <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
+                                <AgentSkillPicker kind="art" value={artSkill} onChange={setArtSkill} />
+                                <AgentSkillPicker kind="story" value={storySkill} onChange={setStorySkill} />
                             </>
                         }
                     />
@@ -885,6 +891,25 @@ export function CanvasAssistantPanel({
                 {agentMode === "local" ? <CanvasLocalAgentPanel embedded snapshot={snapshot} canUndoOps={canUndoOps} onApplyOps={onApplyOps} onUndoOps={onUndoOps} /> : onlineContent}
             </motion.aside>
         </motion.div>
+    );
+}
+
+function AgentSkillPicker({ kind, value, onChange }: { kind: "art" | "story"; value: string | null; onChange: (value: string | null) => void }) {
+    const options = kind === "art" ? ART_SKILL_OPTIONS : STORY_SKILL_OPTIONS;
+    const storageKey = kind === "art" ? "canvas-agent-art-skill" : "canvas-agent-story-skill";
+    return (
+        <Select
+            size="small"
+            style={{ minWidth: 100 }}
+            value={value || undefined}
+            placeholder={kind === "art" ? "美术风格" : "故事风格"}
+            allowClear
+            onChange={(next) => {
+                onChange(next || null);
+                localStorage.setItem(storageKey, next || "");
+            }}
+            options={options.map(({ label, value: optionValue }) => ({ label, value: optionValue }))}
+        />
     );
 }
 
@@ -1607,11 +1632,27 @@ function mergeAssistantReferences(base: CanvasAssistantReference[], extra: Canva
     return [...base, ...extra.filter((item) => !seen.has(item.id))];
 }
 
-async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage): Promise<ResponseInputMessage[]> {
+async function buildOnlineSystemPrompt(artSkill?: string, storySkill?: string): Promise<string> {
+    const parts = [ONLINE_AGENT_PROMPT];
+    if (storySkill) {
+        const content = await loadStorySkill(storySkill);
+        if (content) parts.push(content);
+    }
+    if (artSkill) {
+        const content = await loadArtSkill(artSkill);
+        if (content) parts.push(content);
+    }
+    if (artSkill || storySkill) {
+        parts.push("生成图片或视频时，必须严格按上述风格约束组织提示词，不得偏离风格定义。");
+    }
+    return parts.join("\n\n---\n\n");
+}
+
+async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, options?: { artSkill?: string; storySkill?: string }): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
     const videoFrames = await Promise.all(refs.filter((item) => item.type === CanvasNodeType.Video).map(videoReferenceToFrames));
     return [
-        { role: "system", content: ONLINE_AGENT_PROMPT },
+        { role: "system", content: await buildOnlineSystemPrompt(options?.artSkill, options?.storySkill) },
         ...history
             .filter((message): message is CanvasAssistantMessage & { role: "user" | "assistant" | "system" } => message.role === "user" || message.role === "assistant" || message.role === "system")
             .slice(-8)
