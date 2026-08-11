@@ -754,11 +754,20 @@ export function CanvasAssistantPanel({
                                 Hi，今天想创作点什么？
                             </div>
                             <div className="mt-2 text-xs opacity-50">点一张建议卡片，或直接描述你的想法</div>
-                            <div className="mt-4 grid w-full gap-2">
+                            <motion.div
+                                className="mt-4 grid w-full gap-2"
+                                initial="hidden"
+                                animate="show"
+                                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.09 } } }}
+                            >
                                 {SUGGESTION_CARDS.map((card) => (
-                                    <button
+                                    <motion.button
                                         key={card.title}
                                         type="button"
+                                        variants={{
+                                            hidden: { opacity: 0, x: 18 },
+                                            show: { opacity: 1, x: 0, transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } },
+                                        }}
                                         className="rounded-lg border px-3 py-2.5 text-left transition hover:opacity-80"
                                         style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
                                         onClick={() => setPrompt(card.prompt)}
@@ -768,9 +777,9 @@ export function CanvasAssistantPanel({
                                             {card.title}
                                         </span>
                                         <span className="mt-1 block text-[11px] leading-relaxed opacity-60">{card.description}</span>
-                                    </button>
+                                    </motion.button>
                                 ))}
-                            </div>
+                            </motion.div>
                         </div>
                     )}
                 </div>

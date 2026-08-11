@@ -5901,7 +5901,7 @@ function LeaferCanvasPage() {
 
                 <button
                     type="button"
-                    className="creative-os-agent-fab absolute bottom-6 right-6 z-50 flex size-11 items-center justify-center rounded-full border transition"
+                    className="creative-os-agent-fab absolute bottom-6 right-6 z-50 flex size-11 items-center justify-center rounded-full border transition hover:scale-105 active:scale-95"
                     style={{
                         background: theme.ui.materialElevated,
                         borderColor: theme.ui.hairline,
