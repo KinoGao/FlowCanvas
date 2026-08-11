@@ -495,7 +495,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                 height: data.height,
                 transition: editorManaged ? "opacity 160ms ease" : "box-shadow 160ms ease, opacity 160ms ease",
                 contain: "layout style",
-                contentVisibility: editorManaged && !isSelected ? "auto" : "visible",
+                // `auto` adds paint containment and clips the unselected node's
+                // external magnetic port from hit-testing on the canvas.
+                contentVisibility: "visible",
                 containIntrinsicSize: `${data.width}px ${data.height}px`,
             }}
             onPointerEnter={() => {
