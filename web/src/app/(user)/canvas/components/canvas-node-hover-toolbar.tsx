@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Play, Plus, RefreshCw, ScanSearch, Scissors, Settings2, Sparkles, Trash2, Upload, Video, Workflow } from "lucide-react";
+import { Download, Ellipsis, FolderPlus, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Play, Plus, RefreshCw, ScanSearch, Scissors, Settings2, Sparkles, Trash2, Upload, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -24,7 +24,6 @@ type CanvasNodeHoverToolbarProps = {
     onDecreaseFont: (node: CanvasNodeData) => void;
     onIncreaseFont: (node: CanvasNodeData) => void;
     onToggleDialog: (node: CanvasNodeData) => void;
-    onGenerateImage: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
     onMarkPanorama360: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
@@ -70,7 +69,6 @@ export function CanvasNodeHoverToolbar({
     onDecreaseFont,
     onIncreaseFont,
     onToggleDialog,
-    onGenerateImage,
     onUpload,
     onMarkPanorama360,
     onDownload,
@@ -168,7 +166,6 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(canOpenDialog ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "editText", title: "编辑文本", label: "编辑文字", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
-        ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isText || currentNode.metadata?.canvasTool === "script" ? [{ id: "quickStoryboard", title: "快捷分镜", label: "快捷分镜", icon: <LayoutGrid className="size-4" />, onClick: () => { onKeep(currentNode.id); setStoryboardMenuOpen((value) => !value); } }] : []),
         ...(isConfig ? [{ id: "config", title: "打开生成配置", label: "配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isComfyUi ? [{ id: "comfyui", title: "打开 ComfyUI", label: "ComfyUI", icon: <Workflow className="size-4" />, onClick: () => onToggleDialog(node) }] : []),

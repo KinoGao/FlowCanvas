@@ -4449,45 +4449,6 @@ function LeaferCanvasPage() {
         });
     }, [handleRetryNode, projectId, projectLoaded, saveMode, user?.id]);
 
-    const generateImageFromTextNode = useCallback(
-        (node: CanvasNodeData) => {
-            const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
-            if (!prompt) {
-                message.warning("文本节点为空，无法生图");
-                return;
-            }
-            const sourceNode = nodesRef.current.find((item) => item.id === node.id);
-            if (!sourceNode) return;
-            const nodeSize = getNodeSpec(CanvasNodeType.Image);
-            const generationNode = createCanvasNode(
-                CanvasNodeType.Image,
-                {
-                    x: sourceNode.position.x + sourceNode.width + 96 + nodeSize.width / 2,
-                    y: sourceNode.position.y + sourceNode.height / 2,
-                },
-                {
-                    prompt,
-                    composerContent: prompt,
-                    generationMode: "image",
-                    model: effectiveConfig.imageModel || effectiveConfig.model,
-                    size: effectiveConfig.size,
-                    count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
-                },
-            );
-            const connection = createCanvasConnection(sourceNode.id, generationNode.id);
-            const nextNodes = nodesRef.current.map((item) => (item.id === sourceNode.id ? { ...item, metadata: { ...item.metadata, content: prompt, prompt, status: NODE_STATUS_SUCCESS } } : item)).concat(generationNode);
-            const nextConnections = [...connectionsRef.current, connection];
-            nodesRef.current = nextNodes;
-            connectionsRef.current = nextConnections;
-            setNodes(nextNodes);
-            setConnections(nextConnections);
-            setSelectedNodeIds(new Set([generationNode.id]));
-            setSelectedConnectionId(null);
-            setDialogNodeId(generationNode.id);
-        },
-        [createCanvasConnection, createCanvasNode, effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message],
-    );
-
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
             const storedImage = image.storageKey
@@ -5722,7 +5683,6 @@ function LeaferCanvasPage() {
                                 onUpload={(item) => handleUploadRequest(item.id)}
                                 onOpenAssetPicker={(item) => openAssetPicker(item.id)}
                                 onRetry={handleRetryNodeAction}
-                                onGenerateImage={generateImageFromTextNode}
                                 onCaptureVideoFrame={insertVideoFrameCapture}
                                 onViewImage={handleViewNodeImage}
                                 onGroupAction={(node, action) => (action === "execute" ? void handleExecuteGroup(node) : handleGroupAction(node, action))}
@@ -5835,7 +5795,6 @@ function LeaferCanvasPage() {
                         onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
                         onIncreaseFont={(node) => handleFontSizeChange(node.id, Math.min(32, (node.metadata?.fontSize || 14) + 2))}
                         onToggleDialog={(node) => setDialogNodeId((current) => (current === node.id ? null : node.id))}
-                        onGenerateImage={generateImageFromTextNode}
                         onUpload={(node) => handleUploadRequest(node.id)}
                         onMarkPanorama360={(node) => markNodeAsPanorama360(node.id)}
                         onDownload={downloadNodeImage}

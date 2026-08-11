@@ -115,7 +115,6 @@ export type CanvasNodeProps = {
     onNodeAction?: (node: CanvasNodeData, intent: CanvasNodeActionIntent) => void;
     onUpload?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
-    onGenerateImage?: (node: CanvasNodeData) => void;
     onOpenAssetPicker?: (node: CanvasNodeData) => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onViewImage?: (node: CanvasNodeData) => void;
@@ -143,7 +142,6 @@ type NodeContentRendererProps = {
     mentionReferences: CanvasResourceReference[];
     onStartEditing?: () => void;
     onRetry?: (node: CanvasNodeData) => void;
-    onGenerateImage?: (node: CanvasNodeData) => void;
     onOpenAssetPicker?: () => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onToggleBatch?: () => void;
@@ -222,7 +220,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     onNodeAction,
     onUpload,
     onRetry,
-    onGenerateImage,
     onOpenAssetPicker,
     onCaptureVideoFrame,
     onViewImage,
@@ -576,7 +573,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                     onTextFormatChange={onTextFormatChange}
                     onStopEditing={() => setIsEditingContent(false)}
                     onRetry={onRetry}
-                    onGenerateImage={onGenerateImage}
                     onOpenAssetPicker={() => onOpenAssetPicker?.(data)}
                     onCaptureVideoFrame={onCaptureVideoFrame}
                     onOpenComposer={() => onOpenComposer?.(data)}
@@ -598,7 +594,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                         node={data}
                         theme={theme}
                         onChange={(patch) => onTextFormatChange?.(data.id, patch)}
-                        onOpenComposer={() => onOpenComposer?.(data)}
                     />
                 ) : null}
 
@@ -618,7 +613,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                     theme={theme}
                     onUpload={() => onUpload?.(data)}
                     onOpenAssetPicker={data.type === CanvasNodeType.Image ? () => onOpenAssetPicker?.(data) : undefined}
-                    onOpenComposer={() => onOpenComposer?.(data)}
                 />
             ) : null}
 
@@ -776,7 +770,7 @@ function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; th
     );
 }
 
-function TextFormatToolbar({ node, theme, onChange, onOpenComposer }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void; onOpenComposer?: () => void }) {
+function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void }) {
     const format = node.metadata?.textFormat || {};
     const update = (patch: NonNullable<CanvasNodeData["metadata"]>["textFormat"]) => onChange?.({ textFormat: { ...format, ...patch } });
     const clear = () => onChange?.({ textFormat: undefined, fontSize: 14 });
@@ -830,26 +824,11 @@ function TextFormatToolbar({ node, theme, onChange, onOpenComposer }: { node: Ca
             >
                 ↺
             </button>
-            <span className="mx-1 h-5 w-px shrink-0" style={{ background: theme.ui.hairline }} />
-            <button
-                type="button"
-                title="打开生成面板"
-                aria-label="打开生成面板"
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition hover:-translate-y-px"
-                style={{ background: theme.ui.accentSoft, color: theme.ui.accent }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenComposer?.();
-                }}
-            >
-                <Sparkles className="size-3.5" />
-                生成
-            </button>
         </div>
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onNodeAction }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onNodeAction }: NodeContentRendererProps) {
     const format = node.metadata?.textFormat || {};
     const fontSize = format.heading === 1 ? 24 : format.heading === 2 ? 20 : format.heading === 3 ? 17 : node.metadata?.fontSize || 14;
     const textStyle = {
@@ -868,30 +847,10 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 
     return (
         <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
-            {!isEmpty ? (
-                <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="absolute right-3 top-3 z-20 h-8 rounded-full border px-2.5 text-xs opacity-85 backdrop-blur-md transition hover:scale-[1.02] hover:opacity-100"
-                    style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onGenerateImage?.(node);
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    title="用文本生图"
-                    aria-label="用文本生图"
-                >
-                    <ImageIcon className="size-3.5" />
-                    生图
-                </Button>
-            ) : null}
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
-                    className="nodrag nopan thin-scrollbar m-0 block h-full w-full resize-none appearance-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent px-5 pb-5 pr-16 pt-0 outline-none select-text"
+                    className="nodrag nopan thin-scrollbar m-0 block h-full w-full resize-none appearance-none overflow-y-auto whitespace-pre-wrap break-words border-none bg-transparent px-5 pb-5 pt-0 outline-none select-text"
                     style={textStyle}
                     value={node.metadata?.content || ""}
                     references={mentionReferences}
@@ -921,7 +880,7 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
                 </div>
             ) : (
                 <div
-                    className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-5 pb-5 pr-16 pt-0"
+                    className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-5 pb-5 pt-0"
                     style={textStyle}
                     onDoubleClick={(event) => {
                         event.preventDefault();
@@ -1233,18 +1192,16 @@ function MediaNodePlaceholder({ kind, theme }: { kind: "image" | "video" | "audi
     );
 }
 
-function MediaNodeQuickActions({ kind, theme, onUpload, onOpenAssetPicker, onOpenComposer }: {
+function MediaNodeQuickActions({ kind, theme, onUpload, onOpenAssetPicker }: {
     kind: CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     onUpload: () => void;
     onOpenAssetPicker?: () => void;
-    onOpenComposer: () => void;
 }) {
     const uploadLabel = kind === CanvasNodeType.Image ? "上传图片" : kind === CanvasNodeType.Video ? "上传视频" : "上传音频";
     const actions = [
         { label: "上传", title: uploadLabel, icon: <Upload className="size-3.5" />, onClick: onUpload },
         ...(onOpenAssetPicker ? [{ label: "素材库", title: "从素材库选择", icon: <FolderOpen className="size-3.5" />, onClick: onOpenAssetPicker }] : []),
-        { label: "生成", title: "打开生成面板", icon: <Sparkles className="size-3.5" />, onClick: onOpenComposer },
     ];
     return (
         <div
