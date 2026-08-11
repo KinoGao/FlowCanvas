@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -236,6 +236,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
+    const isMediaNode = data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio;
+    const isEmptyMediaNode = isMediaNode && !hasImageContent && !hasVideoContent && !hasAudioContent && data.metadata?.status !== "loading" && data.metadata?.status !== "error";
     const isGroup = data.type === CanvasNodeType.Group;
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
@@ -485,6 +487,10 @@ export const CanvasNode = React.memo(function CanvasNode({
             }
             data-node-editing={isEditingContent ? "true" : undefined}
             data-node-selected={isSelected ? "true" : undefined}
+            data-node-status={data.metadata?.status || "idle"}
+            data-node-empty-media={isEmptyMediaNode ? "true" : undefined}
+            data-node-batch-root={isBatchRoot ? "true" : undefined}
+            data-node-batch-child={isBatchChild ? "true" : undefined}
             className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
@@ -511,7 +517,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </div>
             ) : null}
             <Card
-                className="creative-os-node relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
+                className="creative-os-node canvas-node-card relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
                     background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
                     borderColor: editorManaged ? "transparent" : isGroup
@@ -587,15 +593,34 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
+                {!shouldUseOverview && data.type === CanvasNodeType.Text && isSelected ? (
+                    <TextFormatToolbar
+                        node={data}
+                        theme={theme}
+                        onChange={(patch) => onTextFormatChange?.(data.id, patch)}
+                        onOpenComposer={() => onOpenComposer?.(data)}
+                    />
+                ) : null}
+
                 {!shouldUseOverview && !editorManaged ? (
                     <>
-                        <ResizeHandle corner="top-left" onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="top-right" onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="bottom-left" onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="bottom-right" onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="top-left" visible={isSelected} onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="top-right" visible={isSelected} onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="bottom-left" visible={isSelected} onMouseDown={handleResizeMouseDown} />
+                        <ResizeHandle corner="bottom-right" visible={isSelected} onMouseDown={handleResizeMouseDown} />
                     </>
                 ) : null}
             </Card>
+
+            {!shouldUseOverview && isSelected && isEmptyMediaNode ? (
+                <MediaNodeQuickActions
+                    kind={data.type as CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio}
+                    theme={theme}
+                    onUpload={() => onUpload?.(data)}
+                    onOpenAssetPicker={data.type === CanvasNodeType.Image ? () => onOpenAssetPicker?.(data) : undefined}
+                    onOpenComposer={() => onOpenComposer?.(data)}
+                />
+            ) : null}
 
             {!isGroup ? <ConnectionHandleDot side="left" visible={!shouldUseOverview && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
             {!isGroup ? <ConnectionHandleDot side="right" visible={!shouldUseOverview && !isGenerationConfigNode(data.type) && (isSelected || isConnecting)} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
@@ -713,7 +738,7 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
 
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
     return (
-        <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
+        <div className="canvas-node-error-state flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
             <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
             <Button
                 type="button"
@@ -751,7 +776,7 @@ function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; th
     );
 }
 
-function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void }) {
+function TextFormatToolbar({ node, theme, onChange, onOpenComposer }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void; onOpenComposer?: () => void }) {
     const format = node.metadata?.textFormat || {};
     const update = (patch: NonNullable<CanvasNodeData["metadata"]>["textFormat"]) => onChange?.({ textFormat: { ...format, ...patch } });
     const clear = () => onChange?.({ textFormat: undefined, fontSize: 14 });
@@ -771,7 +796,7 @@ function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; th
 
     return (
         <div
-            className="canvas-text-format-toolbar pointer-events-auto absolute left-2 top-2 z-30 flex max-w-[calc(100%-88px)] items-center gap-0.5 overflow-x-auto rounded-md border p-1 shadow-sm backdrop-blur-md"
+            className="canvas-text-format-toolbar pointer-events-auto absolute bottom-[calc(100%+34px)] left-1/2 z-[65] flex max-w-[min(680px,calc(100vw-40px))] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-xl border p-1.5 shadow-[0_14px_34px_rgba(0,0,0,.28)] backdrop-blur-xl"
             style={{ background: `${theme.toolbar.panel}e8`, borderColor: theme.ui.hairline, color: theme.node.text }}
             data-canvas-no-zoom
             onMouseDown={(event) => event.stopPropagation()}
@@ -805,11 +830,26 @@ function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; th
             >
                 ↺
             </button>
+            <span className="mx-1 h-5 w-px shrink-0" style={{ background: theme.ui.hairline }} />
+            <button
+                type="button"
+                title="打开生成面板"
+                aria-label="打开生成面板"
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition hover:-translate-y-px"
+                style={{ background: theme.ui.accentSoft, color: theme.ui.accent }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenComposer?.();
+                }}
+            >
+                <Sparkles className="size-3.5" />
+                生成
+            </button>
         </div>
     );
 }
 
-function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, mentionReferences, onContentChange, onTextFormatChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
+function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onNodeAction }: NodeContentRendererProps) {
     const format = node.metadata?.textFormat || {};
     const fontSize = format.heading === 1 ? 24 : format.heading === 2 ? 20 : format.heading === 3 ? 17 : node.metadata?.fontSize || 14;
     const textStyle = {
@@ -828,7 +868,6 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
 
     return (
         <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
-            {isSelected ? <TextFormatToolbar node={node} theme={theme} onChange={(patch) => onTextFormatChange?.(node.id, patch)} /> : null}
             {!isEmpty ? (
                 <Button
                     type="button"
@@ -877,14 +916,9 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
                     ]}
                 />
             ) : isEmpty ? (
-                <NodeStarterPanel kind="text"
-                    theme={theme}
-                    actions={[
-                        { label: "自己编写内容", onClick: onStartEditing },
-                        { label: "文生视频", onClick: () => onNodeAction?.("text-to-video") },
-                        { label: "文字生音乐", onClick: () => onNodeAction?.("text-to-audio") },
-                    ]}
-                />
+                <div className="canvas-node-text-empty flex h-full w-full items-start px-5 pt-3 text-[14px]" style={{ color: theme.node.placeholder }}>
+                    双击开始编辑…
+                </div>
             ) : (
                 <div
                     className="thin-scrollbar block h-full w-full select-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-5 pb-5 pr-16 pt-0"
@@ -1185,6 +1219,61 @@ const nodeStarterVisuals: Record<NodeStarterKind, { label: string; description: 
     audio: { label: "音频素材", description: "导入声音素材，或连接到音频生成流程。", icon: Music2 },
 };
 
+function MediaNodePlaceholder({ kind, theme }: { kind: "image" | "video" | "audio"; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const Icon = kind === "image" ? ImageIcon : kind === "video" ? Video : Music2;
+    const label = kind === "image" ? "图片" : kind === "video" ? "视频" : "音频";
+    return (
+        <div className="canvas-node-media-placeholder relative flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill, color: theme.node.placeholder }}>
+            <span aria-hidden className="canvas-node-media-placeholder-band absolute inset-x-0 top-1/2 h-[34%] -translate-y-1/2" />
+            <span className="canvas-node-media-placeholder-icon relative grid size-14 place-items-center rounded-2xl border" style={{ background: theme.ui.controlFill, borderColor: theme.ui.hairline }}>
+                <Icon className="size-7 opacity-45" />
+            </span>
+            <span className="sr-only">{label}节点为空</span>
+        </div>
+    );
+}
+
+function MediaNodeQuickActions({ kind, theme, onUpload, onOpenAssetPicker, onOpenComposer }: {
+    kind: CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onUpload: () => void;
+    onOpenAssetPicker?: () => void;
+    onOpenComposer: () => void;
+}) {
+    const uploadLabel = kind === CanvasNodeType.Image ? "上传图片" : kind === CanvasNodeType.Video ? "上传视频" : "上传音频";
+    const actions = [
+        { label: "上传", title: uploadLabel, icon: <Upload className="size-3.5" />, onClick: onUpload },
+        ...(onOpenAssetPicker ? [{ label: "素材库", title: "从素材库选择", icon: <FolderOpen className="size-3.5" />, onClick: onOpenAssetPicker }] : []),
+        { label: "生成", title: "打开生成面板", icon: <Sparkles className="size-3.5" />, onClick: onOpenComposer },
+    ];
+    return (
+        <div
+            data-canvas-no-zoom
+            className="canvas-node-media-actions pointer-events-auto absolute bottom-[calc(100%+34px)] left-1/2 z-[65] flex -translate-x-1/2 items-center gap-1 rounded-xl border p-1.5 shadow-[0_14px_34px_rgba(0,0,0,.28)] backdrop-blur-xl"
+            style={{ background: `${theme.toolbar.panel}f2`, borderColor: theme.toolbar.border, color: theme.node.text }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+        >
+            {actions.map((action) => (
+                <button
+                    key={action.title}
+                    type="button"
+                    title={action.title}
+                    aria-label={action.title}
+                    className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-[11px] font-medium transition hover:bg-black/5 dark:hover:bg-white/10"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        action.onClick();
+                    }}
+                >
+                    {action.icon}
+                    {action.label}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; kind?: NodeStarterKind; actions: Array<{ label: string; onClick?: () => void }> }) {
     const visual = nodeStarterVisuals[kind];
     const NodeIcon = visual.icon as LucideIcon;
@@ -1271,7 +1360,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload, onOpenAssetPicker }: NodeContentRendererProps) {
+function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload }: NodeContentRendererProps) {
     if (node.metadata?.canvasTool === "panorama360") {
         return (
             <NodeStarterPanel kind="image"
@@ -1283,15 +1372,7 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
             />
         );
     }
-    const content = (
-        <NodeStarterPanel kind="image"
-            theme={theme}
-            actions={[
-                { label: "上传图片", onClick: onUpload },
-                { label: "从素材库选择", onClick: onOpenAssetPicker },
-            ]}
-        />
-    );
+    const content = <MediaNodePlaceholder kind="image" theme={theme} />;
     if (isBatchRoot)
         return (
             <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -1450,11 +1531,11 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
         [capturing, duration, node, onCaptureVideoFrame],
     );
 
-    if (!src) return <NodeStarterPanel kind="video" theme={theme} actions={[{ label: "上传视频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
+    if (!src) return <MediaNodePlaceholder kind="video" theme={theme} />;
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
 
     return (
-        <div ref={containerRef} className="group/video relative h-full w-full overflow-hidden rounded-[inherit] bg-black">
+        <div ref={containerRef} className="canvas-node-media group/video relative h-full w-full overflow-hidden rounded-[inherit] bg-black">
             <video
                 ref={videoRef}
                 src={src}
@@ -1561,11 +1642,11 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
     );
 }
 
-function AudioNodeContent({ node, theme, onUpload, onOpenComposer }: NodeContentRendererProps) {
+function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src) return <NodeStarterPanel kind="audio" theme={theme} actions={[{ label: "上传音频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
+    if (!src) return <MediaNodePlaceholder kind="audio" theme={theme} />;
     return (
-        <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
+        <div className="canvas-node-media flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
@@ -1600,7 +1681,7 @@ function ImageContent({
 
     return (
         <BatchFrame batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden rounded-[inherit]">
+            <div className="canvas-node-media h-full w-full overflow-hidden rounded-[inherit]">
                 {imgSrc ? (
                     <div className="relative h-full w-full">
                         <img
@@ -1702,7 +1783,7 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
         </div>
     );
 }
-function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDown: (event: ResizeStartEvent, corner: ResizeCorner) => void }) {
+function ResizeHandle({ corner, visible, onMouseDown }: { corner: ResizeCorner; visible: boolean; onMouseDown: (event: ResizeStartEvent, corner: ResizeCorner) => void }) {
     const positionClass = {
         "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
         "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
@@ -1719,7 +1800,7 @@ function ResizeHandle({ corner, onMouseDown }: { corner: ResizeCorner; onMouseDo
                 event.stopPropagation();
             }}
         >
-            {corner === "bottom-right" ? <span className="absolute bottom-2 right-2 size-3 rounded-br-md border-b-2 border-r-2 border-white/55 opacity-0 transition group-hover/resize:opacity-100" /> : null}
+            <span className={`canvas-node-resize-dot absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border transition ${visible ? "scale-100 opacity-100" : "scale-75 opacity-0 group-hover/resize:scale-100 group-hover/resize:opacity-100"}`} />
         </div>
     );
 }
@@ -1789,12 +1870,12 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             data-handle
             data-handle-type={isSource ? "source" : "target"}
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
-            style={{ [side]: "-34px", width: "44px" }}
+            style={{ [side]: "-58px", width: "48px" }}
         >
-            {/* 视觉圆点居中于 44px 命中条，即圆心正好骑在节点边框上（对齐 TapNow 贴边 ⊕）。 */}
-            <span onPointerDown={handlePointerDown} className="pointer-events-auto absolute left-1/2 top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center">
+            {/* 扩大命中区域，并把可见连接点放在节点外侧，避免遮挡内容和缩放手柄。 */}
+            <span onPointerDown={handlePointerDown} className="pointer-events-auto absolute left-1/2 top-1/2 flex size-12 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center">
                 <span
-                    className={`pointer-events-none relative grid size-3.5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                    className={`canvas-node-connection-dot pointer-events-none relative grid size-8 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                     style={{
                         background: active ? theme.ui.accent : theme.ui.materialElevated,
                         borderColor: active ? theme.ui.accent : theme.node.stroke,
@@ -1802,8 +1883,8 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
                         boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
                     }}
                 >
-                    <span className="absolute left-1/2 top-1/2 h-[7px] w-[1.2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-                    <span className="absolute left-1/2 top-1/2 h-[1.2px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
                 </span>
             </span>
         </div>

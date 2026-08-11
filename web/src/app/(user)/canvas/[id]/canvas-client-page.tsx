@@ -1589,6 +1589,20 @@ function LeaferCanvasPage() {
         : activeNodeId
           ? nodeById.get(activeNodeId) || null
           : null;
+    const selectedNodeOwnsToolbar = Boolean(
+        toolbarNode
+        && selectedNodeIds.has(toolbarNode.id)
+        && (
+            toolbarNode.type === CanvasNodeType.Text
+            || (
+                (toolbarNode.type === CanvasNodeType.Image || toolbarNode.type === CanvasNodeType.Video || toolbarNode.type === CanvasNodeType.Audio)
+                && !toolbarNode.metadata?.content
+                && !toolbarNode.metadata?.storageKey
+                && toolbarNode.metadata?.status !== NODE_STATUS_LOADING
+                && toolbarNode.metadata?.status !== NODE_STATUS_ERROR
+            )
+        ),
+    );
     // 拆成两个独立 useMemo：
     // batchChildCountById/batchMotionById 依赖 nodes（含位置），每次拖拽都会重算，但计算量很小。
     // configInputsById/configInputSummaryById 依赖 canvasGraph（含连接关系），
@@ -5822,7 +5836,7 @@ function LeaferCanvasPage() {
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
                 ) : null}
 
-                {!isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode ? (
+                {!isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode && !selectedNodeOwnsToolbar ? (
                     <CanvasNodeHoverToolbar
                         node={toolbarNode}
                         viewport={viewport}
