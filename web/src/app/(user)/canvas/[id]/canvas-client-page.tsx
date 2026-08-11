@@ -563,6 +563,23 @@ function ConnectionCreateMenu({
     const menuRef = useRef<HTMLDivElement>(null);
     const [menuPosition, setMenuPosition] = useState(position);
 
+    useEffect(() => {
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            const target = event.target;
+            if (target instanceof Node && menuRef.current?.contains(target)) return;
+            onClose();
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+        document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+        window.addEventListener("keydown", closeOnEscape);
+        return () => {
+            document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+            window.removeEventListener("keydown", closeOnEscape);
+        };
+    }, [onClose]);
+
     useLayoutEffect(() => {
         const element = menuRef.current;
         const offsetParent = element?.offsetParent as HTMLElement | null;

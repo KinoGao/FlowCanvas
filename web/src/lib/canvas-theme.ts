@@ -44,8 +44,8 @@ export const canvasThemes = {
             activeColor: "#0891b2",
             width: 3.2,
             activeWidth: 4.4,
-            tempWidth: 2.5,
-            dash: [8, 4] as const,
+            tempWidth: 3.2,
+            dash: [13, 13] as const,
         },
     },
     dark: {
@@ -90,8 +90,8 @@ export const canvasThemes = {
             activeColor: "#12C4EE",
             width: 3.2,
             activeWidth: 4.4,
-            tempWidth: 2.5,
-            dash: [8, 4] as const,
+            tempWidth: 3.2,
+            dash: [13, 13] as const,
         },
     },
 } as const;
