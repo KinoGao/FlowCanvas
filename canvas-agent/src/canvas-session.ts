@@ -57,12 +57,13 @@ export class CanvasSession {
         }
         if (tool === "canvas_create_node") {
             const data = input as { nodeType: CanvasNodeType; title?: string; x?: number; y?: number; width?: number; height?: number; metadata?: Record<string, unknown> };
-            input = { ops: [{ type: "add_node", nodeType: data.nodeType, title: data.title, position: { x: data.x ?? nextCanvasX(this.canvasState), y: data.y ?? 0 }, width: data.width, height: data.height, metadata: data.metadata }] };
+            // 未显式指定坐标时不传 position，由画布自动流式避让，避免按 Agent 快照计算导致重叠
+            input = { ops: [{ type: "add_node", nodeType: data.nodeType, title: data.title, x: data.x, y: data.y, width: data.width, height: data.height, metadata: data.metadata }] };
             tool = "canvas_apply_ops";
         }
         if (tool === "canvas_create_text_node") {
             const text = input as { text?: string; x?: number; y?: number; title?: string; width?: number; height?: number };
-            input = { ops: [textNodeOp(text, text.x ?? nextCanvasX(this.canvasState), text.y ?? 0)] };
+            input = { ops: [textNodeOp(text, text.x, text.y)] };
             tool = "canvas_apply_ops";
         }
         if (tool === "canvas_create_text_nodes") {
@@ -180,8 +181,8 @@ const passthroughOpTypes = {
     canvas_insert_template: "insert_template",
 } as const;
 
-function textNodeOp(input: { id?: string; text?: string; title?: string; width?: number; height?: number }, x: number, y: number) {
-    return { type: "add_node", id: input.id, nodeType: "text", title: input.title, position: { x, y }, width: input.width, height: input.height, metadata: { content: input.text || "", status: "success", fontSize: 14 } };
+function textNodeOp(input: { id?: string; text?: string; title?: string; width?: number; height?: number }, x: number | undefined, y: number | undefined) {
+    return { type: "add_node", id: input.id, nodeType: "text", title: input.title, ...(x == null && y == null ? {} : { position: { x: x ?? 0, y: y ?? 0 } }), width: input.width, height: input.height, metadata: { content: input.text || "", status: "success", fontSize: 14 } };
 }
 
 function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {

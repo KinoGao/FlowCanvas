@@ -1209,11 +1209,10 @@ function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot:
     if (name === "canvas_apply_ops") return requireOps(input.ops);
     if (name === "canvas_create_node") {
         const nodeType = requireNodeType(input.nodeType);
-        const x = numberOr(input.x, nextCanvasX(snapshot));
-        const y = numberOr(input.y, 0);
-        return [{ type: "add_node", nodeType, title: stringOptional(input.title), position: { x, y }, width: numberOptional(input.width), height: numberOptional(input.height), metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
+        // 未显式指定坐标时不传 position，由画布按当前节点自动流式避让，避免按 Agent 快照计算导致重叠
+        return [{ type: "add_node", nodeType, title: stringOptional(input.title), x: numberOptional(input.x), y: numberOptional(input.y), width: numberOptional(input.width), height: numberOptional(input.height), metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
     }
-    if (name === "canvas_create_text_node") return [textNodeOp(input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0))];
+    if (name === "canvas_create_text_node") return [textNodeOp(input, numberOptional(input.x), numberOptional(input.y))];
     if (name === "canvas_create_text_nodes") {
         const items = requireRecordArray(input.items, "items");
         const x = numberOr(input.x, nextCanvasX(snapshot));
@@ -1306,13 +1305,13 @@ function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgent
     ];
 }
 
-function textNodeOp(input: Record<string, unknown>, x: number, y: number): CanvasAgentOp {
+function textNodeOp(input: Record<string, unknown>, x: number | undefined, y: number | undefined): CanvasAgentOp {
     return {
         type: "add_node",
         id: stringOptional(input.id),
         nodeType: CanvasNodeType.Text,
         title: stringOptional(input.title),
-        position: { x, y },
+        ...(x == null && y == null ? {} : { position: { x: x ?? 0, y: y ?? 0 } }),
         width: numberOptional(input.width),
         height: numberOptional(input.height),
         metadata: { content: stringOptional(input.text), status: "success", fontSize: 14 },
