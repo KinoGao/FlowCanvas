@@ -1280,16 +1280,6 @@ function LeaferCanvasPage() {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
     }, [dialogNodeId]);
 
-    // dialog 打开脚本节点时自动转入全屏脚本工作台（覆盖素材导入、视频解析等创建路径）
-    useEffect(() => {
-        if (!dialogNodeId) return;
-        const node = nodesRef.current.find((item) => item.id === dialogNodeId);
-        if (node?.metadata?.canvasTool === "script") {
-            setDialogNodeId(null);
-            setScriptStudioNodeId(node.id);
-        }
-    }, [dialogNodeId]);
-
     useEffect(() => {
         if (!projectLoaded) return;
         if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
@@ -5148,7 +5138,10 @@ function LeaferCanvasPage() {
             selectOnlyNode(nodeId);
             setSelectedConnectionId(null);
             setContextMenu(null);
-            setDialogNodeId(nodeId);
+            // 脚本/导演台节点单击只选中（可移动），不自动打开面板；双击或点节点内按钮再进入
+            const studioNode = nodesRef.current.find((item) => item.id === nodeId);
+            const isStudioKind = studioNode?.metadata?.canvasTool === "script" || studioNode?.metadata?.canvasTool === "director";
+            if (!isStudioKind) setDialogNodeId(nodeId);
         },
         [selectOnlyNode],
     );

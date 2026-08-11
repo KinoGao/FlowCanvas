@@ -539,6 +539,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onToggleBatch?.(data.id);
                         return;
                     }
+                    if (data.metadata?.canvasTool === "script") {
+                        event.stopPropagation();
+                        onOpenComposer?.(data);
+                        return;
+                    }
                     if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
