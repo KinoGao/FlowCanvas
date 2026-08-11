@@ -136,13 +136,9 @@ const IMAGE_OUTPUT_FORMAT = "png";
 // 模型名包含这些子串时认为支持 OpenAI DALL-E / GPT-Image 系列的 `response_format: "b64_json"` 参数。
 const B64_JSON_MODEL_KEYWORDS = ["dall-e", "dalle", "gpt-image"];
 
-function isAgnesImageModel(model: string) {
+export function isAgnesImageModel(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.startsWith("agnes-image") || value.includes("agnes-image");
-}
-
-function agnesImageResponseFormat(config: Pick<AiConfig, "imageResponseFormat">, model: string) {
-    return shouldUseB64JsonResponse(config, model) ? "b64_json" : "url";
+    return value.startsWith("agnes-image") || value.includes("agnes-image") || value.startsWith("agnes-t2i") || value.includes("agnes-t2i");
 }
 
 /**
@@ -160,8 +156,8 @@ export function shouldUseB64JsonResponse(config: Pick<AiConfig, "imageResponseFo
     return B64_JSON_MODEL_KEYWORDS.some((keyword) => name.includes(keyword));
 }
 
-function requestedImageResponseFormat(config: Pick<AiConfig, "imageResponseFormat">, model: string): "b64_json" | "url" | undefined {
-    if (config.imageResponseFormat === "url") return "url";
+export function requestedImageResponseFormat(config: Pick<AiConfig, "imageResponseFormat">, model: string): "b64_json" | undefined {
+    if (isAgnesImageModel(model) || config.imageResponseFormat === "url") return undefined;
     return shouldUseB64JsonResponse(config, model) ? "b64_json" : undefined;
 }
 
@@ -991,7 +987,6 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 async function requestAgnesImages(config: AiConfig, prompt: string, references: ReferenceImage[], n: number, size: string | undefined, options?: RequestOptions) {
     try {
         const images = await Promise.all(references.map((image) => agnesReferenceImageInput(image, options?.signal)));
-        const responseFormat = agnesImageResponseFormat(config, config.model);
         const body: Record<string, unknown> = {
             model: config.model,
             prompt,
@@ -999,7 +994,6 @@ async function requestAgnesImages(config: AiConfig, prompt: string, references: 
             ...(size ? { size } : {}),
         };
         if (images.length) body.image = images.length === 1 ? images[0] : images;
-        if (responseFormat === "b64_json" || config.imageResponseFormat === "url") body.response_format = responseFormat;
         const url = aiApiUrl(config, "/images/generations");
         const response = await axios.post<ImageApiResponse>(url, body, { headers: { ...aiHeaders(config, "application/json"), ...durableGenerationHeaders(url, options?.jobId) }, signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS });
         return parseImagePayload(response.data, config.useProxy);
