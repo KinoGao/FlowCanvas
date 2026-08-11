@@ -1280,6 +1280,16 @@ function LeaferCanvasPage() {
         if (!dialogNodeId) setNodeImageSettingsOpen(false);
     }, [dialogNodeId]);
 
+    // dialog 打开脚本节点时自动转入全屏脚本工作台（覆盖素材导入、视频解析等创建路径）
+    useEffect(() => {
+        if (!dialogNodeId) return;
+        const node = nodesRef.current.find((item) => item.id === dialogNodeId);
+        if (node?.metadata?.canvasTool === "script") {
+            setDialogNodeId(null);
+            setScriptStudioNodeId(node.id);
+        }
+    }, [dialogNodeId]);
+
     useEffect(() => {
         if (!projectLoaded) return;
         if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
@@ -1830,10 +1840,9 @@ function LeaferCanvasPage() {
     );
 
     const createScriptNode = useCallback(() => {
-        createNode(CanvasNodeType.Text, {
-            width: 220,
-            height: 160,
-            metadata: {
+        const targetPosition = lastCanvasPositionRef.current || getCanvasCenter();
+        const newNode = {
+            ...createCanvasNode(CanvasNodeType.Text, targetPosition, {
                 canvasTool: "script",
                 content: DEFAULT_SCRIPT_BODY,
                 scriptTitle: "未命名脚本",
@@ -1842,9 +1851,18 @@ function LeaferCanvasPage() {
                 status: NODE_STATUS_SUCCESS,
                 fontSize: 13,
                 generationMode: "text",
-            },
-        });
-    }, [createNode]);
+            }),
+            width: 220,
+            height: 160,
+        };
+        nodesRef.current = [...nodesRef.current, newNode];
+        setNodes((prev) => [...prev, newNode]);
+        setSelectedNodeIds(new Set([newNode.id]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+        setScriptStudioNodeId(newNode.id);
+        setEditingNodeId(null);
+    }, [createCanvasNode, getCanvasCenter]);
 
     const createVideoCompositionNode = useCallback(() => {
         createNode(CanvasNodeType.ComfyUI, {
