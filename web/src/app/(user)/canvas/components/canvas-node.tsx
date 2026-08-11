@@ -510,7 +510,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
-            {data.metadata?.canvasTool === "script" ? (                <div className="pointer-events-none absolute left-1.5 top-1.5 z-20 rounded px-1.5 py-0.5 text-[10px] font-medium leading-4" style={{ background: theme.ui.accent, color: "#fff" }}>                    脚本                </div>            ) : null}            {editorManaged ? (
+            {data.metadata?.canvasTool === "script" ? (                <div className="pointer-events-none absolute inset-0 z-20">                    <div className="absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium leading-4" style={{ background: theme.ui.accent, color: "#fff" }}>                        脚本                    </div>                    <button type="button" className="pointer-events-auto absolute bottom-2 right-2 rounded-md px-2 py-1 text-[11px] font-medium transition hover:opacity-80" style={{ background: theme.ui.accent, color: "#fff" }} onClick={(event) => { event.stopPropagation(); onNodeAction?.(data, "script-edit"); }}>                        进入脚本编辑                    </button>                </div>            ) : null}            {editorManaged ? (
                 <div className="canvas-node-overview-label" style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}>
                     {data.title?.trim() || NODE_OVERVIEW_TYPE_LABEL[data.type] || "节点"}
                 </div>

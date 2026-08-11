@@ -1860,7 +1860,6 @@ function LeaferCanvasPage() {
         setSelectedNodeIds(new Set([newNode.id]));
         setSelectedConnectionId(null);
         setDialogNodeId(null);
-        setScriptStudioNodeId(newNode.id);
         setEditingNodeId(null);
     }, [createCanvasNode, getCanvasCenter]);
 
