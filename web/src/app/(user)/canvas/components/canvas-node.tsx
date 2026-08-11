@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Check, ChevronRight, Clapperboard, Copy, FileText, FolderOpen, Image as ImageIcon, Layers3, Link2, List, LoaderCircle, Maximize2, Music2, Palette, Pause, Play, RefreshCw, Sparkles, Star, TriangleAlert, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -137,8 +137,6 @@ type NodeContentRendererProps = {
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     onContentChange: (nodeId: string, content: string) => void;
     onTextFormatChange?: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
-    textFocusMode?: boolean;
-    onToggleTextFocus?: () => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onStartEditing?: () => void;
@@ -229,7 +227,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     const scaleRef = useCanvasScaleRef();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [isEditingContent, setIsEditingContent] = useState(false);
-    const [textFocusMode, setTextFocusMode] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
@@ -237,7 +234,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
-    const nodeStatus = data.metadata?.status || "idle";
     const imageBorderColor = isActive || (isRelated && !isBatchChild) ? theme.ui.accent : theme.ui.hairline;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -288,10 +284,6 @@ export const CanvasNode = React.memo(function CanvasNode({
         if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
         setIsEditingContent(true);
     }, [data.type, editRequestNonce]);
-
-    useEffect(() => {
-        if (!isSelected && textFocusMode) setTextFocusMode(false);
-    }, [isSelected, textFocusMode]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -469,36 +461,6 @@ export const CanvasNode = React.memo(function CanvasNode({
             : data.metadata?.canvasTool === "script"
               ? "w-[720px] max-w-[calc(100vw-48px)]"
               : "w-[500px] max-w-[calc(100vw-32px)]";
-    const isEmptyMediaNode = !isGroup
-        && !isBatchChild
-        && !hasImageContent
-        && !hasVideoContent
-        && !hasAudioContent
-        && (data.type === CanvasNodeType.Image || data.type === CanvasNodeType.Video || data.type === CanvasNodeType.Audio)
-        && data.metadata?.canvasTool !== "panorama360";
-    const nodeStatusColor = nodeStatus === "error" ? theme.ui.danger : nodeStatus === "success" ? theme.ui.success : theme.ui.accent;
-    const nodeBorderColor = nodeStatus === "error"
-        ? theme.ui.danger
-        : nodeStatus === "loading"
-          ? theme.ui.accent
-          : isGroup
-            ? isSelected
-                ? theme.ui.accent
-                : theme.ui.hairline
-            : hasImageContent
-              ? imageBorderColor
-              : isActive || isRelated
-                ? theme.ui.accent
-                : theme.ui.hairline;
-    const nodeBoxShadow = nodeStatus === "loading"
-        ? `0 0 0 2px ${theme.ui.accentSoft}, 0 14px 34px ${theme.ui.accentSoft}`
-        : nodeStatus === "error"
-          ? `0 0 0 2px ${theme.ui.danger}55, ${theme.ui.shadow}`
-          : isGroup
-            ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined)
-            : isActive
-              ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}`
-              : undefined;
 
     return (
         <div
@@ -517,8 +479,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             }
             data-node-editing={isEditingContent ? "true" : undefined}
             data-node-selected={isSelected ? "true" : undefined}
-            data-node-status={nodeStatus}
-            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} relative flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
+            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
@@ -543,36 +504,22 @@ export const CanvasNode = React.memo(function CanvasNode({
                     {data.title?.trim() || NODE_OVERVIEW_TYPE_LABEL[data.type] || "节点"}
                 </div>
             ) : null}
-            {!shouldUseOverview && data.type === CanvasNodeType.Text && isSelected ? (
-                <div className="canvas-text-format-float absolute left-1/2 top-0 z-[70] -translate-x-1/2 -translate-y-[calc(100%+34px)]" data-canvas-no-zoom>
-                    <TextFormatToolbarFull
-                        node={data}
-                        theme={theme}
-                        onChange={(patch) => onTextFormatChange?.(data.id, patch)}
-                        onCopy={() => {
-                            const content = data.metadata?.content?.trim();
-                            if (content && navigator.clipboard) void navigator.clipboard.writeText(content);
-                        }}
-                        onToggleFocus={() => setTextFocusMode((value) => !value)}
-                    />
-                </div>
-            ) : null}
-            {!shouldUseOverview && isEmptyMediaNode ? (
-                <NodeMediaActionBar
-                    kind={data.type as "image" | "video" | "audio"}
-                    theme={theme}
-                    onUpload={() => onUpload?.(data)}
-                    onOpenAssetPicker={data.type === CanvasNodeType.Image ? () => onOpenAssetPicker?.(data) : undefined}
-                    onOpenComposer={() => onOpenComposer?.(data)}
-                />
-            ) : null}
-            {!shouldUseOverview && nodeStatus !== "idle" && (nodeStatus !== "success" || isSelected) ? <NodeStatusBadge status={nodeStatus} color={nodeStatusColor} theme={theme} /> : null}
             <Card
                 className="creative-os-node relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
                     background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
-                    borderColor: editorManaged ? "transparent" : nodeBorderColor,
-                    boxShadow: editorManaged ? undefined : nodeBoxShadow,
+                    borderColor: editorManaged ? "transparent" : isGroup
+                        ? isSelected
+                            ? theme.ui.accent
+                            : theme.ui.hairline
+                        : hasImageContent
+                            ? imageBorderColor
+                            : isActive
+                              ? theme.ui.accent
+                              : isRelated
+                                ? theme.ui.accent
+                                : theme.ui.hairline,
+                    boxShadow: editorManaged ? undefined : isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
                 onDoubleClick={(event) => {
                     if (data.type === CanvasNodeType.Image && hasImageContent) return;
@@ -587,7 +534,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
             >
                 <div
-                    className={`canvas-node-render-surface relative flex h-full w-full items-center justify-center ${isBatchRoot || (data.type === CanvasNodeType.Text && (isSelected || textFocusMode)) ? "overflow-visible" : "overflow-hidden"}`}
+                    className={`canvas-node-render-surface relative flex h-full w-full items-center justify-center ${isBatchRoot ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
                             background: editorManaged ? "transparent" : !hasImageContent && !hasVideoContent ? theme.node.panel : "transparent",
@@ -615,8 +562,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                     onStartEditing={() => setIsEditingContent(true)}
                     onContentChange={onContentChange}
                     onTextFormatChange={onTextFormatChange}
-                    textFocusMode={textFocusMode}
-                    onToggleTextFocus={() => setTextFocusMode((value) => !value)}
                     onStopEditing={() => setIsEditingContent(false)}
                     onRetry={onRetry}
                     onGenerateImage={onGenerateImage}
@@ -635,8 +580,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
-
-                {showImageInfo && hasImageContent ? <ImageInfoBar node={data} theme={theme} /> : null}
 
                 {!shouldUseOverview && !editorManaged ? (
                     <>
@@ -802,26 +745,15 @@ function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; th
     );
 }
 
-function TextFormatToolbarFull({ node, theme, onChange, onCopy, onToggleFocus }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void; onCopy?: () => void; onToggleFocus?: () => void }) {
+function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void }) {
     const format = node.metadata?.textFormat || {};
-    const [colorOpen, setColorOpen] = useState(false);
     const update = (patch: NonNullable<CanvasNodeData["metadata"]>["textFormat"]) => onChange?.({ textFormat: { ...format, ...patch } });
-    const clear = () => {
-        onChange?.({ textFormat: undefined, fontSize: 14 });
-        setColorOpen(false);
-    };
-    const colors = [
-        { label: "正文颜色", value: undefined },
-        { label: "青色强调", value: theme.ui.accent },
-        { label: "成功绿色", value: theme.ui.success },
-        { label: "警示黄色", value: theme.ui.warning },
-        { label: "危险红色", value: theme.ui.danger },
-    ];
+    const clear = () => onChange?.({ textFormat: undefined, fontSize: 14 });
     const buttons = [
         { label: "H1", title: "标题 1", active: format.heading === 1, onClick: () => update({ heading: format.heading === 1 ? undefined : 1, quote: undefined }) },
         { label: "H2", title: "标题 2", active: format.heading === 2, onClick: () => update({ heading: format.heading === 2 ? undefined : 2, quote: undefined }) },
         { label: "H3", title: "标题 3", active: format.heading === 3, onClick: () => update({ heading: format.heading === 3 ? undefined : 3, quote: undefined }) },
-        { label: ">", title: "引用", active: Boolean(format.quote), onClick: () => update({ quote: !format.quote, heading: undefined }) },
+        { label: "❝", title: "引用", active: Boolean(format.quote), onClick: () => update({ quote: !format.quote, heading: undefined }) },
         { label: "B", title: "粗体", active: Boolean(format.bold), onClick: () => update({ bold: !format.bold }) },
         { label: "I", title: "斜体", active: Boolean(format.italic), onClick: () => update({ italic: !format.italic }) },
         { label: "U", title: "下划线", active: Boolean(format.underline), onClick: () => update({ underline: !format.underline }) },
@@ -830,59 +762,19 @@ function TextFormatToolbarFull({ node, theme, onChange, onCopy, onToggleFocus }:
 
     return (
         <div
-            className="canvas-text-format-toolbar pointer-events-auto relative flex max-w-[min(760px,calc(100vw-32px))] items-center gap-0.5 overflow-x-auto rounded-full border p-1.5 shadow-[0_14px_36px_rgba(0,0,0,.22)] backdrop-blur-xl"
-            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+            className="canvas-text-format-toolbar pointer-events-auto absolute left-2 top-2 z-30 flex max-w-[calc(100%-88px)] items-center gap-0.5 overflow-x-auto rounded-md border p-1 shadow-sm backdrop-blur-md"
+            style={{ background: `${theme.toolbar.panel}e8`, borderColor: theme.ui.hairline, color: theme.node.text }}
             data-canvas-no-zoom
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
-            onWheel={(event) => event.stopPropagation()}
         >
-            <div className="relative shrink-0">
-                <button
-                    type="button"
-                    title="文字颜色"
-                    aria-label="文字颜色"
-                    aria-expanded={colorOpen}
-                    className="grid size-8 place-items-center rounded-full transition hover:scale-105"
-                    style={{ background: colorOpen ? theme.toolbar.activeBg : "transparent", color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        setColorOpen((value) => !value);
-                    }}
-                >
-                    <span className="grid size-5 place-items-center rounded-full border" style={{ borderColor: theme.ui.hairline }}>
-                        <span className="size-3 rounded-full" style={{ background: format.textColor || theme.node.text }} />
-                    </span>
-                </button>
-                {colorOpen ? (
-                    <div className="absolute left-0 top-full z-20 mt-2 flex gap-1 rounded-xl border p-1.5 shadow-xl" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}>
-                        {colors.map((color) => (
-                            <button
-                                key={color.label}
-                                type="button"
-                                title={color.label}
-                                aria-label={color.label}
-                                className="grid size-7 place-items-center rounded-full transition hover:scale-110"
-                                style={{ background: theme.toolbar.itemHover }}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    update({ textColor: color.value });
-                                    setColorOpen(false);
-                                }}
-                            >
-                                <span className="size-4 rounded-full border" style={{ background: color.value || theme.node.text, borderColor: theme.ui.hairline }} />
-                            </button>
-                        ))}
-                    </div>
-                ) : null}
-            </div>
             {buttons.map((button) => (
                 <button
                     key={button.title}
                     type="button"
                     title={button.title}
                     aria-label={button.title}
-                    className="grid size-8 shrink-0 place-items-center rounded-full text-[11px] font-semibold transition hover:scale-105"
+                    className="grid size-7 shrink-0 place-items-center rounded text-[11px] font-semibold transition"
                     style={{ background: button.active ? theme.toolbar.activeBg : "transparent", color: button.active ? theme.ui.accent : theme.node.text }}
                     onClick={(event) => {
                         event.stopPropagation();
@@ -892,41 +784,30 @@ function TextFormatToolbarFull({ node, theme, onChange, onCopy, onToggleFocus }:
                     {button.label}
                 </button>
             ))}
-            <span className="mx-1 h-5 w-px shrink-0" style={{ background: theme.ui.hairline }} />
-            <button type="button" title="项目符号列表" aria-label="项目符号列表" className="grid size-8 shrink-0 place-items-center rounded-full text-xs transition hover:scale-105" style={{ background: format.list === "bullet" ? theme.toolbar.activeBg : "transparent", color: format.list === "bullet" ? theme.ui.accent : theme.node.text }} onClick={(event) => { event.stopPropagation(); update({ list: format.list === "bullet" ? undefined : "bullet" }); }}>
-                <List className="size-3.5" />
-            </button>
-            <button type="button" title="编号列表" aria-label="编号列表" className="grid size-8 shrink-0 place-items-center rounded-full text-[10px] font-semibold transition hover:scale-105" style={{ background: format.list === "ordered" ? theme.toolbar.activeBg : "transparent", color: format.list === "ordered" ? theme.ui.accent : theme.node.text }} onClick={(event) => { event.stopPropagation(); update({ list: format.list === "ordered" ? undefined : "ordered" }); }}>
-                1.
-            </button>
-            <button type="button" title="插入分隔线" aria-label="插入分隔线" className="grid size-8 shrink-0 place-items-center rounded-full transition hover:scale-105" style={{ color: theme.node.text }} onClick={(event) => { event.stopPropagation(); const content = node.metadata?.content?.trimEnd() || ""; onChange?.({ content: `${content}${content ? "\n" : ""}---\n` }); }}>
-                <span className="h-px w-4" style={{ background: theme.node.text }} />
-            </button>
-            <button type="button" title="插入链接标记" aria-label="插入链接标记" className="grid size-8 shrink-0 place-items-center rounded-full transition hover:scale-105" style={{ color: theme.node.text }} onClick={(event) => { event.stopPropagation(); const url = window.prompt("输入链接地址"); if (url?.trim()) onChange?.({ content: `[${node.metadata?.content?.trim() || "链接"}](${url.trim()})` }); }}>
-                <Link2 className="size-3.5" />
-            </button>
-            <button type="button" title="复制文本" aria-label="复制文本" disabled={!node.metadata?.content?.trim()} className="grid size-8 shrink-0 place-items-center rounded-full transition hover:scale-105 disabled:opacity-35" style={{ color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onCopy?.(); }}>
-                <Copy className="size-3.5" />
-            </button>
-            <button type="button" title="清除格式" aria-label="清除格式" className="shrink-0 rounded-full px-2 text-[10px] opacity-70 transition hover:opacity-100" style={{ color: theme.node.text }} onClick={(event) => { event.stopPropagation(); clear(); }}>
-                清除
-            </button>
-            <span className="mx-1 h-5 w-px shrink-0" style={{ background: theme.ui.hairline }} />
-            <button type="button" title="聚焦文本节点" aria-label="聚焦文本节点" className="grid size-8 shrink-0 place-items-center rounded-full transition hover:scale-105" style={{ color: theme.node.text }} onClick={(event) => { event.stopPropagation(); onToggleFocus?.(); }}>
-                <Maximize2 className="size-3.5" />
+            <button
+                type="button"
+                title="清除格式"
+                aria-label="清除格式"
+                className="grid size-7 shrink-0 place-items-center rounded text-[11px] opacity-60 transition hover:opacity-100"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    clear();
+                }}
+            >
+                ↺
             </button>
         </div>
     );
 }
 
-function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, mentionReferences, onContentChange, textFocusMode, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
+function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, mentionReferences, onContentChange, onTextFormatChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
     const format = node.metadata?.textFormat || {};
     const fontSize = format.heading === 1 ? 24 : format.heading === 2 ? 20 : format.heading === 3 ? 17 : node.metadata?.fontSize || 14;
     const textStyle = {
         fontSize: `${fontSize}px`,
         lineHeight: `${Math.round(fontSize * (format.quote ? 1.6 : 1.72))}px`,
         letterSpacing: 0,
-        color: format.textColor || theme.node.text,
+        color: theme.node.text,
         boxSizing: "border-box",
         fontWeight: format.bold ? 700 : format.heading ? 650 : 400,
         fontStyle: format.italic ? "italic" : "normal",
@@ -935,10 +816,10 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
         paddingLeft: format.quote ? 14 : undefined,
     } as React.CSSProperties;
     const isEmpty = !node.metadata?.content?.trim();
-    const contentLines = (node.metadata?.content || "").split("\n");
 
     return (
-        <div data-node-text-editable={isEditingContent ? "true" : undefined} className={cn("flex h-full w-full flex-col pt-8", textFocusMode ? "canvas-text-content-expanded" : "overflow-hidden")}>
+        <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
+            {isSelected ? <TextFormatToolbar node={node} theme={theme} onChange={(patch) => onTextFormatChange?.(node.id, patch)} /> : null}
             {!isEmpty ? (
                 <Button
                     type="button"
@@ -986,18 +867,6 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
                         { label: "生成旁白", onClick: () => onNodeAction?.("script-to-audio") },
                     ]}
                 />
-            ) : isEmpty && isSelected ? (
-                <div
-                    className="flex h-full w-full cursor-text items-start px-5 pb-5 pt-4 text-[15px] opacity-45"
-                    style={textStyle}
-                    onDoubleClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onStartEditing?.();
-                    }}
-                >
-                    双击开始编辑…
-                </div>
             ) : isEmpty ? (
                 <NodeStarterPanel kind="text"
                     theme={theme}
@@ -1018,12 +887,7 @@ function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, m
                     }}
                     onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
                 >
-                    {format.list ? contentLines.map((line, index) => (
-                        <div key={`${node.id}-line-${index}`} className="flex gap-2">
-                            <span className="shrink-0 opacity-60">{format.list === "ordered" ? `${index + 1}.` : "•"}</span>
-                            <span className="min-w-0">{line || "\u00a0"}</span>
-                        </div>
-                    )) : node.metadata?.content}
+                    {node.metadata?.content}
                 </div>
             )}
         </div>
@@ -1343,59 +1207,6 @@ function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof ca
     );
 }
 
-function NodeMediaActionBar({ kind, theme, onUpload, onOpenAssetPicker, onOpenComposer }: { kind: "image" | "video" | "audio"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUpload?: () => void; onOpenAssetPicker?: () => void; onOpenComposer?: () => void }) {
-    const actions = kind === "image"
-        ? [{ label: "上传", icon: <Upload className="size-3.5" />, onClick: onUpload }, { label: "从素材库选择", icon: <FolderOpen className="size-3.5" />, onClick: onOpenAssetPicker }]
-        : [{ label: "上传", icon: <Upload className="size-3.5" />, onClick: onUpload }, { label: "打开生成面板", icon: <Sparkles className="size-3.5" />, onClick: onOpenComposer }];
-    return (
-        <div className="canvas-node-media-action-bar pointer-events-auto absolute left-1/2 top-0 z-[65] flex -translate-x-1/2 -translate-y-[calc(100%+30px)] items-center gap-0.5 rounded-full border p-1 shadow-[0_10px_28px_rgba(0,0,0,.18)] backdrop-blur-xl" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }} data-canvas-no-zoom>
-            {actions.map((action) => (
-                <button
-                    key={action.label}
-                    type="button"
-                    className="flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition hover:-translate-y-0.5"
-                    style={{ color: theme.node.text }}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        action.onClick?.();
-                    }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                >
-                    <span style={{ color: theme.ui.accent }}>{action.icon}</span>
-                    {action.label}
-                </button>
-            ))}
-        </div>
-    );
-}
-
-function NodeMediaPlaceholder({ kind, theme }: { kind: "image" | "video" | "audio"; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const Icon = kind === "image" ? ImageIcon : kind === "video" ? Video : Music2;
-    const label = kind === "image" ? "图片素材" : kind === "video" ? "视频素材" : "音频素材";
-    const hint = kind === "image" ? "上传或从素材库选择" : kind === "video" ? "上传后可截帧、剪辑或生成" : "上传后可播放或继续生成";
-    return (
-        <div className="canvas-media-placeholder flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
-            <span className="canvas-media-placeholder-icon grid size-12 place-items-center rounded-2xl border" style={{ background: theme.toolbar.activeBg, borderColor: theme.node.stroke }}>
-                <Icon className="size-6 opacity-70" />
-            </span>
-            <span className="text-[11px] font-medium" style={{ color: theme.node.text }}>{label}</span>
-            <span className="text-[10px] opacity-55">{hint}</span>
-        </div>
-    );
-}
-
-function NodeStatusBadge({ status, color, theme }: { status: "loading" | "success" | "error"; color: string; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const isLoading = status === "loading";
-    const isError = status === "error";
-    return (
-        <div className={`canvas-node-status-badge canvas-node-status-${status} absolute right-0 top-0 z-[65] flex -translate-y-[calc(100%+30px)] items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium shadow-sm backdrop-blur-xl`} style={{ background: theme.ui.materialElevated, borderColor: `${color}66`, color }} data-canvas-no-zoom role={isLoading ? "status" : undefined} aria-live={isLoading ? "polite" : undefined}>
-            {isLoading ? <LoaderCircle className="size-3 animate-spin" /> : isError ? <TriangleAlert className="size-3" /> : <Check className="size-3" />}
-            {isLoading ? "生成中" : isError ? "生成失败" : "已生成"}
-        </div>
-    );
-}
-
 function ResourceLabelBadge({ reference }: { reference: CanvasResourceReference }) {
     return <Badge className={cn("pointer-events-none absolute right-2 top-2 z-30 h-auto rounded-md px-1.5 py-0.5 text-[10px]", reference.active ? "bg-[#2f80ff] text-white shadow-sm" : "bg-black/35 text-white/75")}>{reference.label}</Badge>;
 }
@@ -1445,7 +1256,15 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
             />
         );
     }
-    const content = <NodeMediaPlaceholder kind="image" theme={theme} />;
+    const content = (
+        <NodeStarterPanel kind="image"
+            theme={theme}
+            actions={[
+                { label: "上传图片", onClick: onUpload },
+                { label: "从素材库选择", onClick: onOpenAssetPicker },
+            ]}
+        />
+    );
     if (isBatchRoot)
         return (
             <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
@@ -1604,7 +1423,7 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
         [capturing, duration, node, onCaptureVideoFrame],
     );
 
-    if (!src) return <NodeMediaPlaceholder kind="video" theme={theme} />;
+    if (!src) return <NodeStarterPanel kind="video" theme={theme} actions={[{ label: "上传视频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
 
     return (
@@ -1715,88 +1534,16 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
     );
 }
 
-const AUDIO_WAVEFORM_HEIGHTS = [24, 42, 68, 36, 58, 82, 48, 30, 64, 92, 54, 36, 72, 44, 60, 88, 52, 28, 76, 46, 66, 34, 56, 80, 40, 62, 30, 50] as const;
-
-function formatAudioTime(seconds: number) {
-    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-    const minutes = Math.floor(seconds / 60);
-    const remaining = Math.floor(seconds % 60);
-    return `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
-
-function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
+function AudioNodeContent({ node, theme, onUpload, onOpenComposer }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const [playing, setPlaying] = useState(false);
-    const [muted, setMuted] = useState(false);
-    const [volume, setVolume] = useState(1);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-
-    useEffect(() => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        setPlaying(false);
-        setMuted(audio.muted);
-        setVolume(audio.volume || 1);
-        setCurrentTime(0);
-        setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-        const updateTime = () => setCurrentTime(audio.currentTime);
-        const updateDuration = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-        const updatePlayback = () => setPlaying(!audio.paused);
-        const updateVolume = () => {
-            setMuted(audio.muted);
-            setVolume(audio.volume);
-        };
-        audio.addEventListener("timeupdate", updateTime);
-        audio.addEventListener("loadedmetadata", updateDuration);
-        audio.addEventListener("play", updatePlayback);
-        audio.addEventListener("pause", updatePlayback);
-        audio.addEventListener("ended", updatePlayback);
-        audio.addEventListener("volumechange", updateVolume);
-        return () => {
-            audio.removeEventListener("timeupdate", updateTime);
-            audio.removeEventListener("loadedmetadata", updateDuration);
-            audio.removeEventListener("play", updatePlayback);
-            audio.removeEventListener("pause", updatePlayback);
-            audio.removeEventListener("ended", updatePlayback);
-            audio.removeEventListener("volumechange", updateVolume);
-        };
-    }, [src]);
-
-    if (!src) return <NodeMediaPlaceholder kind="audio" theme={theme} />;
-
-    const togglePlayback = () => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (audio.paused) void audio.play().catch(() => setPlaying(false));
-        else audio.pause();
-    };
-    const stopControlEvent = (event: React.SyntheticEvent) => event.stopPropagation();
-    const maxTime = Math.max(duration, 0.01);
-
+    if (!src) return <NodeStarterPanel kind="audio" theme={theme} actions={[{ label: "上传音频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
     return (
-        <div className="canvas-audio-player flex h-full w-full flex-col justify-center gap-3 rounded-[inherit] px-4 py-3" style={{ background: theme.node.fill, color: theme.node.text }} data-canvas-no-zoom onWheel={stopControlEvent}>
-            <audio ref={audioRef} src={src} preload="metadata" className="sr-only" aria-label={node.title || "音频"} />
-            <div className="flex min-w-0 items-center gap-2">
-                <button type="button" className="canvas-audio-play grid size-9 shrink-0 place-items-center rounded-full transition hover:scale-105" style={{ background: theme.ui.accent, color: theme.canvas.background }} aria-label={playing ? "暂停音频" : "播放音频"} onClick={(event) => { event.stopPropagation(); togglePlayback(); }} onMouseDown={stopControlEvent} onPointerDown={stopControlEvent}>
-                    {playing ? <Pause className="size-4 fill-current" /> : <Play className="ml-0.5 size-4 fill-current" />}
-                </button>
-                <div className="min-w-0 flex-1">
-                    <div className="truncate text-[11px] font-semibold">{node.title || "音频"}</div>
-                    <div className="mt-0.5 text-[10px] opacity-50">{formatAudioTime(currentTime)} / {formatAudioTime(duration || (node.metadata?.durationMs || 0) / 1000)}</div>
-                </div>
-                <button type="button" className="grid size-7 shrink-0 place-items-center rounded-full transition hover:bg-white/10" style={{ color: theme.node.muted }} aria-label={muted ? "取消静音" : "静音"} onClick={(event) => { event.stopPropagation(); const audio = audioRef.current; if (!audio) return; audio.muted = !audio.muted; }} onMouseDown={stopControlEvent} onPointerDown={stopControlEvent}>
-                    {muted || volume === 0 ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
-                </button>
+        <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
+                <Music2 className="size-4 shrink-0" />
+                <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <div className={`canvas-audio-waveform flex h-10 items-center gap-[3px] ${playing ? "is-playing" : ""}`} aria-hidden>
-                {AUDIO_WAVEFORM_HEIGHTS.map((height, index) => <span key={index} className="canvas-audio-wave-bar" style={{ height: `${height}%`, animationDelay: `${index * 32}ms`, background: theme.ui.accent }} />)}
-            </div>
-            <div className="flex items-center gap-2" onMouseDown={stopControlEvent} onPointerDown={stopControlEvent}>
-                <input aria-label="音频进度" type="range" min={0} max={maxTime} step={0.01} value={Math.min(currentTime, maxTime)} className="h-1 min-w-0 flex-1 cursor-pointer accent-cyan-500" onChange={(event) => { const next = Number(event.target.value); const audio = audioRef.current; if (audio) audio.currentTime = next; setCurrentTime(next); }} />
-                <input aria-label="音频音量" type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} className="h-1 w-14 cursor-pointer accent-cyan-500" onChange={(event) => { const next = Number(event.target.value); const audio = audioRef.current; if (!audio) return; audio.volume = next; audio.muted = next === 0; }} />
-            </div>
+            <audio src={src} controls className="w-full" data-canvas-no-zoom />
         </div>
     );
 }
@@ -1886,13 +1633,13 @@ function ImageContent({
     );
 }
 
-function ImageInfoBar({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     const width = Math.round(node.metadata?.naturalWidth || node.width);
     const height = Math.round(node.metadata?.naturalHeight || node.height);
     const size = formatBytes(node.metadata?.bytes || 0);
     return (
         <div className="pointer-events-none absolute bottom-3 right-3 z-40 max-w-[calc(100%-24px)]">
-            <Badge className="max-w-full truncate rounded-md px-2 py-1 text-[11px] font-medium leading-none backdrop-blur-sm" style={{ background: `${theme.canvas.background}cc`, color: theme.node.text, borderColor: theme.ui.hairline }}>
+            <Badge className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
                 {width} x {height}
                 {size ? ` · ${size}` : ""}
             </Badge>

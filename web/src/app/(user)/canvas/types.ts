@@ -68,8 +68,6 @@ export type CanvasBaseMetadata = {
         italic?: boolean;
         underline?: boolean;
         strike?: boolean;
-        textColor?: string;
-        list?: "bullet" | "ordered";
     };
 };
 

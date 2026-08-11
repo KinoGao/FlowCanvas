@@ -38,8 +38,6 @@ export const canvasThemes = {
             accentSoft: "rgba(8,145,178,.14)",
             controlFill: "rgba(118,118,128,.12)",
             danger: "#ff3b30",
-            success: "#168a63",
-            warning: "#a66a00",
         },
         connection: {
             color: "rgba(60,60,67,.35)",
@@ -86,8 +84,6 @@ export const canvasThemes = {
             accentSoft: "rgba(18,196,238,.16)",
             controlFill: "rgba(255,255,255,.10)",
             danger: "#F06B6B",
-            success: "#54D19D",
-            warning: "#F0C36B",
         },
         connection: {
             color: "rgba(255,255,255,.28)",
