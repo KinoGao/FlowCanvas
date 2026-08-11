@@ -325,6 +325,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onChange={updatePrompt}
                     mentionRequestNonce={mentionRequestNonce}
                     onSubmit={submit}
+                    className="w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35"
                 />
                 <button
                     type="button"
