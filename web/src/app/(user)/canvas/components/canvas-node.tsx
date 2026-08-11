@@ -1774,12 +1774,12 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             data-handle
             data-handle-type={isSource ? "source" : "target"}
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
-            style={{ [side]: "-22px", width: "44px" }}
+            style={{ [side]: "-34px", width: "44px" }}
         >
             {/* 视觉圆点居中于 44px 命中条，即圆心正好骑在节点边框上（对齐 TapNow 贴边 ⊕）。 */}
             <span onPointerDown={handlePointerDown} className="pointer-events-auto absolute left-1/2 top-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center">
                 <span
-                    className={`pointer-events-none relative grid size-5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                    className={`pointer-events-none relative grid size-3.5 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                     style={{
                         background: active ? theme.ui.accent : theme.ui.materialElevated,
                         borderColor: active ? theme.ui.accent : theme.node.stroke,
@@ -1787,8 +1787,8 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
                         boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
                     }}
                 >
-                    <span className="absolute left-1/2 top-1/2 h-[10px] w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-                    <span className="absolute left-1/2 top-1/2 h-[1.5px] w-[10px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-[7px] w-[1.2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    <span className="absolute left-1/2 top-1/2 h-[1.2px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
                 </span>
             </span>
         </div>
