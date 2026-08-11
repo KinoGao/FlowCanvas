@@ -34,7 +34,7 @@ export type CanvasCreateMenuAction =
     | "upload"
     | "generationHistory";
 
-const MENU_WIDTH = 208;
+const MENU_WIDTH = 272;
 
 /** 统一的「添加节点」菜单：右侧 dock +、双击空白、右键空白三个入口共用（对齐 TapNow）。position 为 client 坐标。 */
 export function CanvasCreateNodeMenu({
@@ -99,7 +99,7 @@ export function CanvasCreateNodeMenu({
     return (
         <div
             ref={menuRef}
-            className="canvas-create-menu-enter creative-os-panel fixed z-[80] rounded-[8px] border p-2"
+            className="canvas-create-menu-enter creative-os-panel thin-scrollbar fixed z-[80] max-h-[calc(100vh-16px)] overflow-y-auto rounded-[8px] border p-2"
             style={{
                 left: menuPosition.x,
                 top: menuPosition.y,
@@ -111,41 +111,46 @@ export function CanvasCreateNodeMenu({
             }}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <div className="px-2 pb-2 text-xs font-medium opacity-60">添加节点</div>
-            <CreateMenuOption theme={theme} icon={<Type className="size-4" />} label="文本" onClick={() => onAction("text")} />
-            <CreateMenuOption theme={theme} icon={<ImageIcon className="size-4" />} label="图片" onClick={() => onAction("image")} />
-            <CreateMenuOption theme={theme} icon={<Video className="size-4" />} label="视频" onClick={() => onAction("video")} />
-            <CreateMenuOption theme={theme} icon={<Workflow className="size-4" />} label="ComfyUI" onClick={() => onAction("comfyui")} />
-            <CreateMenuOption theme={theme} icon={<Clapperboard className="size-4" />} label="视频合成" tag="Beta" onClick={() => onAction("videoComposition")} />
-            <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" tag="NEW" onClick={() => onAction("director")} />
-            <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" tag="NEW" onClick={() => onAction("panorama360")} />
-            <CreateMenuOption theme={theme} icon={<Music2 className="size-4" />} label="音频" onClick={() => onAction("audio")} />
-            <CreateMenuOption theme={theme} icon={<FileText className="size-4" />} label="脚本" onClick={() => onAction("script")} />
-            <CreateMenuOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" tag="NEW" onClick={() => onAction("materialLibrary")} />
+            <div className="flex items-center justify-between px-2 pb-2">
+                <div className="text-xs font-medium opacity-70">添加节点</div>
+                <div className="text-[10px] opacity-35">画布工具</div>
+            </div>
+            <CreateMenuOption theme={theme} icon={<Type className="size-4" />} label="文本" description="设置 · 台词 · 剧情说明" onClick={() => onAction("text")} />
+            <CreateMenuOption theme={theme} icon={<ImageIcon className="size-4" />} label="图片" description="宣传图 · 海报 · 封面" onClick={() => onAction("image")} />
+            <CreateMenuOption theme={theme} icon={<Video className="size-4" />} label="视频" description="宣传视频 · 动画 · 电影" onClick={() => onAction("video")} />
+            <CreateMenuOption theme={theme} icon={<Music2 className="size-4" />} label="音频" description="音乐 · 配音 · 音效" onClick={() => onAction("audio")} />
+            <CreateMenuOption theme={theme} icon={<Workflow className="size-4" />} label="ComfyUI" description="连接自定义工作流" onClick={() => onAction("comfyui")} />
+            <CreateMenuOption theme={theme} icon={<Clapperboard className="size-4" />} label="剪辑时间线" description="时间轴串联多段素材" tag="Beta" onClick={() => onAction("videoComposition")} />
+            <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" description="在 3D 空间搭建场景" tag="NEW" onClick={() => onAction("director")} />
+            <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" description="生成沉浸式全景素材" tag="NEW" onClick={() => onAction("panorama360")} />
+            <CreateMenuOption theme={theme} icon={<FileText className="size-4" />} label="脚本" description="脚本、分镜与逐 beat 生成" onClick={() => onAction("script")} />
+            <CreateMenuOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" description="复用账号素材与风格" tag="NEW" onClick={() => onAction("materialLibrary")} />
+            <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="3D 世界" description="空间创作能力即将开放" tag="Beta" disabled />
             <div className="px-2 pb-1 pt-2 text-xs font-medium opacity-60">添加资源</div>
-            <CreateMenuOption theme={theme} icon={<Upload className="size-4" />} label="上传" onClick={() => onAction("upload")} />
-            <CreateMenuOption theme={theme} icon={<Clock3 className="size-4" />} label="从生成历史选择" onClick={() => onAction("generationHistory")} />
+            <CreateMenuOption theme={theme} icon={<Upload className="size-4" />} label="上传" description="图片、视频、音频与文件" onClick={() => onAction("upload")} />
+            <CreateMenuOption theme={theme} icon={<Clock3 className="size-4" />} label="从生成历史选择" description="回到已有生成结果" onClick={() => onAction("generationHistory")} />
         </div>
     );
 }
 
-function CreateMenuOption({ theme, icon, label, tag, onClick }: { theme: CanvasTheme; icon: ReactNode; label: string; tag?: string; onClick: () => void }) {
+function CreateMenuOption({ theme, icon, label, description, tag, disabled = false, onClick }: { theme: CanvasTheme; icon: ReactNode; label: string; description?: string; tag?: string; disabled?: boolean; onClick?: () => void }) {
     return (
         <button
             type="button"
-            className="creative-os-menu-item flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition"
+            disabled={disabled}
+            aria-disabled={disabled}
+            className="creative-os-menu-item flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition disabled:cursor-not-allowed disabled:opacity-40"
             style={{ color: theme.node.text }}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.toolbar.itemHover)}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
-            onClick={onClick}
+            onClick={() => onClick?.()}
         >
-            <span className="grid size-5 place-items-center opacity-80">{icon}</span>
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {tag ? (
-                <span className="rounded px-1.5 py-0.5 text-[10px] font-bold leading-3" style={{ background: theme.toolbar.activeBg, color: theme.toolbar.activeText }}>
-                    {tag}
-                </span>
-            ) : null}
+            <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.activeBg, color: theme.ui.accent }}>{icon}</span>
+            <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{label}</span>
+                {description ? <span className="mt-0.5 block truncate text-[10px] opacity-50">{description}</span> : null}
+            </span>
+            {tag ? <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold leading-3" style={{ background: theme.toolbar.activeBg, color: theme.toolbar.activeText }}>{tag}</span> : null}
         </button>
     );
 }

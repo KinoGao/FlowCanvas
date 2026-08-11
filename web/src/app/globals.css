@@ -609,6 +609,101 @@
         background: var(--creative-control-fill) !important;
         transform: translateX(1px);
     }
+
+    .canvas-empty-state {
+        animation: canvas-empty-rise 420ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .canvas-empty-kicker-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: currentColor;
+        box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 12%, transparent);
+        animation: canvas-empty-pulse 2.4s ease-in-out infinite;
+    }
+
+    .canvas-empty-composer {
+        transition: border-color 180ms ease, box-shadow 220ms ease, transform 180ms ease;
+    }
+
+    .canvas-empty-composer:focus-within {
+        border-color: var(--creative-accent) !important;
+        box-shadow: 0 0 0 4px var(--creative-accent-soft), var(--creative-shadow);
+        transform: translateY(-1px);
+    }
+
+    .canvas-empty-action-card {
+        -webkit-tap-highlight-color: transparent;
+        box-shadow: 0 8px 20px color-mix(in srgb, var(--creative-text) 4%, transparent);
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease, background-color 180ms ease, box-shadow 220ms ease;
+    }
+
+    .canvas-empty-action-card:hover {
+        border-color: var(--creative-accent) !important;
+        box-shadow: 0 14px 30px color-mix(in srgb, var(--creative-accent) 13%, transparent);
+        transform: translateY(-3px);
+    }
+
+    .canvas-empty-action-card:active {
+        transform: translateY(-1px) scale(.985);
+    }
+
+    .canvas-empty-action-icon {
+        transition: transform 180ms cubic-bezier(.2, .8, .2, 1), background-color 180ms ease;
+    }
+
+    .canvas-empty-action-card:hover .canvas-empty-action-icon {
+        transform: rotate(-4deg) scale(1.08);
+        background: var(--creative-accent-soft) !important;
+    }
+
+    .canvas-empty-agent-button:hover {
+        border-color: var(--creative-accent) !important;
+        color: var(--creative-accent) !important;
+        transform: translateY(-1px);
+    }
+
+    .canvas-text-format-toolbar {
+        scrollbar-width: none;
+    }
+
+    .canvas-text-format-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    @keyframes canvas-empty-rise {
+        from {
+            opacity: 0;
+            transform: translateY(10px) scale(.985);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+
+    @keyframes canvas-empty-pulse {
+        0%,
+        100% {
+            opacity: .55;
+            transform: scale(.86);
+        }
+
+        50% {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .canvas-empty-state,
+        .canvas-empty-kicker-dot {
+            animation: none;
+        }
+    }
+
     .creative-os-zoom-cluster {
         border-radius: 12px;
         padding: 4px;

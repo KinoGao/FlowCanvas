@@ -60,6 +60,15 @@ export type CanvasBaseMetadata = {
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;
+    /** 文本节点选中态工具栏使用的轻量富文本样式。正文仍保持纯文本，便于跨节点引用。 */
+    textFormat?: {
+        heading?: 1 | 2 | 3;
+        quote?: boolean;
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        strike?: boolean;
+    };
 };
 
 export type CanvasScriptBeat = {

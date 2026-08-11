@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -105,6 +105,7 @@ export type CanvasNodeProps = {
     onConnectStart: (nodeId: string, handleType: "source" | "target") => void;
     onResize: (nodeId: string, width: number, height: number, position?: CanvasPosition) => void;
     onContentChange: (nodeId: string, content: string) => void;
+    onTextFormatChange?: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onTitleChange: (nodeId: string, title: string) => void;
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
@@ -113,6 +114,7 @@ export type CanvasNodeProps = {
     onUpload?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onOpenAssetPicker?: (node: CanvasNodeData) => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onViewImage?: (node: CanvasNodeData) => void;
     onGroupAction?: (node: CanvasNodeData, action: "execute" | "storyboard" | "ungroup") => void;
@@ -134,11 +136,13 @@ type NodeContentRendererProps = {
     batchRecovering: boolean;
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     onContentChange: (nodeId: string, content: string) => void;
+    onTextFormatChange?: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onStartEditing?: () => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
+    onOpenAssetPicker?: () => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
@@ -204,6 +208,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onConnectStart,
     onResize,
     onContentChange,
+    onTextFormatChange,
     onTitleChange,
     onToggleBatch,
     onSetBatchPrimary,
@@ -212,6 +217,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onUpload,
     onRetry,
     onGenerateImage,
+    onOpenAssetPicker,
     onCaptureVideoFrame,
     onViewImage,
     onGroupAction,
@@ -555,9 +561,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                     mentionReferences={mentionReferences}
                     onStartEditing={() => setIsEditingContent(true)}
                     onContentChange={onContentChange}
+                    onTextFormatChange={onTextFormatChange}
                     onStopEditing={() => setIsEditingContent(false)}
                     onRetry={onRetry}
                     onGenerateImage={onGenerateImage}
+                    onOpenAssetPicker={() => onOpenAssetPicker?.(data)}
                     onCaptureVideoFrame={onCaptureVideoFrame}
                     onOpenComposer={() => onOpenComposer?.(data)}
                     onNodeAction={(intent) => onNodeAction?.(data, intent)}
@@ -737,13 +745,81 @@ function EmptyState({ icon, label, theme }: { icon: ReactNode; label: string; th
     );
 }
 
-function TextContent({ node, theme, isEditingContent, textareaRef, mentionReferences, onContentChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
-    const fontSize = node.metadata?.fontSize || 14;
-    const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.72)}px`, letterSpacing: 0, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
+function TextFormatToolbar({ node, theme, onChange }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onChange?: (patch: Partial<CanvasNodeData["metadata"]>) => void }) {
+    const format = node.metadata?.textFormat || {};
+    const update = (patch: NonNullable<CanvasNodeData["metadata"]>["textFormat"]) => onChange?.({ textFormat: { ...format, ...patch } });
+    const clear = () => onChange?.({ textFormat: undefined, fontSize: 14 });
+    const buttons = [
+        { label: "H1", title: "标题 1", active: format.heading === 1, onClick: () => update({ heading: format.heading === 1 ? undefined : 1, quote: undefined }) },
+        { label: "H2", title: "标题 2", active: format.heading === 2, onClick: () => update({ heading: format.heading === 2 ? undefined : 2, quote: undefined }) },
+        { label: "H3", title: "标题 3", active: format.heading === 3, onClick: () => update({ heading: format.heading === 3 ? undefined : 3, quote: undefined }) },
+        { label: "❝", title: "引用", active: Boolean(format.quote), onClick: () => update({ quote: !format.quote, heading: undefined }) },
+        { label: "B", title: "粗体", active: Boolean(format.bold), onClick: () => update({ bold: !format.bold }) },
+        { label: "I", title: "斜体", active: Boolean(format.italic), onClick: () => update({ italic: !format.italic }) },
+        { label: "U", title: "下划线", active: Boolean(format.underline), onClick: () => update({ underline: !format.underline }) },
+        { label: "S", title: "删除线", active: Boolean(format.strike), onClick: () => update({ strike: !format.strike }) },
+    ];
+
+    return (
+        <div
+            className="canvas-text-format-toolbar pointer-events-auto absolute left-2 top-2 z-30 flex max-w-[calc(100%-88px)] items-center gap-0.5 overflow-x-auto rounded-md border p-1 shadow-sm backdrop-blur-md"
+            style={{ background: `${theme.toolbar.panel}e8`, borderColor: theme.ui.hairline, color: theme.node.text }}
+            data-canvas-no-zoom
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+        >
+            {buttons.map((button) => (
+                <button
+                    key={button.title}
+                    type="button"
+                    title={button.title}
+                    aria-label={button.title}
+                    className="grid size-7 shrink-0 place-items-center rounded text-[11px] font-semibold transition"
+                    style={{ background: button.active ? theme.toolbar.activeBg : "transparent", color: button.active ? theme.ui.accent : theme.node.text }}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        button.onClick();
+                    }}
+                >
+                    {button.label}
+                </button>
+            ))}
+            <button
+                type="button"
+                title="清除格式"
+                aria-label="清除格式"
+                className="grid size-7 shrink-0 place-items-center rounded text-[11px] opacity-60 transition hover:opacity-100"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    clear();
+                }}
+            >
+                ↺
+            </button>
+        </div>
+    );
+}
+
+function TextContent({ node, theme, isSelected, isEditingContent, textareaRef, mentionReferences, onContentChange, onTextFormatChange, onStopEditing, onStartEditing, onGenerateImage, onOpenComposer, onNodeAction }: NodeContentRendererProps) {
+    const format = node.metadata?.textFormat || {};
+    const fontSize = format.heading === 1 ? 24 : format.heading === 2 ? 20 : format.heading === 3 ? 17 : node.metadata?.fontSize || 14;
+    const textStyle = {
+        fontSize: `${fontSize}px`,
+        lineHeight: `${Math.round(fontSize * (format.quote ? 1.6 : 1.72))}px`,
+        letterSpacing: 0,
+        color: theme.node.text,
+        boxSizing: "border-box",
+        fontWeight: format.bold ? 700 : format.heading ? 650 : 400,
+        fontStyle: format.italic ? "italic" : "normal",
+        textDecoration: [format.underline ? "underline" : "", format.strike ? "line-through" : ""].filter(Boolean).join(" ") || "none",
+        borderLeft: format.quote ? `3px solid ${theme.ui.accent}` : undefined,
+        paddingLeft: format.quote ? 14 : undefined,
+    } as React.CSSProperties;
     const isEmpty = !node.metadata?.content?.trim();
 
     return (
         <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
+            {isSelected ? <TextFormatToolbar node={node} theme={theme} onChange={(patch) => onTextFormatChange?.(node.id, patch)} /> : null}
             {!isEmpty ? (
                 <Button
                     type="button"
@@ -1085,7 +1161,7 @@ const nodeStarterVisuals: Record<NodeStarterKind, { label: string; description: 
 function NodeStarterPanel({ theme, kind = "text", actions }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; kind?: NodeStarterKind; actions: Array<{ label: string; onClick?: () => void }> }) {
     const visual = nodeStarterVisuals[kind];
     const NodeIcon = visual.icon as LucideIcon;
-    const actionIcons = kind === "text" ? [FileText, Video, Music2, Clapperboard] : kind === "image" ? [ImageIcon, Sparkles] : kind === "video" ? [Video, ImageIcon] : kind === "comfyui" ? [Workflow, Sparkles] : [Music2, Sparkles];
+    const actionIcons = kind === "text" ? [FileText, Video, Music2, Clapperboard] : kind === "image" ? [ImageIcon, FolderOpen] : kind === "video" ? [Video, Sparkles] : kind === "comfyui" ? [Workflow, Sparkles] : [Music2, Sparkles];
 
     return (
         <div className="relative flex h-full w-full overflow-hidden rounded-[inherit] p-4 text-left" style={{ background: `linear-gradient(145deg, ${theme.node.panel}, ${theme.node.fill})` }}>
@@ -1168,7 +1244,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload }: NodeContentRendererProps) {
+function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload, onOpenAssetPicker }: NodeContentRendererProps) {
     if (node.metadata?.canvasTool === "panorama360") {
         return (
             <NodeStarterPanel kind="image"
@@ -1183,7 +1259,10 @@ function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded
     const content = (
         <NodeStarterPanel kind="image"
             theme={theme}
-            actions={[{ label: "上传图片", onClick: onUpload }]}
+            actions={[
+                { label: "上传图片", onClick: onUpload },
+                { label: "从素材库选择", onClick: onOpenAssetPicker },
+            ]}
         />
     );
     if (isBatchRoot)
@@ -1246,7 +1325,7 @@ function waitForDecodedVideoFrame(video: HTMLVideoElement) {
     });
 }
 
-function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUpload }: NodeContentRendererProps) {
+function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUpload, onOpenComposer }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -1344,7 +1423,7 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
         [capturing, duration, node, onCaptureVideoFrame],
     );
 
-    if (!src) return <NodeStarterPanel kind="video" theme={theme} actions={[{ label: "上传视频", onClick: onUpload }]} />;
+    if (!src) return <NodeStarterPanel kind="video" theme={theme} actions={[{ label: "上传视频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
     if (failedSrc === src) return <EmptyState icon={<Video className="size-7 opacity-35" />} label="视频加载失败" theme={theme} />;
 
     return (
@@ -1455,9 +1534,9 @@ function VideoNodeContent({ node, theme, isSelected, onCaptureVideoFrame, onUplo
     );
 }
 
-function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
+function AudioNodeContent({ node, theme, onUpload, onOpenComposer }: NodeContentRendererProps) {
     const src = useLazyMediaUrl(node.metadata?.storageKey, node.metadata?.content, "media");
-    if (!src) return <EmptyState icon={<Music2 className="size-7 opacity-35" />} label="空音频节点" theme={theme} />;
+    if (!src) return <NodeStarterPanel kind="audio" theme={theme} actions={[{ label: "上传音频", onClick: onUpload }, { label: "打开生成面板", onClick: onOpenComposer }]} />;
     return (
         <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">

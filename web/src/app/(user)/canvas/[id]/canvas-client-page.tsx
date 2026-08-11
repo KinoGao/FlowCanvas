@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, ArrowUp, Upload, Video, Workflow, X } from "lucide-react";
+import { ArrowUp, Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -775,6 +775,7 @@ function LeaferCanvasPage() {
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [assetPickerTargetNodeId, setAssetPickerTargetNodeId] = useState<string | null>(null);
     const [canvasAssetPanelOpen, setCanvasAssetPanelOpen] = useState(false);
     const [workflowToolboxOpen, setWorkflowToolboxOpen] = useState(false);
     const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets">("canvas");
@@ -1538,7 +1539,7 @@ function LeaferCanvasPage() {
     }, [setConnecting]);
 
     const quickCreateFromEmpty = useCallback(
-        (type: CanvasNodeType) => {
+        (type: CanvasNodeType, metadata?: CanvasNodeMetadata) => {
             const shellRect = canvasShellRef.current?.getBoundingClientRect();
             const width = shellRect?.width ?? 800;
             const height = shellRect?.height ?? 600;
@@ -1546,7 +1547,7 @@ function LeaferCanvasPage() {
                 x: (width / 2 - viewport.x) / viewport.k - 120,
                 y: (height / 2 - viewport.y) / viewport.k - 80,
             };
-            const node = createCanvasNode(type, center);
+            const node = createCanvasNode(type, center, metadata);
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
@@ -2773,6 +2774,10 @@ function LeaferCanvasPage() {
 
     const handleNodeContentChange = useCallback((nodeId: string, content: string) => {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, content } } : node)));
+    }, []);
+
+    const handleNodeTextFormatChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...patch } } : node)));
     }, []);
 
     const handleNodeTitleChange = useCallback((nodeId: string, title: string) => {
@@ -4508,9 +4513,42 @@ function LeaferCanvasPage() {
         [screenToCanvas, size.height, size.width],
     );
 
+    const openAssetPicker = useCallback((nodeId?: string) => {
+        setAssetPickerTargetNodeId(nodeId || null);
+        setAssetPickerOpen(true);
+    }, []);
+
     const handleAssetInsert = useCallback(
         (payload: InsertAssetPayload) => {
-            if (payload.kind === "text") {
+            const target = assetPickerTargetNodeId ? nodesRef.current.find((node) => node.id === assetPickerTargetNodeId) : null;
+            const replaceTarget = (patch: Partial<CanvasNodeData>, nextSize?: { width: number; height: number }) => {
+                if (!target) return false;
+                const nextNodes = nodesRef.current.map((node) => (node.id === target.id ? { ...node, ...patch, ...(nextSize || {}), title: payload.title || node.title } : node));
+                nodesRef.current = nextNodes;
+                setNodes(nextNodes);
+                setSelectedNodeIds(new Set([target.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(target.id);
+                return true;
+            };
+
+            if (payload.kind === "text" && target?.type === CanvasNodeType.Text) {
+                replaceTarget({ metadata: { ...target.metadata, content: payload.content, status: NODE_STATUS_SUCCESS } });
+            } else if (payload.kind === "image" && target?.type === CanvasNodeType.Image) {
+                const nextSize = fitNodeSize(payload.width, payload.height, NODE_DEFAULT_SIZE[CanvasNodeType.Image].width, NODE_DEFAULT_SIZE[CanvasNodeType.Image].height);
+                replaceTarget(
+                    { metadata: { ...target.metadata, content: payload.dataUrl, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height, bytes: payload.bytes, mimeType: payload.mimeType } },
+                    nextSize,
+                );
+            } else if (payload.kind === "video" && target?.type === CanvasNodeType.Video) {
+                const nextSize = fitNodeSize(payload.width || NODE_DEFAULT_SIZE[CanvasNodeType.Video].width, payload.height || NODE_DEFAULT_SIZE[CanvasNodeType.Video].height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                replaceTarget(
+                    { metadata: { ...target.metadata, content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height } },
+                    nextSize,
+                );
+            } else if (payload.kind === "audio" && target?.type === CanvasNodeType.Audio) {
+                replaceTarget({ metadata: { ...target.metadata, content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, mimeType: payload.mimeType || "audio/mpeg", durationMs: payload.durationMs } });
+            } else if (payload.kind === "text") {
                 insertAssistantText(payload.content);
             } else if (payload.kind === "video") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
@@ -4527,6 +4565,7 @@ function LeaferCanvasPage() {
                     node,
                 ]);
                 setSelectedNodeIds(new Set([node.id]));
+                setSelectedConnectionId(null);
             } else if (payload.kind === "audio") {
                 const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
@@ -4541,6 +4580,7 @@ function LeaferCanvasPage() {
                     node,
                 ]);
                 setSelectedNodeIds(new Set([node.id]));
+                setSelectedConnectionId(null);
             } else {
                 insertAssistantImage({
                     id: `asset-${Date.now()}`,
@@ -4554,8 +4594,9 @@ function LeaferCanvasPage() {
                 });
             }
             setAssetPickerOpen(false);
+            setAssetPickerTargetNodeId(null);
         },
-        [createCanvasNode, insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
+        [assetPickerTargetNodeId, createCanvasNode, insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
     const openMaterialLibrary = useCallback((tab: "styles" | "effects" | "assets" = "styles") => {
@@ -5657,12 +5698,14 @@ function LeaferCanvasPage() {
                                 onConnectStart={handleLeaferConnectStart}
                                 onResize={handleNodeResize}
                                 onContentChange={handleNodeContentChange}
+                                onTextFormatChange={handleNodeTextFormatChange}
                                 onTitleChange={handleNodeTitleChange}
                                 onToggleBatch={toggleBatchExpanded}
                                 onSetBatchPrimary={setBatchPrimary}
                                 onOpenComposer={openNodeComposer}
                                 onNodeAction={handleNodeAction}
                                 onUpload={(item) => handleUploadRequest(item.id)}
+                                onOpenAssetPicker={(item) => openAssetPicker(item.id)}
                                 onRetry={handleRetryNodeAction}
                                 onGenerateImage={generateImageFromTextNode}
                                 onCaptureVideoFrame={insertVideoFrameCapture}
@@ -5675,76 +5718,15 @@ function LeaferCanvasPage() {
                 </LeaferCanvas>
 
                 {projectLoaded && canvasVisualReady && nodes.length === 0 ? (
-                    <div className="pointer-events-none absolute inset-0 z-[40] flex flex-col items-center justify-center gap-5">
-                        <div className="text-[13px] opacity-60" style={{ color: theme.node.muted }}>
-                            双击画布自由创作，或从下方快速开始
-                        </div>
-                        <form
-                            className="pointer-events-auto flex items-center gap-2 rounded-full border py-1.5 pl-4 pr-1.5"
-                            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                submitInspiration(inspiration);
-                            }}
-                        >
-                            <Sparkles className="size-4 shrink-0" style={{ color: theme.ui.accent }} />
-                            <input
-                                value={inspiration}
-                                onChange={(event) => setInspiration(event.target.value)}
-                                placeholder="输入一句灵感，Agent 帮你搭建工作流"
-                                className="w-64 bg-transparent text-[13px] outline-none placeholder:opacity-45"
-                                style={{ color: theme.node.text }}
-                                aria-label="输入灵感"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!inspiration.trim()}
-                                className="grid size-7 shrink-0 place-items-center rounded-full transition disabled:opacity-40"
-                                style={{ background: theme.ui.accent, color: theme.canvas.background }}
-                                aria-label="发送灵感"
-                            >
-                                <ArrowUp className="size-3.5" />
-                            </button>
-                        </form>
-                        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5">
-                            <button
-                                type="button"
-                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
-                                style={{ color: theme.toolbar.item }}
-                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Image)}
-                            >
-                                <ImageIcon className="size-4" />
-                                文生图
-                            </button>
-                            <button
-                                type="button"
-                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
-                                style={{ color: theme.toolbar.item }}
-                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Video)}
-                            >
-                                <Video className="size-4" />
-                                文生视频
-                            </button>
-                            <button
-                                type="button"
-                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
-                                style={{ color: theme.toolbar.item }}
-                                onClick={() => quickCreateFromEmpty(CanvasNodeType.Text)}
-                            >
-                                <FileText className="size-4" />
-                                文本
-                            </button>
-                            <button
-                                type="button"
-                                className="creative-os-icon-button !w-auto gap-1.5 !px-3 py-1.5 text-[13px]"
-                                style={{ color: theme.toolbar.item }}
-                                onClick={() => setWorkflowToolboxOpen(true)}
-                            >
-                                <Workflow className="size-4" />
-                                模板
-                            </button>
-                        </div>
-                    </div>
+                    <CanvasEmptyState
+                        theme={theme}
+                        inspiration={inspiration}
+                        onInspirationChange={setInspiration}
+                        onSubmitInspiration={submitInspiration}
+                        onCreateNode={quickCreateFromEmpty}
+                        onOpenTemplates={() => setWorkflowToolboxOpen(true)}
+                        onOpenAgent={() => openAgent("online")}
+                    />
                 ) : null}
 
                 {dialogNode && composerPosition && !isNodeDragging ? (
@@ -5817,7 +5799,7 @@ function LeaferCanvasPage() {
                     selectedNodeIds={selectedNodeIds}
                     onClose={() => setCanvasAssetPanelOpen(false)}
                     onSelectNode={selectSingleNode}
-                    onOpenAssetPicker={() => setAssetPickerOpen(true)}
+                    onOpenAssetPicker={() => openAssetPicker()}
                     onUpload={() => handleUploadRequest()}
                 />
 
@@ -6032,7 +6014,7 @@ function LeaferCanvasPage() {
                     <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
                 </Modal>
 
-                {assetPickerOpen ? <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => setAssetPickerOpen(false)} /> : null}
+                {assetPickerOpen ? <AssetPickerModal open={assetPickerOpen} onInsert={handleAssetInsert} onClose={() => { setAssetPickerOpen(false); setAssetPickerTargetNodeId(null); }} /> : null}
                 <CanvasMaterialLibraryModal
                     open={materialLibraryOpen}
                     initialTab={materialLibraryTab}
@@ -6040,7 +6022,7 @@ function LeaferCanvasPage() {
                     onUsePreset={insertMaterialPreset}
                     onOpenAssetPicker={() => {
                         setMaterialLibraryOpen(false);
-                        setAssetPickerOpen(true);
+                        openAssetPicker();
                     }}
                     onUpload={() => {
                         setMaterialLibraryOpen(false);
@@ -6526,6 +6508,97 @@ function nodeIcon(type: CanvasNodeType) {
     if (type === CanvasNodeType.Audio) return <Music2 className="size-4" />;
     if (type === CanvasNodeType.Group) return <Layers3 className="size-4" />;
     return <Box className="size-4" />;
+}
+
+type CanvasEmptyStateProps = {
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    inspiration: string;
+    onInspirationChange: (value: string) => void;
+    onSubmitInspiration: (value: string) => void;
+    onCreateNode: (type: CanvasNodeType, metadata?: CanvasNodeMetadata) => void;
+    onOpenTemplates: () => void;
+    onOpenAgent: () => void;
+};
+
+function CanvasEmptyState({ theme, inspiration, onInspirationChange, onSubmitInspiration, onCreateNode, onOpenTemplates, onOpenAgent }: CanvasEmptyStateProps) {
+    const actions: Array<{ id: string; label: string; description: string; icon: ReactNode; type?: CanvasNodeType; metadata?: CanvasNodeMetadata; onClick?: () => void }> = [
+        { id: "text-to-video", label: "文字生视频", description: "从一句话开始创作镜头", icon: <Video className="size-4.5" />, type: CanvasNodeType.Video, metadata: { generationMode: "video", videoGenerationMode: "text-to-video" } },
+        { id: "image-background", label: "图片换背景", description: "保留主体，快速换场景", icon: <ImageIcon className="size-4.5" />, type: CanvasNodeType.Image, metadata: { generationMode: "image", generationType: "edit", prompt: "保留主体，替换背景环境" } },
+        { id: "first-last-frame", label: "首帧生成视频", description: "从关键画面延展动作", icon: <Clapperboard className="size-4.5" />, type: CanvasNodeType.Video, metadata: { generationMode: "video", videoGenerationMode: "first-last-frame" } },
+        { id: "audio-to-video", label: "音频生视频", description: "用声音作为创作上下文", icon: <Music2 className="size-4.5" />, type: CanvasNodeType.Video, metadata: { generationMode: "video", videoGenerationMode: "all-in-one-reference" } },
+        { id: "text", label: "文本", description: "记录脚本、台词或灵感", icon: <FileText className="size-4.5" />, type: CanvasNodeType.Text },
+        { id: "audio", label: "音频", description: "配音、音乐与音效", icon: <Music2 className="size-4.5" />, type: CanvasNodeType.Audio },
+        { id: "template", label: "模板", description: "复用一套完整工作流", icon: <Workflow className="size-4.5" />, onClick: onOpenTemplates },
+    ];
+
+    return (
+        <div className="pointer-events-none absolute inset-0 z-[40] flex items-center justify-center px-4 py-20">
+            <div className="canvas-empty-state pointer-events-auto flex w-[min(780px,calc(100vw-32px))] flex-col items-center text-center">
+                <div className="canvas-empty-kicker mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em]" style={{ color: theme.ui.accent }}>
+                    <span className="canvas-empty-kicker-dot" aria-hidden />
+                    Creative canvas
+                </div>
+                <h2 className="m-0 text-[clamp(24px,3vw,38px)] font-semibold tracking-[-0.04em]" style={{ color: theme.node.text }}>
+                    把灵感放进画布
+                </h2>
+                <p className="mt-2 max-w-[520px] text-[13px] leading-6 opacity-55" style={{ color: theme.node.muted }}>
+                    从一句话、一个节点或一套模板开始，让输入、过程和结果在同一空间里保持可追溯。
+                </p>
+                <form
+                    className="canvas-empty-composer mt-6 flex w-full max-w-[560px] items-center gap-2 rounded-2xl border p-2 pl-4"
+                    style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        onSubmitInspiration(inspiration);
+                    }}
+                >
+                    <Sparkles className="size-4 shrink-0" style={{ color: theme.ui.accent }} />
+                    <input
+                        value={inspiration}
+                        onChange={(event) => onInspirationChange(event.target.value)}
+                        placeholder="输入一句灵感，Agent 帮你搭建工作流"
+                        className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-45"
+                        style={{ color: theme.node.text }}
+                        aria-label="输入灵感"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!inspiration.trim()}
+                        className="creative-os-primary-action grid size-9 shrink-0 place-items-center rounded-xl transition disabled:opacity-40"
+                        aria-label="发送灵感"
+                    >
+                        <ArrowUp className="size-3.5" />
+                    </button>
+                </form>
+                <div className="canvas-empty-actions mt-5 grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
+                    {actions.map((action) => (
+                        <button
+                            key={action.id}
+                            type="button"
+                            data-canvas-quick-action={action.id}
+                            className="canvas-empty-action-card group flex min-h-[76px] items-center gap-3 rounded-xl border p-3 text-left transition"
+                            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+                            onClick={() => (action.onClick ? action.onClick() : action.type ? onCreateNode(action.type, action.metadata) : undefined)}
+                        >
+                            <span className="canvas-empty-action-icon grid size-9 shrink-0 place-items-center rounded-lg" style={{ background: theme.toolbar.activeBg, color: theme.ui.accent }}>
+                                {action.icon}
+                            </span>
+                            <span className="min-w-0">
+                                <span className="block truncate text-[12px] font-semibold">{action.label}</span>
+                                <span className="mt-1 block truncate text-[10px] leading-4 opacity-50">{action.description}</span>
+                            </span>
+                            <span className="ml-auto shrink-0 text-[16px] opacity-20 transition-transform group-hover:translate-x-0.5 group-hover:opacity-55">↗</span>
+                        </button>
+                    ))}
+                </div>
+                <button type="button" className="canvas-empty-agent-button mt-5 inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] transition" style={{ borderColor: theme.ui.hairline, background: theme.ui.controlFill, color: theme.node.text }} onClick={onOpenAgent}>
+                    <Bot className="size-3.5" style={{ color: theme.ui.accent }} />
+                    打开 Agent 侧栏
+                </button>
+                <div className="mt-4 text-[11px] opacity-35" style={{ color: theme.node.muted }}>也可以双击空白处，或使用右键菜单添加节点</div>
+            </div>
+        </div>
+    );
 }
 
 function CanvasTopBar({
