@@ -340,7 +340,7 @@ export function LeaferCanvas({
             opacity: selected ? 1 : related ? 0.94 : visual.hovered ? 0.96 : 0.86,
             dashPattern: undefined,
         });
-        const flowCount = visual.hovered ? 1 : 0;
+        const flowCount = related || visual.hovered ? 1 : 0;
         const app = leaferRef.current;
         while (app && visual.flow.length < flowCount) {
             const flow = new LUI.Path({
