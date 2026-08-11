@@ -308,7 +308,7 @@ export function LeaferCanvas({
             connectionFlowLastPaintRef.current = time;
             let hasVisibleFlow = false;
             const dash = themeRef.current.connection.dash;
-            const offset = -((time * 0.049) % (dash[0] + dash[1]));
+            const offset = -((time * 0.25) % (dash[0] + dash[1]));
             connectionVisualMapRef.current.forEach((visual) => {
                 visual.flow.forEach((path) => {
                     if (!path.visible) return;
@@ -340,7 +340,7 @@ export function LeaferCanvas({
             opacity: selected ? 1 : related ? 0.94 : visual.hovered ? 0.96 : 0.86,
             dashPattern: undefined,
         });
-        const flowCount = 1;
+        const flowCount = visual.hovered ? 1 : 0;
         const app = leaferRef.current;
         while (app && visual.flow.length < flowCount) {
             const flow = new LUI.Path({
