@@ -308,7 +308,7 @@ export function LeaferCanvas({
             connectionFlowLastPaintRef.current = time;
             let hasVisibleFlow = false;
             const dash = themeRef.current.connection.dash;
-            const offset = -((time * 0.035) % (dash[0] + dash[1]));
+            const offset = -((time * 0.049) % (dash[0] + dash[1]));
             connectionVisualMapRef.current.forEach((visual) => {
                 visual.flow.forEach((path) => {
                     if (!path.visible) return;
