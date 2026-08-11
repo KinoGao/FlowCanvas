@@ -4,6 +4,7 @@ import type {
     ModelCategory,
     PlatformComfyUi,
     PlatformConfigDocument,
+    PlatformDefaultModels,
     PlatformModel,
     PlatformProvider,
     TextCapabilities,
@@ -21,11 +22,16 @@ export const emptyComfyUi: PlatformComfyUi = {
     pollIntervalMs: 1200,
 };
 
+export function emptyDefaultModels(): PlatformDefaultModels {
+    return { text: "", image: "", video: "", audio: "" };
+}
+
 export function normalizePlatformConfig(config: PlatformConfigDocument): PlatformConfigDocument {
     return {
         providers: Array.isArray(config.providers) ? config.providers : [],
         models: Array.isArray(config.models) ? config.models.map(normalizeModel) : [],
         comfyui: { ...emptyComfyUi, ...(config.comfyui || {}) },
+        defaultModels: { ...emptyDefaultModels(), ...(config.defaultModels || {}) },
     };
 }
 

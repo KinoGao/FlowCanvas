@@ -119,9 +119,29 @@ public class PlatformConfigService {
                 ))
                 .toList();
         PlatformConfigDocument.ComfyUi comfy = document.getComfyui();
-        return new RuntimeConfigResponse(runtimeProviders, new RuntimeConfigResponse.ComfyUi(
+        return new RuntimeConfigResponse(runtimeProviders, resolveDefaultModels(document, providers), new RuntimeConfigResponse.ComfyUi(
                 comfy.isEnabled(), comfy.getClientId(), comfy.getDefaultWorkflowId(), comfy.getTimeoutSeconds(), comfy.getPollIntervalMs()
         ));
+    }
+
+    private RuntimeConfigResponse.DefaultModels resolveDefaultModels(
+            PlatformConfigDocument document,
+            Map<String, PlatformConfigDocument.Provider> runtimeProviders
+    ) {
+        Set<String> runtimeModelIds = document.getModels().stream()
+                .filter(PlatformConfigDocument.Model::isEnabled)
+                .filter(PlatformConfigDocument.Model::isPublished)
+                .filter(this::isVerified)
+                .filter(item -> runtimeProviders.containsKey(item.getProviderId()))
+                .map(PlatformConfigDocument.Model::getId)
+                .collect(Collectors.toSet());
+        PlatformConfigDocument.DefaultModels defaults = document.getDefaultModels();
+        return new RuntimeConfigResponse.DefaultModels(
+                runtimeModelIds.contains(defaults.getText()) ? defaults.getText() : "",
+                runtimeModelIds.contains(defaults.getImage()) ? defaults.getImage() : "",
+                runtimeModelIds.contains(defaults.getVideo()) ? defaults.getVideo() : "",
+                runtimeModelIds.contains(defaults.getAudio()) ? defaults.getAudio() : ""
+        );
     }
 
     public PlatformConfigDocument.Provider requireRuntimeProvider(String providerId) {
@@ -379,12 +399,34 @@ public class PlatformConfigService {
             return model.getId();
         }).collect(Collectors.toSet());
         if (modelIds.size() != document.getModels().size()) throw new IllegalArgumentException("模型 ID 不能重复");
+        document.setDefaultModels(document.getDefaultModels());
+        normalizeDefaultModels(document, modelIds);
         PlatformConfigDocument.ComfyUi comfy = document.getComfyui();
         comfy.setBaseUrl(normalizeBaseUrl(comfy.getBaseUrl(), "ComfyUI 地址"));
         comfy.setClientId(blank(comfy.getClientId()) ? "flow-canvas" : comfy.getClientId().trim());
         comfy.setTimeoutSeconds(Math.max(10, comfy.getTimeoutSeconds()));
         comfy.setPollIntervalMs(Math.max(500, comfy.getPollIntervalMs()));
     }
+
+    private void normalizeDefaultModels(PlatformConfigDocument document, Set<String> modelIds) {
+        PlatformConfigDocument.DefaultModels defaults = document.getDefaultModels();
+        defaults.setText(validDefaultModel(defaults.getText(), "text", modelIds, document));
+        defaults.setImage(validDefaultModel(defaults.getImage(), "image", modelIds, document));
+        defaults.setVideo(validDefaultModel(defaults.getVideo(), "video", modelIds, document));
+        defaults.setAudio(validDefaultModel(defaults.getAudio(), "audio", modelIds, document));
+    }
+
+    /** 返回模型 ID；引用不存在或分类不匹配时清空（避免删除模型后保存被阻塞）。 */
+    private String validDefaultModel(String modelId, String category, Set<String> modelIds, PlatformConfigDocument document) {
+        if (blank(modelId)) return "";
+        if (!modelIds.contains(modelId)) return "";
+        return document.getModels().stream()
+                .filter(item -> item.getId().equals(modelId) && category.equals(item.getCategory()))
+                .map(PlatformConfigDocument.Model::getId)
+                .findFirst()
+                .orElse("");
+    }
+
 
     private RuntimeConfigResponse.Model toRuntimeModel(PlatformConfigDocument.Provider provider, PlatformConfigDocument.Model item) {
         PlatformConfigDocument.TextCapabilities text = item.getTextCapabilities();

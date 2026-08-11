@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { AdminCard } from "./admin-card";
 import { applyModelCategory, cloneModel, emptyModel, emptyProvider, IMAGE_RATIOS, normalizeModel, normalizePlatformConfig, numberOr, replaceById } from "../platform-config-utils";
-import { discoverProviderModels, fetchModelProtocols, savePlatformConfig, verifyPlatformModel, type AudioCapabilities, type ImageCapabilities, type ModelCategory, type ModelProtocol, type PlatformConfigDocument, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
+import { discoverProviderModels, fetchModelProtocols, savePlatformConfig, verifyPlatformModel, type AudioCapabilities, type ImageCapabilities, type ModelCategory, type ModelProtocol, type PlatformConfigDocument, type PlatformDefaultModels, type PlatformModel, type PlatformProvider, type TextCapabilities, type VideoCapabilities } from "@/services/api/platform-admin";
 
 const CATEGORY_OPTIONS = [{ value: "text", label: "文本" }, { value: "image", label: "图像" }, { value: "video", label: "视频" }, { value: "audio", label: "音频" }];
 const CATEGORY_LABELS: Record<ModelCategory, string> = { text: "文本", image: "图像", video: "视频", audio: "音频" };
@@ -76,7 +76,7 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
     };
 
     const removeProvider = (provider: PlatformProvider) => modal.confirm({ title: "删除厂商？", content: "该厂商下已配置的模型也会移除。", okText: "删除", okButtonProps: { danger: true }, onOk: () => onChange({ ...config, providers: config.providers.filter((item) => item.id !== provider.id), models: config.models.filter((item) => item.providerId !== provider.id) }) });
-    const removeModel = (model: PlatformModel) => modal.confirm({ title: "删除模型？", content: model.displayName || model.id, okText: "删除", okButtonProps: { danger: true }, onOk: () => onChange({ ...config, models: config.models.filter((item) => item.id !== model.id) }) });
+    const removeModel = (model: PlatformModel) => modal.confirm({ title: "删除模型？", content: model.displayName || model.id, okText: "删除", okButtonProps: { danger: true }, onOk: () => onChange({ ...config, models: config.models.filter((item) => item.id !== model.id), defaultModels: clearDefaultModel(config.defaultModels, model.id) }) });
     const discover = async (provider: PlatformProvider) => {
         setDiscovering(provider.id);
         try {
@@ -110,6 +110,20 @@ export function ModelConfigPanel({ authToken, config, onChange }: Props) {
                 { title: "状态", dataIndex: "enabled", width: 90, render: (value) => value ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
                 { title: "操作", width: 260, render: (_, item) => <Space><Button size="small" icon={<RefreshCw className="size-3.5" />} loading={discovering === item.id} onClick={() => void discover(item)}>认证并拉取</Button><Button size="small" title="编辑厂商" icon={<Pencil className="size-3.5" />} onClick={() => editProvider(item)} /><Button size="small" danger title="删除厂商" icon={<Trash2 className="size-3.5" />} onClick={() => removeProvider(item)} /></Space> },
             ]} />
+        </AdminCard>
+
+        <AdminCard title="默认模型" description="创作端未显式选择模型时使用的默认模型，仅在已启用且已发布的模型中选择，可留空表示不设置。">
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                {CATEGORY_OPTIONS.map((option) => {
+                    const options = config.models
+                        .filter((item) => item.enabled && item.published && item.category === option.value)
+                        .map((item) => ({ value: item.id, label: item.displayName || item.id }));
+                    return <div key={option.value}>
+                        <div className="mb-1.5 text-sm font-medium">{option.label}模型</div>
+                        <Select value={config.defaultModels?.[option.value as ModelCategory] || ""} allowClear placeholder="不设置" options={options} onChange={(value) => onChange({ ...config, defaultModels: { ...(config.defaultModels || {}), [option.value]: value || "" } })} className="w-full" />
+                    </div>;
+                })}
+            </div>
         </AdminCard>
 
         {Object.entries(discovered).map(([providerId, models]) => {
@@ -241,3 +255,7 @@ function ModelAvailability({ model, providers }: { model: PlatformModel; provide
 function Toggle(props: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="flex items-center justify-between gap-3 text-sm"><span>{props.label}</span><Switch size="small" checked={props.checked} disabled={props.disabled} onChange={props.onChange} /></div>; }
 function numberTags(values: string[]) { return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b); }
 function decimalTags(values: string[]) { return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0 && value <= 4))].sort((a, b) => a - b); }
+function clearDefaultModel(defaults: PlatformDefaultModels | undefined, modelId: string): PlatformDefaultModels {
+    const current = defaults || { text: "", image: "", video: "", audio: "" };
+    return Object.fromEntries(Object.entries(current).map(([key, value]) => [key, value === modelId ? "" : value])) as PlatformDefaultModels;
+}

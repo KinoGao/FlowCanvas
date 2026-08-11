@@ -2,7 +2,9 @@ package com.infinitecanvas.backend.dto;
 
 import java.util.List;
 
-public record RuntimeConfigResponse(List<Provider> providers, ComfyUi comfyui) {
+public record RuntimeConfigResponse(List<Provider> providers, DefaultModels defaultModels, ComfyUi comfyui) {
+    /** 后台为各分类设置的默认模型 ID（空串 = 不设置）。 */
+    public record DefaultModels(String text, String image, String video, String audio) {}
     public record Provider(String id, String name, String baseUrl, String apiFormat, List<Model> models) {}
     public record Model(
             String id,

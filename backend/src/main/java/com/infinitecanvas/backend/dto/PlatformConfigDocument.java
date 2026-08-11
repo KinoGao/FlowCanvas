@@ -12,6 +12,7 @@ public class PlatformConfigDocument {
     private List<Provider> providers = new ArrayList<>();
     private List<Model> models = new ArrayList<>();
     private ComfyUi comfyui = new ComfyUi();
+    private DefaultModels defaultModels = new DefaultModels();
 
     public List<Provider> getProviders() { return providers; }
     public void setProviders(List<Provider> providers) { this.providers = providers == null ? new ArrayList<>() : providers; }
@@ -19,6 +20,25 @@ public class PlatformConfigDocument {
     public void setModels(List<Model> models) { this.models = models == null ? new ArrayList<>() : models; }
     public ComfyUi getComfyui() { return comfyui; }
     public void setComfyui(ComfyUi comfyui) { this.comfyui = comfyui == null ? new ComfyUi() : comfyui; }
+    public DefaultModels getDefaultModels() { return defaultModels; }
+    public void setDefaultModels(DefaultModels defaultModels) { this.defaultModels = defaultModels == null ? new DefaultModels() : defaultModels; }
+
+    /** 后台为各分类设置的默认模型 ID（空串 = 不设置）。 */
+    public static class DefaultModels {
+        private String text = "";
+        private String image = "";
+        private String video = "";
+        private String audio = "";
+
+        public String getText() { return text; }
+        public void setText(String text) { this.text = text == null ? "" : text.trim(); }
+        public String getImage() { return image; }
+        public void setImage(String image) { this.image = image == null ? "" : image.trim(); }
+        public String getVideo() { return video; }
+        public void setVideo(String video) { this.video = video == null ? "" : video.trim(); }
+        public String getAudio() { return audio; }
+        public void setAudio(String audio) { this.audio = audio == null ? "" : audio.trim(); }
+    }
 
     public static class Provider {
         private String id = "";

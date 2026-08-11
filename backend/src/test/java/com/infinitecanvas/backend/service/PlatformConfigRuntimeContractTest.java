@@ -236,6 +236,64 @@ class PlatformConfigRuntimeContractTest {
     }
 
     @Test
+    void defaultModelsArePublishedAndExposedToRuntime() throws Exception {
+        PlatformConfigRepository repository = mock(PlatformConfigRepository.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        PlatformConfigDocument document = document();
+        document.getDefaultModels().setImage("image-model");
+        document.getDefaultModels().setVideo("seedance-canonical");
+        PlatformConfigEntity entity = new PlatformConfigEntity();
+        entity.setData(objectMapper.writeValueAsString(document));
+        when(repository.findById(1L)).thenReturn(Optional.of(entity));
+
+        PlatformConfigService service = new PlatformConfigService(repository, objectMapper, "");
+
+        RuntimeConfigResponse.DefaultModels defaults = service.runtimeConfig().defaultModels();
+
+        assertEquals("image-model", defaults.image());
+        assertEquals("seedance-canonical", defaults.video());
+        assertEquals("", defaults.text());
+        assertEquals("", defaults.audio());
+    }
+
+    @Test
+    void defaultModelsWithInvalidReferenceAreClearedOnSave() {
+        PlatformConfigRepository repository = mock(PlatformConfigRepository.class);
+        when(repository.findById(1L)).thenReturn(Optional.empty());
+        PlatformConfigService service = new PlatformConfigService(repository, new ObjectMapper(), "");
+
+        PlatformConfigDocument missing = document();
+        missing.getDefaultModels().setAudio("no-such-model");
+        PlatformConfigDocument savedMissing = service.save(missing);
+        assertEquals("", savedMissing.getDefaultModels().getAudio());
+
+        PlatformConfigDocument mismatched = document();
+        mismatched.getDefaultModels().setVideo("image-model");
+        PlatformConfigDocument savedMismatched = service.save(mismatched);
+        assertEquals("", savedMismatched.getDefaultModels().getVideo());
+    }
+
+    @Test
+    void unpublishedDefaultModelsAreNotExposedToRuntime() throws Exception {
+        PlatformConfigRepository repository = mock(PlatformConfigRepository.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        PlatformConfigDocument document = document();
+        document.getDefaultModels().setVideo("video-model");
+        document.getModels().stream()
+                .filter(model -> "video-model".equals(model.getId()))
+                .findFirst()
+                .orElseThrow()
+                .setVerificationStatus("unverified");
+        PlatformConfigEntity entity = new PlatformConfigEntity();
+        entity.setData(objectMapper.writeValueAsString(document));
+        when(repository.findById(1L)).thenReturn(Optional.of(entity));
+
+        PlatformConfigService service = new PlatformConfigService(repository, objectMapper, "");
+
+        assertEquals("", service.runtimeConfig().defaultModels().video());
+    }
+
+    @Test
     void agnesVideoLegacyOpenAiAdapterIsPublishedAsAgnesV2() throws Exception {
         PlatformConfigRepository repository = mock(PlatformConfigRepository.class);
         ObjectMapper objectMapper = new ObjectMapper();

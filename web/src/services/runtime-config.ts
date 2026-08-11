@@ -41,7 +41,13 @@ function runtimeCatalog(runtime: RuntimeConfig) {
         capability,
         entries.filter((entry) => entry.capability === capability).map((entry) => entry.option),
     ])) as Record<ModelCapability, string[]>;
-    return { entries, channels, modelsByCapability, allModels: entries.map((entry) => entry.option) };
+    const defaultByCapability = Object.fromEntries(capabilities.map((capability) => {
+        const modelId = runtime.defaultModels?.[capability] || "";
+        const entry = entries.find((item) => item.capability === capability && item.channel.models[0] === modelId);
+        return [capability, entry?.option || ""];
+    })) as Record<ModelCapability, string>;
+    const allModels = entries.map((entry) => entry.option);
+    return { entries, channels, modelsByCapability, allModels, defaultByCapability };
 }
 
 export function reconcileConfigWithRuntime(
@@ -50,7 +56,7 @@ export function reconcileConfigWithRuntime(
     currentComfyui: ComfyUiConfig = defaultComfyUiConfig,
 ) {
     const preferences: AiConfig = { ...defaultConfig, ...(accountConfig || {}) };
-    const { entries, channels, modelsByCapability, allModels } = runtimeCatalog(runtime);
+    const { entries, channels, modelsByCapability, allModels, defaultByCapability } = runtimeCatalog(runtime);
     const choose = (current: string | undefined, capability?: ModelCapability) => {
         const allowedOptions = capability ? modelsByCapability[capability] : allModels;
         const normalized = normalizeModelOptionValue(current, channels);
@@ -60,7 +66,10 @@ export function reconcileConfigWithRuntime(
             (!capability || entry.capability === capability)
             && entry.patterns.some((pattern) => wildcardMatches(pattern, requestedModel)),
         );
-        return matched?.option || allowedOptions[0] || "";
+        if (matched) return matched.option;
+        const defaultOption = capability ? defaultByCapability[capability] : "";
+        if (defaultOption && allowedOptions.includes(defaultOption)) return defaultOption;
+        return allowedOptions[0] || "";
     };
     const imageModel = choose(preferences.imageModel, "image");
     const videoModel = choose(preferences.videoModel, "video");

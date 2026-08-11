@@ -87,10 +87,19 @@ export type PlatformComfyUi = {
     pollIntervalMs: number;
 };
 
+/** 后台为各分类设置的默认模型 ID（空串 = 不设置）。 */
+export type PlatformDefaultModels = {
+    text: string;
+    image: string;
+    video: string;
+    audio: string;
+};
+
 export type PlatformConfigDocument = {
     providers: PlatformProvider[];
     models: PlatformModel[];
     comfyui: PlatformComfyUi;
+    defaultModels: PlatformDefaultModels;
 };
 
 export type RuntimeModel = Omit<PlatformModel, "providerId" | "requestModel" | "enabled" | "published" | "verificationStatus" | "verifiedAt" | "verificationMessage">;
@@ -104,6 +113,7 @@ export type RuntimeProvider = {
 export type RuntimeConfig = {
     providers: RuntimeProvider[];
     comfyui: Omit<PlatformComfyUi, "baseUrl">;
+    defaultModels: PlatformDefaultModels;
 };
 
 export type AdminProjectSummary = {
