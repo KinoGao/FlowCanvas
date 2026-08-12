@@ -142,6 +142,28 @@ export type AdminUserWorkspace = {
 export type AdminWorkspaceSummary = { users: AdminUserWorkspace[] };
 export type AdminProjectDetail = AdminProjectSummary & { userId: string; project: unknown };
 
+export type ModelRequestLogEntry = {
+    id: string;
+    userId: string | null;
+    modelId: string | null;
+    method: string;
+    path: string;
+    requestKind: string | null;
+    durationMs: number;
+    statusCode: number;
+    errorMessage: string | null;
+    jobKey: string | null;
+    createdAt: string;
+};
+
+export type ModelRequestLogPage = {
+    content: ModelRequestLogEntry[];
+    totalElements: number;
+    totalPages: number;
+    number: number;
+    size: number;
+};
+
 type ApiEnvelope<T> = { code: number; data: T; msg?: string };
 
 async function readApi<T>(response: Response): Promise<T> {
@@ -257,4 +279,17 @@ export async function deleteAdminWorkflow(authCode: string, id: string) {
     await readApi<null>(
         await fetch(apiUrl("/api/workflows/" + encodeURIComponent(id)), { method: "DELETE", headers: adminHeaders(authCode) }),
     );
+}
+
+export async function fetchModelRequestLogs(
+    authCode: string,
+    params: { modelId?: string; statusCode?: number; onlyErrors?: boolean; page?: number; size?: number } = {},
+) {
+    const query = new URLSearchParams();
+    if (params.modelId) query.set("modelId", params.modelId);
+    if (params.statusCode !== undefined) query.set("statusCode", String(params.statusCode));
+    if (params.onlyErrors) query.set("onlyErrors", "true");
+    query.set("page", String(params.page || 0));
+    query.set("size", String(params.size || 50));
+    return readApi<ModelRequestLogPage>(await fetch(apiUrl("/api/admin/model-request-logs?" + query.toString()), { headers: adminHeaders(authCode) }));
 }

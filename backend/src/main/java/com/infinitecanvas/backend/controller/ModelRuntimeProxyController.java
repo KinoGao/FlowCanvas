@@ -2,6 +2,7 @@ package com.infinitecanvas.backend.controller;
 
 import com.infinitecanvas.backend.service.PlatformConfigService;
 import com.infinitecanvas.backend.service.GenerationJobService;
+import com.infinitecanvas.backend.service.ModelRequestLogService;
 import com.infinitecanvas.backend.service.UserRequestContext;
 import com.infinitecanvas.backend.service.modelruntime.ModelRequestAdapter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,11 +29,13 @@ import java.util.Locale;
 public class ModelRuntimeProxyController {
     private final PlatformConfigService configService;
     private final GenerationJobService generationJobService;
+    private final ModelRequestLogService requestLogService;
     private final List<ModelRequestAdapter> adapters;
 
-    public ModelRuntimeProxyController(PlatformConfigService configService, GenerationJobService generationJobService, List<ModelRequestAdapter> adapters) {
+    public ModelRuntimeProxyController(PlatformConfigService configService, GenerationJobService generationJobService, ModelRequestLogService requestLogService, List<ModelRequestAdapter> adapters) {
         this.configService = configService;
         this.generationJobService = generationJobService;
+        this.requestLogService = requestLogService;
         this.adapters = adapters.stream()
                 .sorted(Comparator.comparingInt(ModelRequestAdapter::order))
                 .toList();
@@ -41,28 +44,33 @@ public class ModelRuntimeProxyController {
     @RequestMapping("/{modelId}/**")
     public ResponseEntity<?> proxy(HttpServletRequest request) throws Exception {
         String jobKey = request.getHeader("X-FlowCanvas-Job-Id");
-        return generationJobService.execute(
-                UserRequestContext.currentUser(request),
-                jobKey,
-                () -> proxyNow(request)
-        );
+        String modelId = pathModelId(request);
+        String suffix = request.getRequestURI().substring(("/api/model-runtime/models/" + modelId).length());
+        long startedAt = System.currentTimeMillis();
+        try {
+            return generationJobService.execute(
+                    UserRequestContext.currentUser(request),
+                    jobKey,
+                    () -> proxyNow(request, modelId, suffix, startedAt, jobKey)
+            );
+        } catch (Exception error) {
+            recordRequest(request, modelId, suffix, startedAt, 0, rootMessage(error), jobKey);
+            throw error;
+        }
     }
 
-    private ResponseEntity<?> proxyNow(HttpServletRequest request) throws IOException, InterruptedException {
-        String modelId = pathModelId(request);
+    private ResponseEntity<?> proxyNow(HttpServletRequest request, String modelId, String suffix, long startedAt, String jobKey) throws IOException, InterruptedException {
         PlatformConfigService.RuntimeModel runtime;
         try {
             runtime = configService.requireRuntimeModel(modelId);
         } catch (IllegalArgumentException error) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error.getMessage());
+            return recordAndRespond(request, modelId, suffix, startedAt, HttpStatus.NOT_FOUND, error.getMessage(), jobKey);
         }
 
-        String prefix = "/api/model-runtime/models/" + modelId;
-        String suffix = request.getRequestURI().substring(prefix.length());
         try {
             validateEndpointCategory(suffix, runtime.model().getCategory());
         } catch (IllegalArgumentException error) {
-            return ResponseEntity.badRequest().body(error.getMessage());
+            return recordAndRespond(request, modelId, suffix, startedAt, HttpStatus.BAD_REQUEST, error.getMessage(), jobKey);
         }
 
         ModelRequestAdapter matched = null;
@@ -73,10 +81,53 @@ public class ModelRuntimeProxyController {
             }
         }
         if (matched == null) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("当前模型没有可用的请求适配器: " + modelId);
+            return recordAndRespond(request, modelId, suffix, startedAt, HttpStatus.BAD_REQUEST,
+                    "当前模型没有可用的请求适配器: " + modelId, jobKey);
         }
-        return matched.handle(request, suffix, runtime);
+        try {
+            ResponseEntity<?> response = matched.handle(request, suffix, runtime);
+            recordRequest(request, modelId, suffix, startedAt, response.getStatusCode().value(), null, jobKey);
+            return response;
+        } catch (Exception error) {
+            recordRequest(request, modelId, suffix, startedAt, 0, rootMessage(error), jobKey);
+            throw error;
+        }
+    }
+
+    /** 记录并返回错误响应（适配器未命中 / 模型不存在等前置校验失败）。 */
+    private ResponseEntity<?> recordAndRespond(HttpServletRequest request, String modelId, String suffix, long startedAt, HttpStatus status, String message, String jobKey) {
+        recordRequest(request, modelId, suffix, startedAt, status.value(), message, jobKey);
+        return ResponseEntity.status(status).body(message);
+    }
+
+    private void recordRequest(HttpServletRequest request, String modelId, String suffix, long startedAt, int statusCode, String errorMessage, String jobKey) {
+        try {
+            String userId = UserRequestContext.currentUser(request) == null ? null : UserRequestContext.currentUser(request).getId();
+            requestLogService.record(
+                    userId, modelId, request.getMethod(), suffix,
+                    requestKind(request.getMethod(), suffix),
+                    System.currentTimeMillis() - startedAt, statusCode, errorMessage, jobKey
+            );
+        } catch (Exception ignored) {
+            // 日志失败不影响主流程。
+        }
+    }
+
+    private String requestKind(String method, String path) {
+        if (!"POST".equalsIgnoreCase(method)) {
+            if (path.matches("/videos/[^/]+/content$")) return "content";
+            if (path.matches("/videos/[^/]+$") || path.matches("/images/[^/]+$")) return "poll";
+            return "other";
+        }
+        if (path.equals("/videos") || path.equals("/images/generations") || path.equals("/images/edits")
+                || path.equals("/audio/speech") || path.equals("/chat/completions")) return "create";
+        return "other";
+    }
+
+    private String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null) current = current.getCause();
+        return current.getMessage() == null || current.getMessage().isBlank() ? error.getClass().getSimpleName() : current.getMessage();
     }
 
     private void validateEndpointCategory(String path, String category) {

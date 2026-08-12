@@ -1,12 +1,13 @@
 "use client";
 
 import { App, Button, Card, Input, Space, Tabs } from "antd";
-import { ArrowLeft, Database, Save, ServerCog, Users, Workflow } from "lucide-react";
+import { ArrowLeft, Database, FileText, Save, ServerCog, Users, Workflow } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ComfyConfigPanel } from "./components/comfy-config-panel";
 import { ModelConfigPanel } from "./components/model-config-panel";
+import { ModelRequestLogPanel } from "./components/model-request-log-panel";
 import { WorkflowPanel } from "./components/workflow-panel";
 import { WorkspacePanel } from "./components/workspace-panel";
 import { normalizePlatformConfig } from "./platform-config-utils";
@@ -100,6 +101,7 @@ export default function AdminPage() {
 
     return <div className="h-screen overflow-y-auto overscroll-contain bg-[#f5f5f7] px-6 py-6 pb-12 text-[#1d1d1f] dark:bg-[#111113] dark:text-white"><div className="mx-auto max-w-7xl"><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><Space><Link to="/" className="inline-flex size-10 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow-sm dark:bg-white/10 dark:text-white/70"><ArrowLeft className="size-4" /></Link><div><h1 className="m-0 text-2xl font-semibold">FlowCanvas 管理后台</h1><p className="m-0 text-sm text-gray-500">统一管理模型、ComfyUI、工作流和用户画布</p></div></Space><Space wrap><Button loading={loading} onClick={() => void loadAll()}>刷新</Button><Button icon={<Save className="size-4" />} loading={saving} type="primary" onClick={() => void saveConfig()}>保存配置</Button><Button onClick={() => { sessionStorage.removeItem(ADMIN_TOKEN_KEY); setToken(""); setConfig(null); }}>退出后台</Button></Space></div><Tabs items={[
         { key: "models", label: <TabLabel icon={<Database />} text="模型配置" />, children: <ModelConfigPanel authToken={token} config={config} onChange={setConfig} /> },
+        { key: "logs", label: <TabLabel icon={<FileText />} text="请求日志" />, children: <ModelRequestLogPanel authToken={token} modelOptions={(config.models || []).map((item) => item.id)} /> },
         { key: "comfy", label: <TabLabel icon={<ServerCog />} text="ComfyUI" />, children: <ComfyConfigPanel comfyui={config.comfyui} onChange={(comfyui) => setConfig({ ...config, comfyui })} /> },
         { key: "workflows", label: <TabLabel icon={<Workflow />} text="工作流" />, children: <WorkflowPanel authCode={token} workflows={workflows} selectedWorkflow={selectedWorkflow} selectedWorkflowId={selectedWorkflowId} candidates={candidates} selectedFieldKeys={selectedFieldKeys} onSelect={setSelectedWorkflowId} onWorkflowsChange={setWorkflows} /> },
         { key: "workspaces", label: <TabLabel icon={<Users />} text="账号与画布" />, children: <WorkspacePanel authToken={token} users={workspaces} onRefresh={() => loadAll(token)} /> },

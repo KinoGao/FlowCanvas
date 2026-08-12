@@ -185,6 +185,26 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `created_at` | TIMESTAMP | 创建时间 |
 | `updated_at` | TIMESTAMP | 最后更新时间 |
 
+### model_request_logs 表
+
+记录经 `/api/model-runtime/models/*` 代理发出的每一次上游模型请求（创建 / 轮询 / 下载），用于在管理后台排查生成失败与超时原因。日志保留 7 天，写入失败不影响正常生成链路；错误信息会脱敏（URL 替换为 `[url]`）。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | 日志记录 ID |
+| `user_id` | VARCHAR | 发起请求的用户（匿名代理为空） |
+| `model_id` | VARCHAR | 后台注册的模型 ID |
+| `method` | VARCHAR | 请求方法（POST / GET 等） |
+| `path` | VARCHAR | 模型侧路径，如 `/videos`、`/videos/{id}`、`/chat/completions` |
+| `request_kind` | VARCHAR | 请求方向：`create`、`poll`、`content`、`other` |
+| `duration_ms` | BIGINT | 本次请求总耗时（毫秒） |
+| `status_code` | INTEGER | 上游返回状态码（0 = 未得到响应） |
+| `error_message` | TEXT | 失败 / 超时简要原因（已脱敏） |
+| `job_key` | VARCHAR | 对应的画布任务 key |
+| `created_at` | TIMESTAMP | 记录时间 |
+
+管理后台查询接口：`GET /api/admin/model-request-logs`（仅管理员，支持 `modelId` / `statusCode` / `onlyErrors` / `page` / `size` 筛选）。
+
 ### 保存通道说明
 
 - `backend`：正常业务唯一账号存储。登录并完成 bootstrap 后读写 `user_configs`、`canvas_projects`、`assets`、`user_files`、`user_generation_logs` 和 `user_generation_jobs`，不同账号数据隔离。未登录、工作区加载失败或后端不可用时，前端锁定用户页面，不回退浏览器数据。
