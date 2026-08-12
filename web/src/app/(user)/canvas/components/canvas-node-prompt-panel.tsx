@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, Users, WandSparkles } from "lucide-react";
-import { App, Button, Popover, Segmented, Select, Tooltip } from "antd";
+import { App, Button, Input, InputNumber, Popover, Segmented, Select, Switch, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
@@ -22,7 +22,7 @@ import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import { inferComfyWorkflowCapability, listComfyWorkflows, type ComfyUiCapability, type ComfyWorkflow } from "@/services/comfyui-workflows";
+import { inferComfyWorkflowCapability, listComfyWorkflows, type ComfyUiCapability, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
@@ -1337,6 +1337,46 @@ function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node
             </div>
             <div className="text-[11px] leading-5 opacity-60" style={{ color: theme.node.muted }}>
                 {capability === "text-to-image" && !selectedWorkflow ? "选择工作流后自动识别能力，也可手动切换。" : COMFY_CAPABILITY_HINTS[capability]}
+            </div>
+            {selectedWorkflow && selectedWorkflow.fields.length ? <ComfyWorkflowFields fields={selectedWorkflow.fields} values={node.metadata?.comfyFieldValues || {}} onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })} theme={theme} /> : null}
+        </div>
+    );
+}
+
+function isComfyPromptFieldName(field: ComfyWorkflowField) {
+    if (field.type !== "text" && field.type !== "textarea") return false;
+    return /prompt|text|caption|description|positive|negative|提示词|正向|负向/i.test(`${field.input} ${field.name}`);
+}
+
+/** 工作流参数表单：默认值预填到 Composer，可编辑；绑定提示词/提示词类字段由提示词控制不在此展示。 */
+function ComfyWorkflowFields({ fields, values, onValuesChange, theme }: { fields: ComfyWorkflowField[]; values: Record<string, unknown>; onValuesChange: (fieldId: string, value: unknown) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const editable = fields.filter((field) => !field.bindPrompt && !isComfyPromptFieldName(field));
+    if (!editable.length) return null;
+    return (
+        <div className="rounded-lg border p-2" style={{ borderColor: theme.ui.hairline }}>
+            <div className="mb-1.5 text-[11px] font-medium opacity-60">工作流参数（默认值预填，可修改；生成时提示词会替换绑定提示词的字段）</div>
+            <div className="space-y-1.5">
+                {editable.map((field) => {
+                    const value = values[field.id] ?? field.default;
+                    return (
+                        <div key={field.id} className="grid grid-cols-[130px_1fr] items-center gap-2">
+                            <span className="truncate text-xs opacity-70" title={field.name}>{field.name}</span>
+                            {field.type === "number" || field.type === "slider" ? (
+                                <InputNumber size="small" className="w-full" value={typeof value === "number" ? value : Number(value) || 0} onChange={(next) => onValuesChange(field.id, next)} />
+                            ) : field.type === "boolean" ? (
+                                <Switch size="small" checked={Boolean(value)} onChange={(next) => onValuesChange(field.id, next)} />
+                            ) : field.type === "dropdown" ? (
+                                <Select size="small" className="w-full" value={String(value ?? "")} options={(field.options || []).map((option) => ({ value: option, label: option }))} onChange={(next) => onValuesChange(field.id, next)} />
+                            ) : field.type === "textarea" ? (
+                                <Input.TextArea size="small" rows={2} className="!text-xs" value={String(value ?? "")} placeholder="默认值" onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                            ) : field.type === "image" || field.type === "video" || field.type === "audio" ? (
+                                <span className="text-[11px] opacity-50">由上游素材连线提供</span>
+                            ) : (
+                                <Input size="small" className="!text-xs" value={String(value ?? "")} placeholder="默认值" onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                            )}
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
