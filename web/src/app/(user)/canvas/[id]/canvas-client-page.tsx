@@ -1090,7 +1090,13 @@ function LeaferCanvasPage() {
                 currentGenerationNodeIds.add(request.originNodeId);
             });
             const sourceNodes = currentGenerationNodeIds.size ? project.nodes : resetInterruptedGeneration(project.nodes);
-            const restoredNodes = await hydrateCanvasImages(sourceNodes).then((items) => (currentGenerationNodeIds.size ? mergeActiveGenerationNodes(items, nodesRef.current, currentGenerationNodeIds) : items));
+            const restoredNodes = await hydrateCanvasImages(sourceNodes).then((items) => {
+                const merged = currentGenerationNodeIds.size ? mergeActiveGenerationNodes(items, nodesRef.current, currentGenerationNodeIds) : items;
+                const comfySize = NODE_DEFAULT_SIZE[CanvasNodeType.ComfyUI];
+                return merged.map((node) => node.type === CanvasNodeType.ComfyUI && (node.width !== comfySize.width || node.height !== comfySize.height)
+                    ? { ...node, width: comfySize.width, height: comfySize.height }
+                    : node);
+            });
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             if (cancelled || restoreGenerationRef.current !== restoreGeneration) return;
 
@@ -5078,7 +5084,7 @@ function LeaferCanvasPage() {
     );
 
     const renderCanvasConfigNodeContent = useCallback(
-        (contentNode: CanvasNodeData) => (
+        (contentNode: CanvasNodeData) => contentNode.type === CanvasNodeType.Config ? (
             <CanvasConfigNodePanel
                 node={contentNode}
                 isRunning={runningNodeId === contentNode.id}
@@ -5095,7 +5101,7 @@ function LeaferCanvasPage() {
                     void handleGenerateNode(nodeId, mode, target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "", comfyWorkflowId);
                 }}
             />
-        ),
+        ) : null,
         [configInputSummaryById, configInputsById, confirmStopGeneration, handleConfigNodeChange, handleConfigNodeHeightChange, handleGenerateNode, mentionReferencesByNodeId, runningNodeId],
     );
 

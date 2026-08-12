@@ -652,7 +652,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
     if (props.node.metadata?.canvasTool === "script") return <ScriptNodeContent {...props} />;
-    if (isGenerationConfigNode(props.node.type) && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
+    if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
