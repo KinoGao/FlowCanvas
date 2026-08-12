@@ -128,3 +128,13 @@ export function buildAssetPrompt(asset: CanvasScriptAsset): string {
     const subject = kindLabel === "角色" ? "全身正面、动作自然、表情清晰" : "完整呈现、细节清晰";
     return `${kindLabel}设定图：${asset.name}。${asset.description}。要求：${subject}，干净背景，风格统一，电影质感。`;
 }
+
+/** 分镜导出文本：把景别/时长/标题/画面描述/角色场景机位/台词排布为可直接填入视频或 ComfyUI 节点 composer 的提示词。 */
+export function buildScriptBeatExportText(beat: CanvasScriptBeat): string {
+    const header = [beat.shotType, beat.duration].filter((item): item is string => Boolean(item)).join("    ");
+    const refs = [beat.character, beat.scene, beat.camera].filter((item): item is string => Boolean(item));
+    const lines = [header, beat.title, beat.content].filter(Boolean);
+    if (refs.length) lines.push("—", ...refs);
+    if (beat.dialogue) lines.push(`台词：${beat.dialogue}`);
+    return lines.join("\n");
+}

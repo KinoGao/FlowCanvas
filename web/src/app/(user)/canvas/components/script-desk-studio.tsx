@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
-import { Button, Select } from "antd";
-import { Plus, Sparkles, Upload, X } from "lucide-react";
+import { Button, Dropdown, Select } from "antd";
+import { Clapperboard, Download, Image as ImageIcon, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 import { buildScriptBeats } from "../utils/canvas-script-beats";
@@ -41,6 +41,7 @@ export function ScriptDeskStudio({
     onAssetRemove,
     onGenerateBeat,
     onGenerateAsset,
+    onExportBeats,
     outputStates,
 }: {
     node: CanvasNodeData;
@@ -58,7 +59,8 @@ export function ScriptDeskStudio({
     onAssetAdd: (asset: CanvasScriptAsset) => void;
     onAssetRemove: (assetId: string) => void;
     onGenerateBeat: (beat: CanvasScriptBeat, index: number) => void;
-    onGenerateAsset: (asset: CanvasScriptAsset) => void;
+    onGenerateAsset: (asset: CanvasScriptAsset, target: "image" | "comfyui") => void;
+    onExportBeats: (target: "video" | "comfyui") => void;
     outputStates: Record<string, ScriptOutputState>;
 }) {
     const body = node.metadata?.scriptBody ?? node.metadata?.content ?? "";
@@ -98,6 +100,18 @@ export function ScriptDeskStudio({
                             从上游导入
                         </Button>
                     ) : null}
+                    <Dropdown
+                        menu={{
+                            items: [
+                                { key: "video", label: "导出为视频节点", icon: <Clapperboard className="size-3.5" /> },
+                                { key: "comfyui", label: "导出为 ComfyUI 节点", icon: <Workflow className="size-3.5" /> },
+                            ],
+                            onClick: ({ key }) => onExportBeats(key as "video" | "comfyui"),
+                        }}
+                        disabled={!beats.length}
+                    >
+                        <Button icon={<Download className="size-4" />}>导出</Button>
+                    </Dropdown>
                     <Button type="text" shape="circle" icon={<X className="size-4" />} onClick={onClose} aria-label="关闭脚本工作台" />
                 </div>
             </div>
@@ -141,9 +155,20 @@ export function ScriptDeskStudio({
                                         </div>
                                         <textarea className="mt-1.5 h-12 w-full resize-none rounded border px-2 py-1 text-xs leading-4 outline-none" value={asset.description} placeholder="外观/环境描述" onChange={(event) => onAssetChange({ ...asset, description: event.target.value })} style={fieldStyle} />
                                         <div className="mt-1.5 flex justify-end">
-                                            <Button size="small" type="primary" ghost onClick={() => onGenerateAsset(asset)} disabled={!asset.name.trim()}>
-                                                生成资产图
-                                            </Button>
+                                            <Dropdown
+                                                menu={{
+                                                    items: [
+                                                        { key: "image", label: "图片节点生成", icon: <ImageIcon className="size-3.5" /> },
+                                                        { key: "comfyui", label: "ComfyUI 生成", icon: <Workflow className="size-3.5" /> },
+                                                    ],
+                                                    onClick: ({ key }) => onGenerateAsset(asset, key as "image" | "comfyui"),
+                                                }}
+                                                disabled={!asset.name.trim()}
+                                            >
+                                                <Button size="small" type="primary" ghost>
+                                                    生成资产图
+                                                </Button>
+                                            </Dropdown>
                                         </div>
                                     </div>
                                 );
@@ -165,7 +190,7 @@ export function ScriptDeskStudio({
                 <div className="flex min-h-0 flex-col p-4">
                     <div className="mb-2 flex items-center justify-between">
                         <div className="text-sm font-medium opacity-70">分镜表</div>
-                        <div className="text-xs opacity-45">{beats.length} 个分镜 · 逐个编辑后点「生成」输出图片节点</div>
+                        <div className="text-xs opacity-45">{beats.length} 个分镜 · 逐个点「生成」输出图片节点，或「导出」批量创建视频 / ComfyUI 节点</div>
                     </div>
                     <div className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                         <table className="w-full border-collapse text-left text-xs">
