@@ -150,6 +150,8 @@ export type CanvasGenerationMetadata = {
     audioSpeed?: string;
     audioInstructions?: string;
     comfyWorkflowId?: string;
+    /** ComfyUI 工作流能力：反推提示词 / 文生图 / 参考图生图 / 图生视频 */
+    comfyCapability?: "image-to-text" | "text-to-image" | "image-to-image" | "image-to-video";
     comfyFieldValues?: Record<string, unknown>;
     references?: string[];
 };

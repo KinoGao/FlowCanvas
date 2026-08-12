@@ -195,3 +195,26 @@ function normalizeFieldValue(field: ComfyWorkflowField, value: unknown) {
 function cloneJsonValue(value: unknown) {
     return JSON.parse(JSON.stringify(value));
 }
+
+/** ComfyUI 工作流能力：反推提示词 / 文生图 / 参考图生图 / 图生视频 */
+export type ComfyUiCapability = "image-to-text" | "text-to-image" | "image-to-image" | "image-to-video";
+
+const COMFY_IMAGE_TO_TEXT_NODES = /tagger|interrogator|caption|wd14|llava|qwen.*vl|clip.*interrogat|image.*to.*text|blip/i;
+const COMFY_VIDEO_OUTPUT_NODES = /savevideo|video.*output|vhs_|save.*mp4|mux|video.*combine/i;
+const COMFY_IMAGE_OUTPUT_NODES = /saveimage|previewimage|save.*png|save.*jpg/i;
+
+/** 从工作流 JSON 与其字段推断能力（默认文生图）。 */
+export function inferComfyWorkflowCapability(workflow: ComfyWorkflowJson | null | undefined, fields: ComfyWorkflowField[] = []): ComfyUiCapability {
+    if (!workflow || typeof workflow !== "object") return "text-to-image";
+    const classTypes = Object.values(workflow).map((node) => node?.class_type || "");
+    const hasImageInput = fields.some((field) => field.type === "image");
+    const hasVideoInput = fields.some((field) => field.type === "video");
+    const hasImageToText = classTypes.some((type) => COMFY_IMAGE_TO_TEXT_NODES.test(type));
+    const hasVideoOutput = classTypes.some((type) => COMFY_VIDEO_OUTPUT_NODES.test(type));
+    const hasImageOutput = classTypes.some((type) => COMFY_IMAGE_OUTPUT_NODES.test(type));
+    if ((hasImageInput || hasVideoInput) && hasVideoOutput) return "image-to-video";
+    if (hasImageInput && hasImageToText && !hasImageOutput) return "image-to-text";
+    if (hasImageInput && hasImageOutput) return "image-to-image";
+    if (hasImageInput) return "image-to-image";
+    return "text-to-image";
+}

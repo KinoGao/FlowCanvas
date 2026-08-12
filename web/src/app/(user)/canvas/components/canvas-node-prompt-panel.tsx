@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, Users, WandSparkles } from "lucide-react";
-import { App, Button, Popover, Tooltip } from "antd";
+import { App, Button, Popover, Segmented, Select, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
@@ -22,6 +22,7 @@ import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
+import { inferComfyWorkflowCapability, listComfyWorkflows, type ComfyUiCapability, type ComfyWorkflow } from "@/services/comfyui-workflows";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
@@ -86,6 +87,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const [comfyWorkflows, setComfyWorkflows] = useState<ComfyWorkflow[]>([]);
     const [confirmMode, setConfirmMode] = useState<"auto" | "manual">("auto");
     const [pendingConfirmation, setPendingConfirmation] = useState<GenerationConfirmation | null>(null);
     const mode = defaultMode(node.type);
@@ -98,6 +100,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
     const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    useEffect(() => {
+        if (node.type !== CanvasNodeType.ComfyUI) return;
+        let cancelled = false;
+        void listComfyWorkflows().then((items) => {
+            if (!cancelled) setComfyWorkflows(items);
+        }).catch(() => undefined);
+        return () => { cancelled = true; };
+    }, [node.type]);
     const [videoMenuOpen, setVideoMenuOpen] = useState<VideoComposerMenu>(null);
     const [imageMenuOpen, setImageMenuOpen] = useState<ImageComposerMenu>(null);
     const [mentionRequestNonce, setMentionRequestNonce] = useState(0);
@@ -347,6 +357,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 />
             ) : null}
             <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
+
+            {mode === "comfyui" ? <ComfyUiCapabilityBar node={node} workflows={comfyWorkflows} onConfigChange={onConfigChange} theme={theme} /> : null}
 
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
@@ -1255,4 +1267,53 @@ function normalizePromptReferences(value: string, references: CanvasResourceRefe
             next = prefix.trimEnd();
         });
     return next;
+}
+
+const COMFY_CAPABILITY_OPTIONS: Array<{ value: ComfyUiCapability; label: string }> = [
+    { value: "image-to-text", label: "反推提示词" },
+    { value: "text-to-image", label: "文生图" },
+    { value: "image-to-image", label: "参考图生图" },
+    { value: "image-to-video", label: "图生视频" },
+];
+
+const COMFY_CAPABILITY_HINTS: Record<ComfyUiCapability, string> = {
+    "image-to-text": "连接图片节点作为输入，输出文本节点（反推提示词）",
+    "text-to-image": "输入提示词，输出图片节点",
+    "image-to-image": "连接参考图节点 + 提示词，输出图片节点",
+    "image-to-video": "连接图片/视频节点 + 提示词，输出视频节点",
+};
+
+function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const selectedWorkflowId = node.metadata?.comfyWorkflowId || "";
+    const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowId) || null;
+    const inferred = selectedWorkflow ? inferComfyWorkflowCapability(selectedWorkflow.workflow, selectedWorkflow.fields) : "text-to-image";
+    const capability = node.metadata?.comfyCapability || inferred;
+
+    return (
+        <div className="mb-2 flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+                <Select
+                    size="small"
+                    style={{ minWidth: 220 }}
+                    placeholder="选择 ComfyUI 工作流"
+                    value={selectedWorkflowId || undefined}
+                    onChange={(workflowId) => {
+                        const workflow = workflows.find((item) => item.id === workflowId);
+                        const nextCapability = workflow ? inferComfyWorkflowCapability(workflow.workflow, workflow.fields) : capability;
+                        onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: nextCapability });
+                    }}
+                    options={workflows.map((item) => ({ value: item.id, label: item.title || item.name }))}
+                />
+                <Segmented
+                    size="small"
+                    value={capability}
+                    onChange={(value) => onConfigChange(node.id, { comfyCapability: value as ComfyUiCapability })}
+                    options={COMFY_CAPABILITY_OPTIONS}
+                />
+            </div>
+            <div className="text-[11px] leading-5 opacity-60" style={{ color: theme.node.muted }}>
+                {capability === "text-to-image" && !selectedWorkflow ? "选择工作流后自动识别能力，也可手动切换。" : COMFY_CAPABILITY_HINTS[capability]}
+            </div>
+        </div>
+    );
 }
