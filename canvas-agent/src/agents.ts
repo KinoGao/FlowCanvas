@@ -15,7 +15,7 @@ import type { ConsistencyAssets, StageOutput } from "./pipeline/types.js";
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string; pipelineId?: string };
+type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string; directorSkill?: string; pipelineId?: string };
 type AgentHistoryMessage = { id: string; role: "user" | "assistant" | "tool" | "error"; title?: string; text: string; detail?: unknown; streamId?: string };
 
 let codexQueue: Promise<unknown> = Promise.resolve();
@@ -41,6 +41,7 @@ async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: Age
         const skillOptions: PromptBuildOptions = {
             storySkill: options.storySkill as PromptBuildOptions["storySkill"],
             artSkill: options.artSkill as PromptBuildOptions["artSkill"],
+            directorSkill: options.directorSkill as PromptBuildOptions["directorSkill"],
         };
         let fullPrompt = withAgentPrompt(prompt, options.mode, skillOptions);
         currentSystemPrompt = options.mode ? buildAgentPrompt(options.mode, skillOptions) : AGENT_PROMPT;

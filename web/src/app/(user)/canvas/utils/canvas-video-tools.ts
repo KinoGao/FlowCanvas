@@ -23,6 +23,7 @@ export function buildVideoStoryboardPrompt(frames: VideoFrameSample[], durationS
     return [
         `下面 ${frames.length} 张图片是按时间顺序从一段约 ${durationSeconds.toFixed(1)} 秒的视频中抽取的画面帧（${timeline}）。`,
         "请把这段视频拆解为分镜表，识别其中的镜头段落（按画面内容/场景/主体变化划分），每个镜头给出：标题（2-8 字）、景别（大远景/远景/全景/中景/近景/特写，可省略）、估计时长（如 \"3s\"）、画面描述（主体、动作、场景、氛围，30 字以内）。",
+        "分镜规范：同一镜头内主体与场景必须一致，主体/场景明显切换即视为新镜头；画面描述写可拍的具体画面（\"人怎么干\"而非\"人干什么\"），相邻镜头衔接保持空间与动作连贯；景别变化体现节奏，情绪高点用近景/特写。",
         '只输出一个 JSON 数组，不要输出其他内容，格式：[{"title":"...","shotType":"中景","duration":"3s","content":"画面描述"}]',
     ].join("\n");
 }

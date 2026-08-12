@@ -1,4 +1,4 @@
-import { artSkillLabel, storySkillLabel } from "./options";
+import { artSkillLabel, directorSkillLabel, storySkillLabel } from "./options";
 
 /**
  * 按需加载 Toonflow 风格 skill 的文本定义（README / prefix），
@@ -11,11 +11,11 @@ const skillFiles = import.meta.glob("../agent-skills/**/*.md", {
     eager: false,
 }) as Record<string, () => Promise<string>>;
 
-function skillPath(kind: "art_skills" | "story_skills", id: string, file: string) {
+function skillPath(kind: "art_skills" | "story_skills" | "director_skills", id: string, file: string) {
     return `../agent-skills/${kind}/${id}/${file}.md`;
 }
 
-async function loadText(kind: "art_skills" | "story_skills", id: string, file: string): Promise<string> {
+async function loadText(kind: "art_skills" | "story_skills" | "director_skills", id: string, file: string): Promise<string> {
     const loader = skillFiles[skillPath(kind, id, file)];
     if (!loader) return "";
     try {
@@ -43,4 +43,11 @@ export async function loadStorySkill(id: string): Promise<string> {
     const readme = await loadText("story_skills", id, "README");
     if (!readme) return "";
     return `## 故事风格：${storySkillLabel(id)}\n\n${readme}`;
+}
+
+/** 导演风格 skill 内容：README（镜头语言 / 光线色彩 / 运镜构图 / 提示词约束）。 */
+export async function loadDirectorSkill(id: string): Promise<string> {
+    const readme = await loadText("director_skills", id, "README");
+    if (!readme) return "";
+    return `## 导演风格：${directorSkillLabel(id)}\n\n${readme}`;
 }

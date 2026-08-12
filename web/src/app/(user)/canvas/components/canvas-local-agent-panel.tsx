@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ART_SKILL_OPTIONS, STORY_SKILL_OPTIONS } from "../agent-skills/options";
+import { ART_SKILL_OPTIONS, DIRECTOR_SKILL_OPTIONS, STORY_SKILL_OPTIONS } from "../agent-skills/options";
 import { App, Button, Input, Segmented, Select, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
 import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
@@ -78,6 +78,7 @@ export function CanvasLocalAgentPanel({
         agentMode,
         storySkill,
         artSkill,
+        directorSkill,
         pipelineId,
         pipeline,
         confirmTools,
@@ -228,7 +229,7 @@ export function CanvasLocalAgentPanel({
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, pipelineId: shouldSendPipelineId(useCanvasAgentStore.getState().agentMode) ? useCanvasAgentStore.getState().pipelineId || undefined : undefined }),
+                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, directorSkill: useCanvasAgentStore.getState().directorSkill || undefined, pipelineId: shouldSendPipelineId(useCanvasAgentStore.getState().agentMode) ? useCanvasAgentStore.getState().pipelineId || undefined : undefined }),
             });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
@@ -602,12 +603,14 @@ export function CanvasLocalAgentPanel({
                         mode={agentMode}
                         storySkill={storySkill}
                         artSkill={artSkill}
+                        directorSkill={directorSkill}
                         theme={theme}
                         onModeChange={(mode) => {
                             localStorage.setItem("canvas-agent-mode", mode);
-                            setAgentState({ agentMode: mode, storySkill: null, artSkill: null });
+                            setAgentState({ agentMode: mode, storySkill: null, artSkill: null, directorSkill: null });
                             localStorage.removeItem("canvas-agent-story-skill");
                             localStorage.removeItem("canvas-agent-art-skill");
+                            localStorage.removeItem("canvas-agent-director-skill");
                             if (mode === "default") {
                                 setAgentState({ pipelineId: null, pipeline: null });
                             } else {
@@ -621,6 +624,10 @@ export function CanvasLocalAgentPanel({
                         onArtSkillChange={(skill) => {
                             localStorage.setItem("canvas-agent-art-skill", skill || "");
                             setAgentState({ artSkill: skill });
+                        }}
+                        onDirectorSkillChange={(skill) => {
+                            localStorage.setItem("canvas-agent-director-skill", skill || "");
+                            setAgentState({ directorSkill: skill });
                         }}
                     />
                     <PipelineProgressBar pipeline={pipeline} theme={theme} />
@@ -1254,18 +1261,22 @@ function AgentModeBar({
     mode,
     storySkill,
     artSkill,
+    directorSkill,
     theme,
     onModeChange,
     onStorySkillChange,
     onArtSkillChange,
+    onDirectorSkillChange,
 }: {
     mode: string;
     storySkill: string | null;
     artSkill: string | null;
+    directorSkill: string | null;
     theme: Record<string, unknown>;
     onModeChange: (mode: "default" | "script" | "production") => void;
     onStorySkillChange: (skill: string | null) => void;
     onArtSkillChange: (skill: string | null) => void;
+    onDirectorSkillChange: (skill: string | null) => void;
 }) {
     return (
         <div className="flex flex-wrap items-center gap-2 px-4 py-2" style={{ borderBottom: `1px solid ${(theme.node as Record<string, string>)?.border || "#e5e7eb"}` }}>
@@ -1291,6 +1302,22 @@ function AgentModeBar({
                         allowClear
                         onChange={(value) => onStorySkillChange(value || null)}
                         options={STORY_SKILL_OPTIONS.map(({ label, value }) => ({ label, value }))}
+                    />
+                </>
+            )}
+            {mode === "production" && (
+                <>
+                    <span className="text-xs" style={{ color: (theme.node as Record<string, string>)?.muted || "#9ca3af" }}>
+                        导演
+                    </span>
+                    <Select
+                        size="small"
+                        style={{ minWidth: 120 }}
+                        value={directorSkill || undefined}
+                        placeholder="不限定"
+                        allowClear
+                        onChange={(value) => onDirectorSkillChange(value || null)}
+                        options={DIRECTOR_SKILL_OPTIONS.map(({ label, value }) => ({ label, value }))}
                     />
                 </>
             )}

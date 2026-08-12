@@ -28,8 +28,20 @@ export const ART_SKILL_OPTIONS = [
     { label: "真人都市现代", value: "realpeople_urban_modern" },
 ];
 
+export const DIRECTOR_SKILL_OPTIONS = [
+    { label: "斯皮尔伯格 · 好莱坞叙事", value: "spielberg" },
+    { label: "库布里克 · 对称冷峻", value: "kubrick" },
+    { label: "王家卫 · 东方文艺", value: "wong_kar_wai" },
+    { label: "诺兰 · 冷峻科幻", value: "nolan" },
+    { label: "张艺谋 · 东方色彩", value: "zhang_yimou" },
+    { label: "侯孝贤 · 长镜头写实", value: "hou_hsiao_hsien" },
+    { label: "韦斯·安德森 · 对称童话", value: "wes_anderson" },
+    { label: "维伦纽瓦 · 宏大静谧", value: "villeneuve" },
+];
+
 export type StorySkillValue = (typeof STORY_SKILL_OPTIONS)[number]["value"];
 export type ArtSkillValue = (typeof ART_SKILL_OPTIONS)[number]["value"];
+export type DirectorSkillValue = (typeof DIRECTOR_SKILL_OPTIONS)[number]["value"];
 
 export function storySkillLabel(value: string) {
     return STORY_SKILL_OPTIONS.find((item) => item.value === value)?.label || value;
@@ -37,4 +49,8 @@ export function storySkillLabel(value: string) {
 
 export function artSkillLabel(value: string) {
     return ART_SKILL_OPTIONS.find((item) => item.value === value)?.label || value;
+}
+
+export function directorSkillLabel(value: string) {
+    return DIRECTOR_SKILL_OPTIONS.find((item) => item.value === value)?.label || value;
 }

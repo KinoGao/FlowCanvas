@@ -84,6 +84,7 @@ export function startHttpServer() {
         const mode = validateMode(req.body?.mode);
         const storySkill = String(req.body?.storySkill || "") || undefined;
         const artSkill = String(req.body?.artSkill || "") || undefined;
+        const directorSkill = String(req.body?.directorSkill || "") || undefined;
         const pipelineId = String(req.body?.pipelineId || "") || undefined;
         if (!threadId) {
             const thread = await startCodexThread(emit, workspace.workspacePath);
@@ -93,7 +94,7 @@ export function startHttpServer() {
             await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
-        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill, pipelineId });
+        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill, directorSkill, pipelineId });
         res.json({ ok: true, threadId });
     }));
     app.post("/agent/claude/turn", (req, res) => {

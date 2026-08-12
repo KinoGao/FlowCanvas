@@ -34,6 +34,7 @@ type CanvasAgentStore = {
     agentMode: AgentMode;
     storySkill: string | null;
     artSkill: string | null;
+    directorSkill: string | null;
     pipelineId: string | null;
     pipeline: PipelineInfo | null;
     confirmTools: boolean;
@@ -66,6 +67,7 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     agentMode: (typeof window === "undefined" ? "default" : localStorage.getItem("canvas-agent-mode") || "default") as AgentMode,
     storySkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-story-skill") || null,
     artSkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-art-skill") || null,
+    directorSkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-director-skill") || null,
     pipelineId: null,
     pipeline: null,
     confirmTools: true,
