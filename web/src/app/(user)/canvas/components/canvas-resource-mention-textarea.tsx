@@ -65,12 +65,12 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
 
     const syncMention = (nextValue: string, cursor: number) => {
         const prefix = nextValue.slice(0, cursor);
-        const match = /(^|\s)@([^\s@]*)$/.exec(prefix);
+        const match = /@([^\s@]*)$/.exec(prefix);
         if (!match || !references.some((item) => item.active)) {
             closeMention();
             return;
         }
-        setMention({ start: cursor - match[2].length - 1, query: match[2] });
+        setMention({ start: cursor - match[1].length - 1, query: match[1] });
         setActiveIndex(0);
     };
 
@@ -174,30 +174,35 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     props.onPointerUp?.(event);
                 }}
                 onKeyDown={(event) => {
-                    if (mention && candidates.length) {
-                        if (event.key === "ArrowDown") {
+                    if (mention && candidates.length && !event.nativeEvent.isComposing) {
+                        if (event.key === "ArrowDown" || event.code === "ArrowDown") {
                             event.preventDefault();
+                            event.stopPropagation();
                             setActiveIndex((index) => (index + 1) % candidates.length);
                             return;
                         }
-                        if (event.key === "ArrowUp") {
+                        if (event.key === "ArrowUp" || event.code === "ArrowUp") {
                             event.preventDefault();
+                            event.stopPropagation();
                             setActiveIndex((index) => (index - 1 + candidates.length) % candidates.length);
                             return;
                         }
-                        if (event.key === "Enter") {
+                        if (event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter") {
                             event.preventDefault();
+                            event.stopPropagation();
                             insertReference(candidates[Math.min(activeIndex, candidates.length - 1)]);
                             return;
                         }
-                        if (event.key === "Escape") {
+                        if (event.key === "Escape" || event.code === "Escape") {
                             event.preventDefault();
+                            event.stopPropagation();
                             closeMention();
                             return;
                         }
                     }
-                    if (event.key === "Enter" && onSubmit && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+                    if ((event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter") && onSubmit && !event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
                         event.preventDefault();
+                        event.stopPropagation();
                         onSubmit();
                         return;
                     }
