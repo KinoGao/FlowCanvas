@@ -22,7 +22,7 @@ import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import { inferComfyWorkflowCapability, listComfyWorkflows, type ComfyUiCapability, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
+import { COMFY_CAPABILITY_META, inferComfyWorkflowCapability, listComfyWorkflows, type ComfyOutputType, type ComfyUiCapability, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
@@ -1269,41 +1269,43 @@ function normalizePromptReferences(value: string, references: CanvasResourceRefe
     return next;
 }
 
-const COMFY_CAPABILITY_OPTIONS: Array<{ value: ComfyUiCapability; label: string }> = [
-    { value: "image-to-text", label: "反推提示词" },
-    { value: "text-to-image", label: "文生图" },
-    { value: "image-to-image", label: "参考图生图" },
-    { value: "image-to-video", label: "图生视频" },
+const COMFY_OUTPUT_OPTIONS: Array<{ value: ComfyOutputType; label: string }> = [
+    { value: "text", label: "文本" },
+    { value: "image", label: "图像" },
+    { value: "video", label: "视频" },
 ];
 
+const COMFY_CAPABILITY_BY_OUTPUT: Record<ComfyOutputType, ComfyUiCapability[]> = {
+    text: ["text-to-text", "image-to-text"],
+    image: ["text-to-image", "image-to-image"],
+    video: ["text-to-video", "image-to-video", "reference-video"],
+};
+
 const COMFY_CAPABILITY_HINTS: Record<ComfyUiCapability, string> = {
-    "image-to-text": "连接图片节点作为输入，输出文本节点（反推提示词）",
+    "text-to-text": "输入提示词，输出文本节点",
+    "image-to-text": "连接图片节点作为输入，输出文本节点（图生文 / 反推提示词）",
     "text-to-image": "输入提示词，输出图片节点",
     "image-to-image": "连接参考图节点 + 提示词，输出图片节点",
-    "image-to-video": "连接图片/视频节点 + 提示词，输出视频节点",
+    "text-to-video": "输入提示词，输出视频节点",
+    "image-to-video": "连接图片节点 + 提示词，输出视频节点",
+    "reference-video": "连接图片/视频/音频参考 + 提示词，输出视频节点",
 };
 
-const COMFY_WORKFLOW_GROUP_LABELS: Record<ComfyUiCapability, string> = {
-    "image-to-text": "反推提示词",
-    "text-to-image": "文生图",
-    "image-to-image": "参考图生图",
-    "image-to-video": "图生视频",
-};
-
-/** 按后台配置的能力分类分组工作流选项（未配置归「未分类」）。 */
-function comfyWorkflowOptions(workflows: ComfyWorkflow[]) {
+/** 按能力过滤并分组工作流选项（匹配 capability 的工作流 + 未分类兜底）。 */
+function comfyWorkflowOptions(workflows: ComfyWorkflow[], capability: ComfyUiCapability) {
+    const meta = COMFY_CAPABILITY_META[capability];
     const groups: Array<{ label: string; options: Array<{ value: string; label: string }> }> = [];
-    const byCapability = new Map<string, ComfyWorkflow[]>();
-    for (const workflow of workflows) {
-        const key = workflow.capability && workflow.capability in COMFY_WORKFLOW_GROUP_LABELS ? workflow.capability : "";
-        byCapability.set(key, [...(byCapability.get(key) || []), workflow]);
-    }
-    const orderedKeys = ["image-to-text", "text-to-image", "image-to-image", "image-to-video", ""];
-    for (const key of orderedKeys) {
-        const items = byCapability.get(key);
-        if (!items?.length) continue;
-        groups.push({ label: key ? COMFY_WORKFLOW_GROUP_LABELS[key as ComfyUiCapability] : "未分类", options: items.map((item) => ({ value: item.id, label: item.title || item.name })) });
-    }
+    const matched = workflows.filter((item) => item.capability === capability);
+    const unclassified = workflows.filter((item) => !item.capability);
+    const push = (label: string, items: ComfyWorkflow[]) => {
+        if (!items.length) return;
+        groups.push({ label, options: items.map((item) => ({ value: item.id, label: item.title || item.name })) });
+    };
+    push(meta.label, matched);
+    // 同输出类型下其他能力的工作流与未分类工作流也列出，便于发现与切换
+    const siblings = workflows.filter((item) => { const c = item.capability as ComfyUiCapability | undefined; return c && COMFY_CAPABILITY_META[c]?.output === meta.output && c !== capability; });
+    push("同类型其他能力", siblings);
+    push("未分类", unclassified);
     return groups;
 }
 
@@ -1312,9 +1314,27 @@ function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node
     const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowId) || null;
     const inferred = selectedWorkflow ? inferComfyWorkflowCapability(selectedWorkflow.workflow, selectedWorkflow.fields) : "text-to-image";
     const capability = node.metadata?.comfyCapability || (selectedWorkflow?.capability as ComfyUiCapability | undefined) || inferred;
+    const output = COMFY_CAPABILITY_META[capability]?.output || "image";
 
     return (
         <div className="mb-2 flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+                <Segmented
+                    size="small"
+                    value={output}
+                    onChange={(value: ComfyOutputType) => {
+                        const next = COMFY_CAPABILITY_BY_OUTPUT[value][0];
+                        onConfigChange(node.id, { comfyCapability: next });
+                    }}
+                    options={COMFY_OUTPUT_OPTIONS}
+                />
+                <Segmented
+                    size="small"
+                    value={capability}
+                    onChange={(value: ComfyUiCapability) => onConfigChange(node.id, { comfyCapability: value })}
+                    options={COMFY_CAPABILITY_BY_OUTPUT[output].map((value) => ({ value, label: COMFY_CAPABILITY_META[value].label }))}
+                />
+            </div>
             <div className="flex flex-wrap items-center gap-2">
                 <Select
                     size="small"
@@ -1323,20 +1343,12 @@ function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node
                     value={selectedWorkflowId || undefined}
                     onChange={(workflowId) => {
                         const workflow = workflows.find((item) => item.id === workflowId);
-                        const nextCapability = workflow ? inferComfyWorkflowCapability(workflow.workflow, workflow.fields) : capability;
-                        onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: nextCapability });
+                        const nextCapability = workflow?.capability as ComfyUiCapability | undefined || (workflow ? inferComfyWorkflowCapability(workflow.workflow, workflow.fields) : capability);
+                        onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: node.metadata?.comfyCapability || nextCapability });
                     }}
-                    options={comfyWorkflowOptions(workflows)}
+                    options={comfyWorkflowOptions(workflows, capability)}
                 />
-                <Segmented
-                    size="small"
-                    value={capability}
-                    onChange={(value) => onConfigChange(node.id, { comfyCapability: value as ComfyUiCapability })}
-                    options={COMFY_CAPABILITY_OPTIONS}
-                />
-            </div>
-            <div className="text-[11px] leading-5 opacity-60" style={{ color: theme.node.muted }}>
-                {capability === "text-to-image" && !selectedWorkflow ? "选择工作流后自动识别能力，也可手动切换。" : COMFY_CAPABILITY_HINTS[capability]}
+                <span className="text-[11px] leading-5 opacity-60" style={{ color: theme.node.muted }}>{COMFY_CAPABILITY_HINTS[capability]}</span>
             </div>
             {selectedWorkflow && selectedWorkflow.fields.length ? <ComfyWorkflowFields fields={selectedWorkflow.fields} values={node.metadata?.comfyFieldValues || {}} onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })} theme={theme} /> : null}
         </div>

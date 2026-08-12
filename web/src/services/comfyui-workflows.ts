@@ -199,11 +199,28 @@ function cloneJsonValue(value: unknown) {
 }
 
 /** ComfyUI 工作流能力：反推提示词 / 文生图 / 参考图生图 / 图生视频 */
-export type ComfyUiCapability = "image-to-text" | "text-to-image" | "image-to-image" | "image-to-video";
+export type ComfyOutputType = "text" | "image" | "video";
+
+/** ComfyUI 工作流能力（两级：输出媒体类型 → 细分能力） */
+export type ComfyUiCapability =
+    | "text-to-text" | "image-to-text"
+    | "text-to-image" | "image-to-image"
+    | "text-to-video" | "image-to-video" | "reference-video";
+
+export const COMFY_CAPABILITY_META: Record<ComfyUiCapability, { output: ComfyOutputType; label: string }> = {
+    "text-to-text": { output: "text", label: "文生文" },
+    "image-to-text": { output: "text", label: "图生文" },
+    "text-to-image": { output: "image", label: "文生图" },
+    "image-to-image": { output: "image", label: "参考图生图" },
+    "text-to-video": { output: "video", label: "文生视频" },
+    "image-to-video": { output: "video", label: "图片生视频" },
+    "reference-video": { output: "video", label: "全能参考生视频" },
+};
 
 const COMFY_IMAGE_TO_TEXT_NODES = /tagger|interrogator|caption|wd14|llava|qwen.*vl|clip.*interrogat|image.*to.*text|blip/i;
 const COMFY_VIDEO_OUTPUT_NODES = /savevideo|video.*output|vhs_|save.*mp4|mux|video.*combine/i;
 const COMFY_IMAGE_OUTPUT_NODES = /saveimage|previewimage|save.*png|save.*jpg/i;
+const COMFY_TEXT_OUTPUT_NODES = /showtext|displaytext|text.*output|previewtext|print/i;
 
 /** 从工作流 JSON 与其字段推断能力（默认文生图）。 */
 export function inferComfyWorkflowCapability(workflow: ComfyWorkflowJson | null | undefined, fields: ComfyWorkflowField[] = []): ComfyUiCapability {
@@ -211,12 +228,18 @@ export function inferComfyWorkflowCapability(workflow: ComfyWorkflowJson | null 
     const classTypes = Object.values(workflow).map((node) => node?.class_type || "");
     const hasImageInput = fields.some((field) => field.type === "image");
     const hasVideoInput = fields.some((field) => field.type === "video");
+    const hasAudioInput = fields.some((field) => field.type === "audio");
     const hasImageToText = classTypes.some((type) => COMFY_IMAGE_TO_TEXT_NODES.test(type));
     const hasVideoOutput = classTypes.some((type) => COMFY_VIDEO_OUTPUT_NODES.test(type));
     const hasImageOutput = classTypes.some((type) => COMFY_IMAGE_OUTPUT_NODES.test(type));
-    if ((hasImageInput || hasVideoInput) && hasVideoOutput) return "image-to-video";
+    const hasTextOutput = classTypes.some((type) => COMFY_TEXT_OUTPUT_NODES.test(type));
     if (hasImageInput && hasImageToText && !hasImageOutput) return "image-to-text";
+    if (hasVideoOutput) {
+        if (hasImageInput || hasVideoInput || hasAudioInput) return hasImageInput ? "image-to-video" : "reference-video";
+        return "text-to-video";
+    }
     if (hasImageInput && hasImageOutput) return "image-to-image";
     if (hasImageInput) return "image-to-image";
+    if (hasTextOutput) return "text-to-text";
     return "text-to-image";
 }
