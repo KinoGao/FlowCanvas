@@ -36,7 +36,7 @@ type AgnesTask = {
     error?: { message?: string; code?: string | number } | null;
     message?: string;
 };
-type RequestOptions = DurableGenerationOptions & { generationMode?: VideoGenerationMode };
+type RequestOptions = DurableGenerationOptions & { generationMode?: VideoGenerationMode; onDownloadStart?: () => void };
 
 /** 创建接口只负责返回任务 ID，生成过程由后续轮询负责。 */
 const VIDEO_CREATE_TIMEOUT_MS = 90_000;
@@ -44,6 +44,8 @@ const VIDEO_CREATE_TIMEOUT_MS = 90_000;
 const AGNES_VIDEO_CREATE_TIMEOUT_MS = 90_000;
 /** 视频轮询单次请求超时（毫秒） */
 const VIDEO_POLL_TIMEOUT_MS = 60_000;
+/** 视频文件下载超时（毫秒）：Junli 等上游 CDN 下载速度慢，15 秒 720p 视频可能需数分钟，放宽到 10 分钟。 */
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "agnes"; model: string };
@@ -233,7 +235,8 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_POLL_TIMEOUT_MS });
+            options?.onDownloadStart?.();
+            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal, timeout: VIDEO_DOWNLOAD_TIMEOUT_MS });
             await assertVideoBlob(content.data);
             return { status: "completed", result: { blob: content.data } };
         }
@@ -415,7 +418,7 @@ async function downloadVideoBlob(url: string, options?: RequestOptions) {
     let lastError: unknown;
     for (const candidate of candidates) {
         try {
-            const response = await axios.get<Blob>(candidate, { responseType: "blob", signal: options?.signal, timeout: 60_000 });
+            const response = await axios.get<Blob>(candidate, { responseType: "blob", signal: options?.signal, timeout: VIDEO_DOWNLOAD_TIMEOUT_MS });
             await assertVideoBlob(response.data);
             return response.data;
         } catch (error) {

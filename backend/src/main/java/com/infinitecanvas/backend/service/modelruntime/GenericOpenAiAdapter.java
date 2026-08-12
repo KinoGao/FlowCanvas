@@ -11,9 +11,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -113,6 +115,7 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         }
 
         boolean videoCreate = "POST".equalsIgnoreCase(request.getMethod()) && "/videos".equals(suffix);
+        boolean mediaDownload = "GET".equalsIgnoreCase(request.getMethod()) && isDownloadEndpoint(suffix);
         HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(videoCreate ? CREATE_TIMEOUT : TIMEOUT);
         if (gemini) builder.header("x-goog-api-key", runtime.provider().getApiKey());
         else builder.header("Authorization", "Bearer " + runtime.provider().getApiKey());
@@ -120,6 +123,23 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         copyHeader(request, builder, "Accept");
         builder.method(request.getMethod(), body.length == 0 ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         try {
+            // 媒体下载（视频 /content、任务查询）采用流式透传：响应头先返回、body 边收边发。
+            // 上游 CDN 下载可能很慢（如 Junli ~15KB/s），若等全部下载完再返回，
+            // 前端会因长时间收不到数据而判定超时。
+            if (mediaDownload) {
+                HttpResponse<InputStream> upstream = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+                HttpHeaders headers = new HttpHeaders();
+                upstream.headers().map().forEach((name, values) -> {
+                    if (!HOP_HEADERS.contains(name.toLowerCase(Locale.ROOT)) && !name.startsWith(":")) {
+                        values.forEach(value -> headers.add(name, value));
+                    }
+                });
+                if (upstream.statusCode() < 200 || upstream.statusCode() >= 300) {
+                    String detail = new String(upstream.body().readNBytes(4096), StandardCharsets.UTF_8);
+                    return new ResponseEntity<>(detail.getBytes(StandardCharsets.UTF_8), headers, HttpStatus.valueOf(upstream.statusCode()));
+                }
+                return streamingMediaResponse(headers, upstream.body());
+            }
             HttpResponse<byte[]> upstream = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
             HttpHeaders headers = new HttpHeaders();
             upstream.headers().map().forEach((name, values) -> {
@@ -134,6 +154,28 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
             // 不向客户端透出网络细节（主机 / 端口 / 内网地址等）。
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body("上游模型请求失败");
         }
+    }
+
+    /** 媒体下载流式透传：显式声明 StreamingResponseBody 泛型，避免类型擦除后 Spring 找不到 converter。 */
+    private ResponseEntity<StreamingResponseBody> streamingMediaResponse(HttpHeaders headers, InputStream body) {
+        return new ResponseEntity<>(
+                (StreamingResponseBody) output -> {
+                    try (InputStream input = body) {
+                        input.transferTo(output);
+                    } catch (IOException ignored) {
+                        // 客户端断开时静默结束。
+                    }
+                },
+                headers,
+                HttpStatus.OK
+        );
+    }
+
+    private boolean isDownloadEndpoint(String suffix) {
+        // 只流式透传媒体文件下载端点；任务轮询（/videos/{id}）返回小 JSON，保持整包读取。
+        return suffix.endsWith("/content")
+                || suffix.matches("/images/[^/]+/(file|bytes)$")
+                || suffix.matches("/audio/[^/]+/(file|bytes)$");
     }
 
     // ---------- request validation & rewrite ----------

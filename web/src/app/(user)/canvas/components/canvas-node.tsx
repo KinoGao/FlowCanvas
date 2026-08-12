@@ -714,6 +714,7 @@ function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererPr
 }
 
 function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const downloading = node.metadata?.videoDownloading === true;
     return (
         <div
             role="status"
@@ -731,8 +732,8 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
             <div aria-hidden className="canvas-generation-loading-dot-mask absolute inset-0" />
             <div aria-hidden className="canvas-generation-loading-shimmer absolute inset-0" />
             <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center" style={{ color: theme.node.text }}>
-                <span className="text-xs font-medium tracking-wide">任务运行中</span>
-                {node.metadata?.generationJobId ? <span className="text-[10px] opacity-60">刷新页面后会继续处理</span> : null}
+                <span className="text-xs font-medium tracking-wide">{downloading ? "视频已生成，正在下载" : "任务运行中"}</span>
+                {node.metadata?.generationJobId ? <span className="text-[10px] opacity-60">下载可能需要几分钟，请耐心等待</span> : null}
             </div>
         </div>
     );

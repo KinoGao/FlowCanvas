@@ -143,6 +143,8 @@ export type CanvasGenerationMetadata = {
     imageCameraAperture?: string;
     videoTask?: { id: string; provider: "openai" | "agnes"; model: string };
     videoTaskStartedAt?: number;
+    /** 视频已在上游生成完成、正在下载文件（下载可能耗时数分钟）。 */
+    videoDownloading?: boolean;
     generationJobId?: string;
     generationRuns?: CanvasGenerationRun[];
     audioVoice?: string;

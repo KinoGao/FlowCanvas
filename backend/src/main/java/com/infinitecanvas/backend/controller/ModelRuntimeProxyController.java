@@ -6,10 +6,12 @@ import com.infinitecanvas.backend.service.ModelRequestLogService;
 import com.infinitecanvas.backend.service.UserRequestContext;
 import com.infinitecanvas.backend.service.modelruntime.ModelRequestAdapter;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -42,17 +44,34 @@ public class ModelRuntimeProxyController {
     }
 
     @RequestMapping("/{modelId}/**")
-    public ResponseEntity<?> proxy(HttpServletRequest request) throws Exception {
+    public ResponseEntity<?> proxy(HttpServletRequest request, HttpServletResponse servletResponse) throws Exception {
         String jobKey = request.getHeader("X-FlowCanvas-Job-Id");
         String modelId = pathModelId(request);
         String suffix = request.getRequestURI().substring(("/api/model-runtime/models/" + modelId).length());
         long startedAt = System.currentTimeMillis();
         try {
-            return generationJobService.execute(
+            ResponseEntity<?> response = generationJobService.execute(
                     UserRequestContext.currentUser(request),
                     jobKey,
                     () -> proxyNow(request, modelId, suffix, startedAt, jobKey)
             );
+            // 流式响应：Spring 无法从 ResponseEntity<?> 擦除后的类型推断 StreamingResponseBody
+            // converter（HttpMessageNotWritableException），这里手动把流写入 servletResponse：
+            // 先回写响应头（chunked 传输立即生效），再由 writeTo 边读上游边写下游，
+            // 前端无需等全部下载完即可收到数据。
+            if (response != null && response.getBody() instanceof StreamingResponseBody stream) {
+                servletResponse.setStatus(response.getStatusCode().value());
+                response.getHeaders().forEach((name, values) ->
+                        values.forEach(value -> servletResponse.setHeader(name, value)));
+                String contentType = response.getHeaders().getContentType() == null
+                        ? "application/octet-stream" : response.getHeaders().getContentType().toString();
+                servletResponse.setContentType(contentType);
+                servletResponse.flushBuffer();
+                stream.writeTo(servletResponse.getOutputStream());
+                servletResponse.getOutputStream().flush();
+                return null;
+            }
+            return response;
         } catch (Exception error) {
             recordRequest(request, modelId, suffix, startedAt, 0, rootMessage(error), jobKey);
             throw error;

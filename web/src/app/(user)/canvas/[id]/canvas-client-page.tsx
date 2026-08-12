@@ -912,6 +912,16 @@ function LeaferCanvasPage() {
                     signal: controller.signal,
                     generationMode: nodesRef.current.find((node) => node.id === nodeId)?.metadata?.videoGenerationMode,
                     startedAt,
+                    onDownloadStart: () => {
+                        // 视频已在上游生成完成，正在下载文件（Junli 等 CDN 下载可能较慢）。
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === nodeId
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_LOADING, videoDownloading: true, errorDetails: undefined } }
+                                    : node,
+                            ),
+                        );
+                    },
                 });
                 providerTaskCompleted = true;
                 const video = await storeGeneratedVideo(result);
@@ -924,7 +934,7 @@ function LeaferCanvasPage() {
                             width: videoSize.width,
                             height: videoSize.height,
                             position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 },
-                            metadata: { ...node.metadata, ...videoMetadata(video), generationJobId: undefined, videoTask: undefined, videoTaskStartedAt: undefined, errorDetails: undefined },
+                            metadata: { ...node.metadata, ...videoMetadata(video), generationJobId: undefined, videoTask: undefined, videoTaskStartedAt: undefined, videoDownloading: undefined, errorDetails: undefined },
                         };
                     }),
                 );
@@ -939,6 +949,7 @@ function LeaferCanvasPage() {
                               metadata: {
                                   ...node.metadata,
                                   status: NODE_STATUS_ERROR,
+                                  videoDownloading: undefined,
                                   errorDetails: providerTaskCompleted ? `视频已生成，但保存到素材库失败：${errorDetails}。重新打开画布会自动恢复。` : errorDetails,
                                   ...(providerTaskCompleted ? null : { videoTask: undefined, videoTaskStartedAt: undefined }),
                               },

@@ -17,8 +17,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -204,32 +206,35 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
         }
         // 优先使用完成态返回的公开 URL（创建时传 response_format=url，走 CDN 无需 Key）；
         // /content 端点作为回退，失败时透出上游详情而不是笼统的网关错误。
+        // 两者均采用流式透传（响应头先返回、body 边收边发），避免大文件下载时
+        // 前端长时间收不到任何字节而被判定超时（Junli CDN 下载速度较慢）。
         String publicUrl = resultUrl(source);
         if (!publicUrl.isBlank()) {
-            HttpResponse<byte[]> fromUrl = httpClient.send(
+            HttpResponse<InputStream> fromUrl = httpClient.send(
                     HttpRequest.newBuilder(URI.create(publicUrl)).timeout(TIMEOUT).GET().build(),
-                    HttpResponse.BodyHandlers.ofByteArray()
+                    HttpResponse.BodyHandlers.ofInputStream()
             );
             if (fromUrl.statusCode() >= 200 && fromUrl.statusCode() < 300) {
-                return videoResponse(fromUrl);
+                return streamingVideoResponse(fromUrl);
             }
         }
-        HttpResponse<byte[]> content = httpClient.send(
+        HttpResponse<InputStream> content = httpClient.send(
                 authorized(URI.create(joinUrl(runtime.provider().getBaseUrl(), "/videos/" + encode(taskId) + "/content")), runtime.provider().getApiKey())
                         .timeout(TIMEOUT)
                         .GET().build(),
-                HttpResponse.BodyHandlers.ofByteArray()
+                HttpResponse.BodyHandlers.ofInputStream()
         );
         if (content.statusCode() < 200 || content.statusCode() >= 300) {
-            String detail = upstreamMessage(content.body());
+            String detail = readUpstreamError(content.body());
             String message = "Junli 视频文件下载失败 (HTTP " + content.statusCode() + ")";
             if (!detail.isBlank()) message += ": " + sanitize(detail, runtime.provider().getApiKey());
             return error(HttpStatus.BAD_GATEWAY, message);
         }
-        return videoResponse(content);
+        return streamingVideoResponse(content);
     }
 
-    private ResponseEntity<byte[]> videoResponse(HttpResponse<byte[]> content) {
+    /** 流式透传视频响应：状态码 / 头部立即返回，body 由 Spring 异步线程边收边写。 */
+    private ResponseEntity<StreamingResponseBody> streamingVideoResponse(HttpResponse<InputStream> content) {
         HttpHeaders headers = new HttpHeaders();
         String contentType = content.headers().firstValue("content-type").orElse("video/mp4");
         try {
@@ -238,7 +243,25 @@ public class JunliOpenAiAdapter implements ModelRequestAdapter {
             headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
         }
         content.headers().firstValue("content-disposition").ifPresent(value -> headers.set("Content-Disposition", value));
-        return new ResponseEntity<>(content.body(), headers, HttpStatus.OK);
+        headers.set("Cache-Control", "no-store");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(output -> {
+                    try (InputStream input = content.body()) {
+                        input.transferTo(output);
+                    } catch (IOException error) {
+                        // 客户端断开时静默结束，不向上游抛异常。
+                    }
+                });
+    }
+
+    /** 读取错误响应的文本内容（仅用于错误信息，非 2xx 时 body 通常很小）。 */
+    private String readUpstreamError(InputStream body) {
+        try (InputStream input = body) {
+            return new String(input.readNBytes(4096), StandardCharsets.UTF_8);
+        } catch (IOException ignored) {
+            return "";
+        }
     }
 
     private HttpResponse<byte[]> query(String taskId, PlatformConfigService.RuntimeModel runtime)

@@ -61,7 +61,7 @@ public class GenerationJobService {
                 UserGenerationJob job = existing == null ? create(user, jobKey) : existing;
                 try {
                     ResponseEntity<?> response = action.get();
-                    saveResponse(job, response);
+                    if (response != null) saveResponse(job, response);
                     return response;
                 } catch (Exception error) {
                     fail(job, rootMessage(error));
@@ -91,6 +91,16 @@ public class GenerationJobService {
 
     @Transactional
     protected void saveResponse(UserGenerationJob job, ResponseEntity<?> response) throws Exception {
+        // 流式响应（StreamingResponseBody 等）不缓存：body 无法回放且可能巨大，
+        // 直接透传并标记完成，避免序列化失败或缓存膨胀。
+        if (isStreamingBody(response.getBody())) {
+            job.setStatus("COMPLETED");
+            job.setResponseStatus(response.getStatusCode().value());
+            job.setErrorMessage(null);
+            job.setUpdatedAt(Instant.now());
+            repository.saveAndFlush(job);
+            return;
+        }
         HttpHeaders headers = new HttpHeaders();
         response.getHeaders().forEach((name, values) -> values.forEach(value -> headers.add(name, value)));
         byte[] body = responseBody(response.getBody());
@@ -104,6 +114,10 @@ public class GenerationJobService {
         job.setErrorMessage(null);
         job.setUpdatedAt(Instant.now());
         repository.saveAndFlush(job);
+    }
+
+    private boolean isStreamingBody(Object body) {
+        return body instanceof org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
     }
 
     @Transactional
