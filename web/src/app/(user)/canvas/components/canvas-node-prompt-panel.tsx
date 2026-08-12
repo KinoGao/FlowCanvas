@@ -1283,6 +1283,30 @@ const COMFY_CAPABILITY_HINTS: Record<ComfyUiCapability, string> = {
     "image-to-video": "连接图片/视频节点 + 提示词，输出视频节点",
 };
 
+const COMFY_WORKFLOW_GROUP_LABELS: Record<ComfyUiCapability, string> = {
+    "image-to-text": "反推提示词",
+    "text-to-image": "文生图",
+    "image-to-image": "参考图生图",
+    "image-to-video": "图生视频",
+};
+
+/** 按后台配置的能力分类分组工作流选项（未配置归「未分类」）。 */
+function comfyWorkflowOptions(workflows: ComfyWorkflow[]) {
+    const groups: Array<{ label: string; options: Array<{ value: string; label: string }> }> = [];
+    const byCapability = new Map<string, ComfyWorkflow[]>();
+    for (const workflow of workflows) {
+        const key = workflow.capability && workflow.capability in COMFY_WORKFLOW_GROUP_LABELS ? workflow.capability : "";
+        byCapability.set(key, [...(byCapability.get(key) || []), workflow]);
+    }
+    const orderedKeys = ["image-to-text", "text-to-image", "image-to-image", "image-to-video", ""];
+    for (const key of orderedKeys) {
+        const items = byCapability.get(key);
+        if (!items?.length) continue;
+        groups.push({ label: key ? COMFY_WORKFLOW_GROUP_LABELS[key as ComfyUiCapability] : "未分类", options: items.map((item) => ({ value: item.id, label: item.title || item.name })) });
+    }
+    return groups;
+}
+
 function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const selectedWorkflowId = node.metadata?.comfyWorkflowId || "";
     const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowId) || null;
@@ -1302,7 +1326,7 @@ function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node
                         const nextCapability = workflow ? inferComfyWorkflowCapability(workflow.workflow, workflow.fields) : capability;
                         onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: nextCapability });
                     }}
-                    options={workflows.map((item) => ({ value: item.id, label: item.title || item.name }))}
+                    options={comfyWorkflowOptions(workflows)}
                 />
                 <Segmented
                     size="small"
