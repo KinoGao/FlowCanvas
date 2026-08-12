@@ -52,6 +52,10 @@ export type ToolResponseResult = {
 };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
+
+/** 思考模式模型拒绝强制工具调用的错误特征（如 "Thinking mode does not support this tool_choice"）。 */
+const TOOL_CHOICE_UNSUPPORTED_PATTERN = /does not support this tool_choice|tool_choice.*?(not support|unsupported)|thinking.*?tool_choice/i;
+
 type ResponseMessageContent = AiTextMessage["content"] | string;
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
@@ -1136,18 +1140,25 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
         if (requestConfig.apiFormat === "gemini") {
             return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
         }
-        return await requestStreamingChatCompletion(
-            requestConfig,
-            {
-                model: requestConfig.model,
-                messages: toChatMessages(withSystemMessage(requestConfig, messages)),
-                tools: tools.map(toChatTool),
-                tool_choice: toChatToolChoice(toolChoice),
-                parallel_tool_calls: false,
-            },
-            onDelta,
-            options,
-        );
+        const body = (choice: ToolChoice) => ({
+            model: requestConfig.model,
+            messages: toChatMessages(withSystemMessage(requestConfig, messages)),
+            tools: tools.map(toChatTool),
+            tool_choice: toChatToolChoice(choice),
+            parallel_tool_calls: false,
+        });
+        try {
+            return await requestStreamingChatCompletion(requestConfig, body(toolChoice), onDelta, options);
+        } catch (error) {
+            // 部分开启思考模式的模型不支持强制工具调用（tool_choice=required），
+            // 返回类似 "Thinking mode does not support this tool_choice" 的错误。
+            // 此时降级为 auto 重试一次，让模型自主决定是否调用工具。
+            const message = readAxiosError(error, "");
+            if (toolChoice === "required" && TOOL_CHOICE_UNSUPPORTED_PATTERN.test(message)) {
+                return await requestStreamingChatCompletion(requestConfig, body("auto"), onDelta, options);
+            }
+            throw error;
+        }
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
