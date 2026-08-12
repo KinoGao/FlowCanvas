@@ -1354,6 +1354,8 @@ function ComfyUiWorkflowFilters({ node, workflows, onConfigChange, theme }: { no
 
 /** 后台字段顺序就是 Composer 顺序；文本、图片、视频等字段直接替换通用提示词区。 */
 function ComfyWorkflowComposerFields({ fields, values, references, onValuesChange }: { fields: ComfyWorkflowField[]; values: Record<string, unknown>; references: CanvasResourceReference[]; onValuesChange: (fieldId: string, value: unknown) => void }) {
+    const textReferences = references.filter((reference) => reference.active && reference.kind === "text");
+    const mentionFieldStyle = "w-full resize-none rounded-lg border px-2 py-1 text-sm leading-6 outline-none placeholder:opacity-35";
     return (
         <div className="mb-3 space-y-2.5">
                 {fields.map((field, index) => {
@@ -1371,11 +1373,11 @@ function ComfyWorkflowComposerFields({ fields, values, references, onValuesChang
                             ) : field.type === "dropdown" ? (
                                 <Select className="w-full" value={String(value ?? "")} options={(field.options || []).map((option) => ({ value: option, label: option }))} onChange={(next) => onValuesChange(field.id, next)} />
                             ) : field.type === "textarea" ? (
-                                <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} value={String(value ?? "")} placeholder={`输入${field.name}`} onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                                <CanvasResourceMentionTextarea value={String(value ?? "")} references={textReferences} onChange={(next) => onValuesChange(field.id, next)} placeholder={`输入${field.name}，@ 可引用上游文本`} className={mentionFieldStyle} />
                             ) : field.type === "image" || field.type === "video" || field.type === "audio" ? (
                                 <Select className="w-full" allowClear value={value ? String(value) : undefined} options={mediaOptions} placeholder={mediaOptions.length ? `选择已连接的${field.type === "image" ? "图片" : field.type === "video" ? "视频" : "音频"}` : `请先连接${field.type === "image" ? "图片" : field.type === "video" ? "视频" : "音频"}节点`} onChange={(next) => onValuesChange(field.id, next || "")} />
                             ) : (
-                                <Input value={String(value ?? "")} placeholder={`输入${field.name}`} onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                                <CanvasResourceMentionTextarea value={String(value ?? "")} references={textReferences} onChange={(next) => onValuesChange(field.id, next)} placeholder={`输入${field.name}，@ 可引用上游文本`} className={mentionFieldStyle} />
                             )}
                         </label>
                     );
