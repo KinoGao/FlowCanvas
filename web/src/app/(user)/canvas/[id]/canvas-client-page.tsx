@@ -781,6 +781,7 @@ function LeaferCanvasPage() {
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
     const [lightingNodeId, setLightingNodeId] = useState<string | null>(null);
+    const [imageToolDialogUrl, setImageToolDialogUrl] = useState("");
     const [trimVideoNodeId, setTrimVideoNodeId] = useState<string | null>(null);
     const [trimVideoSrc, setTrimVideoSrc] = useState("");
     const [compositionNodeId, setCompositionNodeId] = useState<string | null>(null);
@@ -3071,6 +3072,20 @@ function LeaferCanvasPage() {
             }
             setTrimVideoSrc(url);
             setTrimVideoNodeId(node.id);
+        },
+        [message],
+    );
+
+    /** 打开图片工具弹窗前先重新解析媒体 URL（content 里的签名 URL 可能已过期，需按 storageKey 重新签名）。 */
+    const openImageToolDialog = useCallback(
+        async (node: CanvasNodeData, open: (id: string) => void) => {
+            const url = await resolveNodeContent(node);
+            if (!url) {
+                message.warning("图片内容不可用，无法打开工具");
+                return;
+            }
+            setImageToolDialogUrl(url);
+            open(node.id);
         },
         [message],
     );
@@ -6010,13 +6025,13 @@ function LeaferCanvasPage() {
                         onMarkPanorama360={(node) => markNodeAsPanorama360(node.id)}
                         onDownload={downloadNodeImage}
                         onSaveAsset={(node) => void saveNodeAsset(node)}
-                        onMaskEdit={(node) => setMaskEditNodeId(node.id)}
-                        onCrop={(node) => setCropNodeId(node.id)}
-                        onSplit={(node) => setSplitNodeId(node.id)}
-                        onUpscale={(node) => setUpscaleNodeId(node.id)}
-                        onAngle={(node) => setAngleNodeId(node.id)}
-                        onOutpaint={(node) => setOutpaintNodeId(node.id)}
-                        onLighting={(node) => setLightingNodeId(node.id)}
+                        onMaskEdit={(node) => void openImageToolDialog(node, setMaskEditNodeId)}
+                        onCrop={(node) => void openImageToolDialog(node, setCropNodeId)}
+                        onSplit={(node) => void openImageToolDialog(node, setSplitNodeId)}
+                        onUpscale={(node) => void openImageToolDialog(node, setUpscaleNodeId)}
+                        onAngle={(node) => void openImageToolDialog(node, setAngleNodeId)}
+                        onOutpaint={(node) => void openImageToolDialog(node, setOutpaintNodeId)}
+                        onLighting={(node) => void openImageToolDialog(node, setLightingNodeId)}
                         onCutout={(node) => void generateCutoutNode(node)}
                         onPanorama720={(node) => void generatePanorama720Node(node)}
                         onViewImage={handleViewNodeImage}
@@ -6160,22 +6175,22 @@ function LeaferCanvasPage() {
 
                 {infoNode ? <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => setInfoNodeId(null)} /> : null}
 
-                {cropNode?.metadata?.content ? <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
+                {cropNode && imageToolDialogUrl ? <CanvasNodeCropDialog dataUrl={imageToolDialogUrl} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} /> : null}
 
-                {maskEditNode?.metadata?.content ? (
-                    <CanvasNodeMaskEditDialog dataUrl={maskEditNode.metadata.content} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} />
+                {maskEditNode && imageToolDialogUrl ? (
+                    <CanvasNodeMaskEditDialog dataUrl={imageToolDialogUrl} open={Boolean(maskEditNode)} onClose={() => setMaskEditNodeId(null)} onConfirm={(payload) => void maskEditImageNode(maskEditNode!, payload)} />
                 ) : null}
 
-                {splitNode?.metadata?.content ? <CanvasNodeSplitDialog dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} /> : null}
+                {splitNode && imageToolDialogUrl ? <CanvasNodeSplitDialog dataUrl={imageToolDialogUrl} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} /> : null}
 
-                {upscaleNode?.metadata?.content ? (
-                    <CanvasNodeUpscaleDialog dataUrl={upscaleNode.metadata.content} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
+                {upscaleNode && imageToolDialogUrl ? (
+                    <CanvasNodeUpscaleDialog dataUrl={imageToolDialogUrl} open={Boolean(upscaleNode)} onClose={() => setUpscaleNodeId(null)} onConfirm={(params) => void upscaleImageNode(upscaleNode!, params)} />
                 ) : null}
-{angleNode?.metadata?.content ? <CanvasNodeAngleDialog dataUrl={angleNode.metadata.content} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
+{angleNode && imageToolDialogUrl ? <CanvasNodeAngleDialog dataUrl={imageToolDialogUrl} open={Boolean(angleNode)} onClose={() => setAngleNodeId(null)} onConfirm={(params) => void generateAngleNode(angleNode!, params)} /> : null}
 
-                {outpaintNode?.metadata?.content ? <CanvasNodeOutpaintDialog dataUrl={outpaintNode.metadata.content} open={Boolean(outpaintNode)} onClose={() => setOutpaintNodeId(null)} onConfirm={(ratioId) => void generateOutpaintNode(outpaintNode!, ratioId)} /> : null}
+                {outpaintNode && imageToolDialogUrl ? <CanvasNodeOutpaintDialog dataUrl={imageToolDialogUrl} open={Boolean(outpaintNode)} onClose={() => setOutpaintNodeId(null)} onConfirm={(ratioId) => void generateOutpaintNode(outpaintNode!, ratioId)} /> : null}
 
-                {lightingNode?.metadata?.content ? <CanvasNodeLightingDialog dataUrl={lightingNode.metadata.content} open={Boolean(lightingNode)} onClose={() => setLightingNodeId(null)} onConfirm={(settings) => void generateLightingNode(lightingNode!, settings)} /> : null}
+                {lightingNode && imageToolDialogUrl ? <CanvasNodeLightingDialog dataUrl={imageToolDialogUrl} open={Boolean(lightingNode)} onClose={() => setLightingNodeId(null)} onConfirm={(settings) => void generateLightingNode(lightingNode!, settings)} /> : null}
 
                 {trimVideoNode && trimVideoSrc ? (
                     <CanvasVideoTrimDialog
@@ -6447,8 +6462,8 @@ function CanvasGenerationHistoryModal({ open, nodes, onClose, onSelectNode }: { 
                                         onClose();
                                     }}
                                 >
-                                    <div className="mb-2 flex aspect-[4/3] items-center justify-center rounded-lg text-xs opacity-65" style={{ background: theme.toolbar.itemHover }}>
-                                        {tab === "image" ? <ImageIcon className="size-6" /> : tab === "video" ? <Video className="size-6" /> : <Music2 className="size-6" />}
+                                    <div className="mb-2 flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg text-xs opacity-90" style={{ background: theme.toolbar.itemHover }}>
+                                        {tab === "image" ? <HistoryImageThumb node={node} /> : tab === "video" ? <HistoryVideoThumb node={node} /> : <Music2 className="size-6 opacity-65" />}
                                     </div>
                                     <div className="truncate text-sm font-medium">{node.title}</div>
                                     <div className="mt-1 truncate text-xs opacity-50">{node.metadata?.prompt || node.metadata?.requestPrompt || "画布生成结果"}</div>
@@ -6464,6 +6479,44 @@ function CanvasGenerationHistoryModal({ open, nodes, onClose, onSelectNode }: { 
             </div>
         </Modal>
     );
+}
+
+/** 生成历史图片缩略图：按 storageKey 重新签名解析（content 里的旧签名 URL 可能已过期）。 */
+function HistoryImageThumb({ node }: { node: CanvasNodeData }) {
+    const [url, setUrl] = useState("");
+    useEffect(() => {
+        let cancelled = false;
+        const { storageKey, content } = node.metadata ?? {};
+        if (storageKey) {
+            void resolveImageUrl(storageKey, "").then((resolved) => {
+                if (!cancelled && resolved) setUrl(resolved);
+            });
+        } else if (content) {
+            setUrl(content);
+        }
+        return () => {
+            cancelled = true;
+        };
+    }, [node.metadata?.storageKey, node.metadata?.content]);
+    return url ? <img src={url} alt="" className="size-full object-cover" draggable={false} /> : <ImageIcon className="size-6 opacity-65" />;
+}
+
+/** 生成历史视频缩略图：取视频首帧（poster 由浏览器加载首帧前无法直接取，这里按 storageKey 重新签名后展示第一帧）。 */
+function HistoryVideoThumb({ node }: { node: CanvasNodeData }) {
+    const [url, setUrl] = useState("");
+    useEffect(() => {
+        let cancelled = false;
+        const { storageKey, content } = node.metadata ?? {};
+        const resolve = (resolved: string) => {
+            if (!cancelled && resolved) setUrl(resolved);
+        };
+        if (storageKey) void resolveMediaUrl(storageKey, "").then(resolve);
+        else if (content) setUrl(content);
+        return () => {
+            cancelled = true;
+        };
+    }, [node.metadata?.storageKey, node.metadata?.content]);
+    return url ? <video src={url} className="size-full object-cover" muted playsInline preload="metadata" /> : <Video className="size-6 opacity-65" />;
 }
 
 function CanvasAssetManagerPanel({
