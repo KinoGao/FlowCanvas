@@ -3762,7 +3762,7 @@ function LeaferCanvasPage() {
                     const comfyWorkflow = workflowId ? await getComfyWorkflow(workflowId) : null;
                     if (!comfyWorkflow) throw new Error("请先在配置节点选择 ComfyUI 工作流");
                     await saveCanvasGenerationJobs(new Map([[nodeId, generationJobId]]));
-                    const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, effectivePrompt);
+                    const values = buildComfyCanvasFieldValues(comfyWorkflow, sourceNode?.metadata?.comfyFieldValues || {}, rawPrompt);
                     resolveComfyTextFields(comfyWorkflow, values, generationContext);
                     await resolveComfyMediaFields(comfyWorkflow, values, generationContext, comfyui, runController.signal);
                     const requestWorkflow = applyComfyWorkflowFields(comfyWorkflow.workflow, comfyWorkflow.fields, values);
@@ -6831,7 +6831,7 @@ function buildComfyCanvasFieldValues(workflow: ComfyWorkflow, nodeValues: Record
     const promptText = prompt.trim();
     if (!promptText) return values;
     workflow.fields
-        .filter((field) => field.bindPrompt || isComfyPromptField(field))
+        .filter((field) => (field.bindPrompt || isComfyPromptField(field)) && nodeValues[field.id] === undefined)
         .forEach((field) => {
             values[field.id] = promptText;
         });

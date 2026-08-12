@@ -331,28 +331,37 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
             <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry ? () => onRetry(node.id) : undefined} />
-            <div className="relative">
-                <CanvasResourceMentionTextarea
-                    ref={textareaRef}
-                    value={prompt}
-                    references={mentionReferences}
-                    placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
-                    onChange={updatePrompt}
-                    mentionRequestNonce={mentionRequestNonce}
-                    onSubmit={submit}
-                    className="w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35"
+            {mode === "comfyui" && selectedComfyWorkflow?.fields.length ? (
+                <ComfyWorkflowComposerFields
+                    fields={selectedComfyWorkflow.fields}
+                    values={node.metadata?.comfyFieldValues || {}}
+                    references={stableMentionReferences}
+                    onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })}
                 />
-                <button
-                    type="button"
-                    className="creative-os-icon-button absolute right-0 top-0 !size-7"
-                    aria-label="展开输入框"
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                >
-                    <Maximize2 className="size-4" />
-                </button>
-            </div>
-            {!prompt.trim() ? (
+            ) : (
+                <div className="relative">
+                    <CanvasResourceMentionTextarea
+                        ref={textareaRef}
+                        value={prompt}
+                        references={mentionReferences}
+                        placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
+                        onChange={updatePrompt}
+                        mentionRequestNonce={mentionRequestNonce}
+                        onSubmit={submit}
+                        className="w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35"
+                    />
+                    <button
+                        type="button"
+                        className="creative-os-icon-button absolute right-0 top-0 !size-7"
+                        aria-label="展开输入框"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                    >
+                        <Maximize2 className="size-4" />
+                    </button>
+                </div>
+            )}
+            {mode !== "comfyui" && !prompt.trim() ? (
                 // video / image 模式各自有专属 Composer 快捷提示词，主面板仅剩
                 // text / audio / comfyui；comfyui 节点复用文本类提示词。
                 <ComposerQuickPrompts
@@ -361,11 +370,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onSelect={updatePrompt}
                 />
             ) : null}
-            <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
+            {mode !== "comfyui" ? <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" /> : null}
 
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
-                    <CanvasPromptLibrary onSelect={updatePrompt} />
+                    {mode !== "comfyui" ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
                     {mode === "comfyui" ? (
                         <ComfyUiWorkflowFilters node={node} workflows={comfyWorkflows} onConfigChange={onConfigChange} theme={theme} />
                     ) : mode === "audio" ? (
@@ -381,9 +390,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                         </div>
                     )}
                 </div>
-                <button type="button" className="creative-os-icon-button !size-8" aria-label="翻译" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                    <Languages className="size-4" />
-                </button>
+                {mode !== "comfyui" ? <button type="button" className="creative-os-icon-button !size-8" aria-label="翻译" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><Languages className="size-4" /></button> : null}
                 <Button
                     type="primary"
                     className="creative-os-primary-action !h-9 !min-w-9 shrink-0 !rounded-full !px-0"
@@ -1341,54 +1348,38 @@ function ComfyUiWorkflowFilters({ node, workflows, onConfigChange, theme }: { no
                     onChange={(workflowId) => onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: capability, comfyFieldValues: {} })}
                 />
             </Tooltip>
-            {selectedWorkflow?.fields.length ? (
-                <Popover
-                    trigger="click"
-                    placement="topLeft"
-                    content={<div className="w-[430px] max-w-[70vw]"><ComfyWorkflowFields fields={selectedWorkflow.fields} values={node.metadata?.comfyFieldValues || {}} onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })} theme={theme} /></div>}
-                >
-                    <Button size="small" className="!h-8 shrink-0 !rounded-lg">参数</Button>
-                </Popover>
-            ) : null}
         </div>
     );
 }
 
-function isComfyPromptFieldName(field: ComfyWorkflowField) {
-    if (field.type !== "text" && field.type !== "textarea") return false;
-    return /prompt|text|caption|description|positive|negative|提示词|正向|负向/i.test(`${field.input} ${field.name}`);
-}
-
-/** 工作流参数表单：默认值预填到 Composer，可编辑；绑定提示词/提示词类字段由提示词控制不在此展示。 */
-function ComfyWorkflowFields({ fields, values, onValuesChange, theme }: { fields: ComfyWorkflowField[]; values: Record<string, unknown>; onValuesChange: (fieldId: string, value: unknown) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const editable = fields.filter((field) => !field.bindPrompt && !isComfyPromptFieldName(field));
-    if (!editable.length) return null;
+/** 后台字段顺序就是 Composer 顺序；文本、图片、视频等字段直接替换通用提示词区。 */
+function ComfyWorkflowComposerFields({ fields, values, references, onValuesChange }: { fields: ComfyWorkflowField[]; values: Record<string, unknown>; references: CanvasResourceReference[]; onValuesChange: (fieldId: string, value: unknown) => void }) {
     return (
-        <div className="rounded-lg border p-2" style={{ borderColor: theme.ui.hairline }}>
-            <div className="mb-1.5 text-[11px] font-medium opacity-60">工作流参数（默认值预填，可修改；生成时提示词会替换绑定提示词的字段）</div>
-            <div className="space-y-1.5">
-                {editable.map((field) => {
+        <div className="mb-3 space-y-2.5">
+                {fields.map((field, index) => {
                     const value = values[field.id] ?? field.default;
+                    const mediaOptions = field.type === "image" || field.type === "video" || field.type === "audio"
+                        ? references.filter((reference) => reference.active && reference.kind === field.type).map((reference) => ({ value: `@[node:${reference.nodeId}]`, label: `${reference.label} · ${reference.title || field.type}` }))
+                        : [];
                     return (
-                        <div key={field.id} className="grid grid-cols-[130px_1fr] items-center gap-2">
-                            <span className="truncate text-xs opacity-70" title={field.name}>{field.name}</span>
+                        <label key={field.id} className="block">
+                            <span className="mb-1 block truncate text-[11px] font-medium opacity-55" title={field.name}>{index + 1}. {field.name}</span>
                             {field.type === "number" || field.type === "slider" ? (
-                                <InputNumber size="small" className="w-full" value={typeof value === "number" ? value : Number(value) || 0} onChange={(next) => onValuesChange(field.id, next)} />
+                                <InputNumber className="w-full" value={typeof value === "number" ? value : Number(value) || 0} min={field.min ?? undefined} max={field.max ?? undefined} step={field.step ?? undefined} onChange={(next) => onValuesChange(field.id, next)} />
                             ) : field.type === "boolean" ? (
-                                <Switch size="small" checked={Boolean(value)} onChange={(next) => onValuesChange(field.id, next)} />
+                                <Switch checked={Boolean(value)} onChange={(next) => onValuesChange(field.id, next)} />
                             ) : field.type === "dropdown" ? (
-                                <Select size="small" className="w-full" value={String(value ?? "")} options={(field.options || []).map((option) => ({ value: option, label: option }))} onChange={(next) => onValuesChange(field.id, next)} />
+                                <Select className="w-full" value={String(value ?? "")} options={(field.options || []).map((option) => ({ value: option, label: option }))} onChange={(next) => onValuesChange(field.id, next)} />
                             ) : field.type === "textarea" ? (
-                                <Input.TextArea size="small" rows={2} className="!text-xs" value={String(value ?? "")} placeholder="默认值" onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                                <Input.TextArea autoSize={{ minRows: 2, maxRows: 6 }} value={String(value ?? "")} placeholder={`输入${field.name}`} onChange={(event) => onValuesChange(field.id, event.target.value)} />
                             ) : field.type === "image" || field.type === "video" || field.type === "audio" ? (
-                                <span className="text-[11px] opacity-50">由上游素材连线提供</span>
+                                <Select className="w-full" allowClear value={value ? String(value) : undefined} options={mediaOptions} placeholder={mediaOptions.length ? `选择已连接的${field.type === "image" ? "图片" : field.type === "video" ? "视频" : "音频"}` : `请先连接${field.type === "image" ? "图片" : field.type === "video" ? "视频" : "音频"}节点`} onChange={(next) => onValuesChange(field.id, next || "")} />
                             ) : (
-                                <Input size="small" className="!text-xs" value={String(value ?? "")} placeholder="默认值" onChange={(event) => onValuesChange(field.id, event.target.value)} />
+                                <Input value={String(value ?? "")} placeholder={`输入${field.name}`} onChange={(event) => onValuesChange(field.id, event.target.value)} />
                             )}
-                        </div>
+                        </label>
                     );
                 })}
-            </div>
         </div>
     );
 }
