@@ -480,8 +480,18 @@ function toChatMessages(messages: ResponseInputMessage[]): ChatMessage[] {
             ];
         }
         if (message.role === "tool") return [{ role: "tool", tool_call_id: message.tool_call_id, content: message.content }];
-        return [{ role: message.role, content: message.content }];
+        return [{ role: message.role, content: toChatContent(message.content) }];
     });
+}
+
+/** 纯文本 content 数组转字符串（DeepSeek 等厂商要求 content 为字符串）；含图保持数组。 */
+function toChatContent(content: unknown): ChatMessageContent {
+    if (typeof content === "string" || content == null) return content || "";
+    if (Array.isArray(content)) {
+        if (content.every((item) => item.type === "text")) return content.map((item) => item.text).join("\n\n");
+        return content as ChatMessageContent;
+    }
+    return content as ChatMessageContent;
 }
 
 function toChatToolChoice(toolChoice: ToolChoice) {
