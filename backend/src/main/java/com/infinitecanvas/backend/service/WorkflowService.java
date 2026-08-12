@@ -78,6 +78,7 @@ public class WorkflowService {
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("title", config.getOrDefault("title", id));
         normalized.put("fields", config.getOrDefault("fields", new ArrayList<>()));
+        normalized.put("capability", config.getOrDefault("capability", ""));
 
         try {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(cfgFile.toFile(), normalized);
@@ -122,6 +123,7 @@ public class WorkflowService {
                 Map<String, Object> cfg = objectMapper.readValue(cfgFile.toFile(), Map.class);
                 entry.put("fields", cfg.getOrDefault("fields", new ArrayList<>()));
                 entry.put("title", cfg.getOrDefault("title", id));
+                entry.put("capability", cfg.getOrDefault("capability", ""));
                 entry.put("hasConfig", true);
             } catch (IOException e) {
                 entry.put("fields", new ArrayList<>());

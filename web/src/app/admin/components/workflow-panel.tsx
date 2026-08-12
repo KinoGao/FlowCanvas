@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { AdminCard } from "./admin-card";
 import { deleteAdminWorkflow, saveAdminWorkflowConfig, uploadAdminWorkflow } from "@/services/api/platform-admin";
 import {
+    inferComfyWorkflowCapability,
     parseComfyWorkflowJson,
     type ComfyWorkflow,
     type ComfyWorkflowField,
     type ComfyWorkflowFieldType,
+    type ComfyUiCapability,
     type ComfyWorkflowInputCandidate,
 } from "@/services/comfyui-workflows";
 
@@ -34,11 +36,13 @@ export function WorkflowPanel(props: Props) {
     const { message, modal } = App.useApp();
     const [title, setTitle] = useState("");
     const [fields, setFields] = useState<ComfyWorkflowField[]>([]);
+    const [capability, setCapability] = useState<ComfyUiCapability | "">("");
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         setTitle(props.selectedWorkflow?.title || "");
         setFields((props.selectedWorkflow?.fields || []).map((field) => ({ ...field, options: [...(field.options || [])] })));
+        setCapability(props.selectedWorkflow?.capability || "");
     }, [props.selectedWorkflow]);
 
     const upload = async (file: File) => {
@@ -47,6 +51,7 @@ export function WorkflowPanel(props: Props) {
             const saved = await uploadAdminWorkflow(props.authCode, file.name, workflow);
             props.onWorkflowsChange([saved, ...props.workflows.filter((item) => item.id !== saved.id)]);
             props.onSelect(saved.id);
+            setCapability(inferComfyWorkflowCapability(workflow, []));
             message.success("工作流已上传，选择需要暴露的输入参数");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "工作流上传失败");
@@ -57,7 +62,7 @@ export function WorkflowPanel(props: Props) {
         if (!props.selectedWorkflow) return;
         setSaving(true);
         try {
-            const saved = await saveAdminWorkflowConfig(props.authCode, props.selectedWorkflow.id, { title: title.trim() || props.selectedWorkflow.title, fields });
+            const saved = await saveAdminWorkflowConfig(props.authCode, props.selectedWorkflow.id, { title: title.trim() || props.selectedWorkflow.title, fields, capability });
             props.onWorkflowsChange(props.workflows.map((item) => item.id === saved.id ? saved : item));
             message.success("工作流参数已发布");
         } catch (error) {
@@ -93,7 +98,7 @@ export function WorkflowPanel(props: Props) {
 
         {props.selectedWorkflow ? <Space direction="vertical" size={18} className="min-w-0 w-full">
             <AdminCard title="工作流参数" description="只把创作端真正需要调整的输入暴露出来。" action={<Space><Button danger icon={<Trash2 className="size-4" />} onClick={remove}>删除</Button><Button type="primary" loading={saving} icon={<Save className="size-4" />} onClick={() => void save()}>保存参数</Button></Space>}>
-                <div className="mb-5 grid gap-4 md:grid-cols-2"><label className="text-sm"><span className="mb-2 block text-gray-500">显示名称</span><Input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">工作流 ID</span><Input disabled value={props.selectedWorkflow.id} /></label></div>
+                <div className="mb-5 grid gap-4 md:grid-cols-3"><label className="text-sm"><span className="mb-2 block text-gray-500">显示名称</span><Input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">工作流 ID</span><Input disabled value={props.selectedWorkflow.id} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">能力分类</span><Select className="w-full" value={capability} onChange={(value) => setCapability(value as ComfyUiCapability | "")} options={[{ value: "", label: "自动识别" }, { value: "image-to-text", label: "反推提示词" }, { value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "参考图生图" }, { value: "image-to-video", label: "图生视频" }]} /></label></div>
                 <Table rowKey="id" pagination={false} dataSource={fields} scroll={{ x: 950 }} locale={{ emptyText: "从下方候选输入中添加参数" }} columns={[
                     { title: "参数名", key: "name", width: 180, render: (_, field) => <Input value={field.name} onChange={(event) => updateField(field.id, { name: event.target.value })} /> },
                     { title: "节点输入", key: "path", width: 160, render: (_, field) => <div><div className="text-xs">{field.node}:{field.input}</div><div className="text-xs text-gray-400">{String(field.default ?? "")}</div></div> },

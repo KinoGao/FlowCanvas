@@ -243,7 +243,7 @@ export async function uploadAdminWorkflow(authCode: string, name: string, workfl
     );
 }
 
-export async function saveAdminWorkflowConfig(authCode: string, id: string, config: { title: string; fields: ComfyWorkflowField[] }) {
+export async function saveAdminWorkflowConfig(authCode: string, id: string, config: { title: string; fields: ComfyWorkflowField[]; capability?: string }) {
     return readApi<ComfyWorkflow>(
         await fetch(apiUrl("/api/workflows/" + encodeURIComponent(id) + "/config"), {
             method: "PUT",

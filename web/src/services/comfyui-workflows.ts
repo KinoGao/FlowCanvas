@@ -33,6 +33,8 @@ export type ComfyWorkflow = {
     id: string;
     name: string;
     title: string;
+    /** 后台配置的工作流能力（空 = 创作端自动识别） */
+    capability?: ComfyUiCapability | "";
     workflow: ComfyWorkflowJson;
     fields: ComfyWorkflowField[];
     createdAt: string;

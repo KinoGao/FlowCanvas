@@ -1287,7 +1287,7 @@ function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node
     const selectedWorkflowId = node.metadata?.comfyWorkflowId || "";
     const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowId) || null;
     const inferred = selectedWorkflow ? inferComfyWorkflowCapability(selectedWorkflow.workflow, selectedWorkflow.fields) : "text-to-image";
-    const capability = node.metadata?.comfyCapability || inferred;
+    const capability = node.metadata?.comfyCapability || (selectedWorkflow?.capability as ComfyUiCapability | undefined) || inferred;
 
     return (
         <div className="mb-2 flex flex-col gap-1.5">
