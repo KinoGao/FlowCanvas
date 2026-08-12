@@ -25,6 +25,8 @@ const STREAMING_CHAT_TIMEOUT_MS = 1_800_000;
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
     content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+    /** DeepSeek 等思考模式模型要求多轮对话回传的思考内容。 */
+    reasoningContent?: string;
 };
 
 export type ResponseToolCall = {
@@ -34,7 +36,7 @@ export type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string; reasoningContent?: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
@@ -49,6 +51,8 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = {
     content: string;
     toolCalls: ResponseToolCall[];
+    /** 思考模式模型的思考内容（reasoning_content），多轮对话需回传。 */
+    reasoningContent?: string;
 };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
@@ -76,19 +80,19 @@ type ResponseApiPayload = {
     msg?: string;
 };
 type ChatMessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
-type ChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: ChatMessageContent; tool_call_id?: string; tool_calls?: ResponseToolCall[] };
+type ChatMessage = { role: "system" | "user" | "assistant" | "tool"; content?: ChatMessageContent; reasoning_content?: string; tool_call_id?: string; tool_calls?: ResponseToolCall[] };
 type ChatToolDefinition = ResponseFunctionTool;
 type ChatCompletionPayload = {
     choices?: Array<{
-        delta?: { content?: string; tool_calls?: ChatDeltaToolCall[] };
-        message?: { content?: string | null; tool_calls?: ResponseToolCall[] };
+        delta?: { content?: string; reasoning_content?: string; tool_calls?: ChatDeltaToolCall[] };
+        message?: { content?: string | null; reasoning_content?: string; tool_calls?: ResponseToolCall[] };
     }>;
     error?: { message?: string };
     code?: number;
     msg?: string;
 };
 type ChatDeltaToolCall = { index?: number; id?: string; type?: "function"; function?: { name?: string; arguments?: string } };
-type ChatStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
+type ChatStreamState = { buffer: string; text: string; reasoningContent: string; toolCalls: ResponseToolCall[]; error?: string };
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
 
 type ImageApiResponse = Record<string, unknown> & {
@@ -476,10 +480,16 @@ function toChatMessages(messages: ResponseInputMessage[]): ChatMessage[] {
                             function: { name: message.name, arguments: message.arguments },
                         },
                     ],
+                    // DeepSeek 等思考模式模型要求 assistant 消息回传 reasoning_content。
+                    ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {}),
                 },
             ];
         }
         if (message.role === "tool") return [{ role: "tool", tool_call_id: message.tool_call_id, content: message.content }];
+        // DeepSeek 等思考模式模型要求 assistant 消息回传 reasoning_content，否则多轮报错。
+        if (message.role === "assistant" && message.reasoningContent) {
+            return [{ role: "assistant", content: toChatContent(message.content), reasoning_content: message.reasoningContent }];
+        }
         return [{ role: message.role, content: toChatContent(message.content) }];
     });
 }
@@ -507,7 +517,7 @@ function parseChatToolResponse(payload: ChatCompletionPayload): ToolResponseResu
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
     if (payload.error?.message) throw new Error(payload.error.message);
     const message = payload.choices?.[0]?.message;
-    return { content: message?.content || "", toolCalls: message?.tool_calls || [] };
+    return { content: message?.content || "", toolCalls: message?.tool_calls || [], reasoningContent: message?.reasoning_content || undefined };
 }
 
 function parseToolResponse(payload: ResponseApiPayload): ToolResponseResult {
@@ -622,6 +632,7 @@ function consumeChatStreamBlock(block: string, state: ChatStreamState, onDelta?:
         state.text += delta.content;
         onDelta?.(state.text);
     }
+    if (delta?.reasoning_content) state.reasoningContent += delta.reasoning_content;
     delta?.tool_calls?.forEach((item) => mergeChatDeltaToolCall(state.toolCalls, item));
 }
 
@@ -679,10 +690,10 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
             return parseChatToolResponse(JSON.parse(text) as ChatCompletionPayload);
         } catch {
             // 网关未声明 content-type 却返回了 SSE 报文：按流解析兜底。
-            const state: ChatStreamState = { buffer: "", text: "", toolCalls: [] };
+            const state: ChatStreamState = { buffer: "", text: "", reasoningContent: "", toolCalls: [] };
             consumeChatStreamText(state, text, onDelta, true);
             if (state.error) throw new Error(state.error);
-            return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name) };
+            return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name), reasoningContent: state.reasoningContent || undefined };
         }
     }
     if (!response.body) {
@@ -691,7 +702,7 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const state: ChatStreamState = { buffer: "", text: "", toolCalls: [] };
+    const state: ChatStreamState = { buffer: "", text: "", reasoningContent: "", toolCalls: [] };
     for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -700,7 +711,7 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
     }
     consumeChatStreamText(state, decoder.decode(), onDelta, true);
     if (state.error) throw new Error(state.error);
-    return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name) };
+    return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name), reasoningContent: state.reasoningContent || undefined };
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {

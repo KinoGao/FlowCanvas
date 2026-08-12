@@ -233,6 +233,8 @@ export type CanvasAssistantMessage = {
     meta?: string;
     detail?: unknown;
     references?: CanvasAssistantReference[];
+    /** DeepSeek 等思考模式模型的思考内容，多轮对话需回传。 */
+    reasoningContent?: string;
 };
 
 export type CanvasAssistantSession = {

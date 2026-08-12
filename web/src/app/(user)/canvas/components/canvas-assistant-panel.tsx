@@ -278,7 +278,7 @@ type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: bo
 type OnlineLoopContext = { step: number };
 type OnlineToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
-type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
+type PendingOnlineToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number; reasoningContent?: string };
 
 type CanvasAssistantPanelProps = {
     nodes: CanvasNodeData[];
@@ -494,7 +494,7 @@ export function CanvasAssistantPanel({
             if (result.toolCalls.length) {
                 const writableCalls = result.toolCalls.filter(isWritableToolCall);
                 if (writableCalls.length && requiresOnlineApproval(result.toolCalls, confirmTools)) {
-                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
+                    upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。", reasoningContent: result.reasoningContent });
                     const toolMessageId = nanoid();
                     pendingToolContextRef.current.set(toolMessageId, { messages, toolCalls: result.toolCalls, assistantId, step: loop.step });
                     const toolMessage: CanvasAssistantMessage = { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(result.toolCalls), detail: { status: "pending", step: loop.step, toolCalls: result.toolCalls, impact: buildToolImpact(result.toolCalls, snapshotRef.current) } };
@@ -505,7 +505,7 @@ export function CanvasAssistantPanel({
                 await continueOnlineToolLoop(sessionId, assistantId, messages, result, loop.step);
             } else {
                 if (!result.content.trim()) throw new Error("模型没有返回工具调用，画布操作未执行。");
-                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "没有返回内容。" });
+                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: result.content || streamed || "没有返回内容。", reasoningContent: result.reasoningContent });
                 addOnlineLog(`Agent Tool Loop ${loop.step} 结束`, { reply: result.content });
             }
         } catch (error) {
@@ -516,7 +516,7 @@ export function CanvasAssistantPanel({
         }
     };
 
-    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[] }, step: number) => {
+    const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[]; reasoningContent?: string }, step: number) => {
         const toolResults = executeOnlineToolCalls(result.toolCalls);
         addOnlineLog("工具执行结果", toolResults);
         appendMessage(sessionId, {
@@ -526,11 +526,11 @@ export function CanvasAssistantPanel({
             text: toolResults.map((item) => toolResultText(item.result)).join("\n"),
             detail: { status: "completed", step, toolCalls: result.toolCalls, results: toolResults },
         });
-        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step);
+        await continueOnlineToolLoopAfterResults(sessionId, assistantId, messages, result.toolCalls, toolResults, step, result.reasoningContent);
     };
 
-    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number) => {
-        const nextMessages: ResponseInputMessage[] = [...messages, ...toolCalls.map(toolCallToResponseInput), ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
+    const continueOnlineToolLoopAfterResults = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], toolCalls: ResponseToolCall[], toolResults: OnlineExecutedToolCall[], step: number, reasoningContent?: string) => {
+        const nextMessages: ResponseInputMessage[] = [...messages, ...toolCalls.map((call) => toolCallToResponseInput(call, reasoningContent)), ...toolResults.map((item) => ({ role: "tool" as const, tool_call_id: item.toolCallId, content: JSON.stringify(item.result) }))];
         if (step >= ONLINE_AGENT_MAX_STEPS) {
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
             addOnlineLog("Agent Tool Loop 达到步数上限", { maxSteps: ONLINE_AGENT_MAX_STEPS });
@@ -546,9 +546,9 @@ export function CanvasAssistantPanel({
         if (next.toolCalls.length) {
             const writableCalls = next.toolCalls.filter(isWritableToolCall);
             if (writableCalls.length && requiresOnlineApproval(next.toolCalls, confirmTools)) {
-                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。" });
+                upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || "准备执行工具，等待确认。", reasoningContent: next.reasoningContent });
                 const toolMessageId = nanoid();
-                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1 });
+                pendingToolContextRef.current.set(toolMessageId, { messages: nextMessages, toolCalls: next.toolCalls, assistantId, step: step + 1, reasoningContent: next.reasoningContent });
                 appendMessage(sessionId, { id: toolMessageId, role: "tool", title: "确认工具调用", text: summarizeToolCalls(next.toolCalls), detail: { status: "pending", step: step + 1, toolCalls: next.toolCalls, impact: buildToolImpact(next.toolCalls, snapshotRef.current) } });
                 addOnlineLog("等待用户确认", next.toolCalls);
                 return;
@@ -556,7 +556,7 @@ export function CanvasAssistantPanel({
             await continueOnlineToolLoop(sessionId, assistantId, nextMessages, next, step + 1);
             return;
         }
-        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
+        upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。", reasoningContent: next.reasoningContent });
     };
 
     const executeOps = (ops: CanvasAgentOp[]) => {
@@ -636,7 +636,7 @@ export function CanvasAssistantPanel({
             addOnlineLog("工具执行结果", results);
             upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" } });
             pendingToolContextRef.current.delete(messageId);
-            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1);
+            await continueOnlineToolLoopAfterResults(session.id, assistantId, previousMessages, toolCalls, results, pendingContext?.step || Number(detail.step) || 1, pendingContext?.reasoningContent);
         } catch (error) {
             addOnlineLog("工具续跑失败", error instanceof Error ? error.message : error);
             appendMessage(session.id, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
@@ -1387,8 +1387,8 @@ function isResponseToolCall(value: unknown): value is ResponseToolCall {
     return typeof item.id === "string" && item.type === "function" && typeof fn.name === "string" && typeof fn.arguments === "string";
 }
 
-function toolCallToResponseInput(call: ResponseToolCall): ResponseInputMessage {
-    return { type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) };
+function toolCallToResponseInput(call: ResponseToolCall, reasoningContent?: string): ResponseInputMessage {
+    return { type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}), ...(reasoningContent ? { reasoningContent } : {}) };
 }
 
 function summarizeToolCalls(calls: ResponseToolCall[]) {
@@ -1665,7 +1665,7 @@ async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: Ca
         ...history
             .filter((message): message is CanvasAssistantMessage & { role: "user" | "assistant" | "system" } => message.role === "user" || message.role === "assistant" || message.role === "system")
             .slice(-8)
-            .map((message): ResponseInputMessage => ({ role: message.role, content: message.text })),
+            .map((message): ResponseInputMessage => ({ role: message.role, content: message.text, ...(message.role === "assistant" && message.reasoningContent ? { reasoningContent: message.reasoningContent } : {}) })),
         {
             role: "user",
             content: [
