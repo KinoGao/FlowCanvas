@@ -4777,20 +4777,17 @@ function LeaferCanvasPage() {
     );
 
     const createScriptBeatNode = useCallback(
-        (scriptNode: CanvasNodeData, beat: CanvasScriptBeat, beatIndex: number) => {
-            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+        (scriptNode: CanvasNodeData, beat: CanvasScriptBeat, beatIndex: number, target: "video" | "comfyui" = "video") => {
+            const type = target === "comfyui" ? CanvasNodeType.ComfyUI : CanvasNodeType.Video;
+            const spec = NODE_DEFAULT_SIZE[type];
             const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + beatIndex * (spec.height + 36) };
+            const prompt = buildScriptBeatExportText(beat);
+            const metadata: CanvasNodeMetadata =
+                target === "comfyui"
+                    ? { status: NODE_STATUS_IDLE, prompt, composerContent: prompt, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId }
+                    : { status: NODE_STATUS_IDLE, prompt, composerContent: prompt, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model };
             const node: CanvasNodeData = {
-                ...createCanvasNode(
-                    CanvasNodeType.Image,
-                    { x: position.x + spec.width / 2, y: position.y + spec.height / 2 },
-                    {
-                        status: NODE_STATUS_IDLE,
-                        prompt: beat.prompt,
-                        generationMode: "image",
-                        generationType: "generation",
-                    },
-                ),
+                ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
                 position,
                 width: spec.width,
                 height: spec.height,
@@ -4803,9 +4800,9 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
             setDialogNodeId(null);
-            void handleGenerateNode(node.id, "image", node.metadata?.prompt || "");
+            void handleGenerateNode(node.id, target, prompt, target === "comfyui" ? comfyui.defaultWorkflowId : undefined);
         },
-        [createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
+        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.videoModel, handleConfigNodeChange, handleGenerateNode],
     );
 
     const createScriptGridStoryboard = useCallback(
@@ -4881,47 +4878,6 @@ function LeaferCanvasPage() {
             void handleGenerateNode(node.id, target, prompt, target === "comfyui" ? comfyui.defaultWorkflowId : undefined);
         },
         [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
-    );
-
-    const exportScriptBeatNodes = useCallback(
-        (scriptNode: CanvasNodeData, target: "video" | "comfyui") => {
-            const beats = scriptNode.metadata?.scriptBeats ?? [];
-            if (!beats.length) {
-                message.warning("分镜表为空，无法导出");
-                return;
-            }
-            const type = target === "video" ? CanvasNodeType.Video : CanvasNodeType.ComfyUI;
-            const spec = NODE_DEFAULT_SIZE[type];
-            const startX = scriptNode.position.x + scriptNode.width + 96;
-            const startY = scriptNode.position.y;
-            const exportedNodes = beats.map((beat, index) => {
-                const exportText = buildScriptBeatExportText(beat);
-                const position = { x: startX, y: startY + index * (spec.height + 36) };
-                const metadata: CanvasNodeMetadata =
-                    target === "video"
-                        ? { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model }
-                        : { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId };
-                return {
-                    ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
-                    position,
-                    width: spec.width,
-                    height: spec.height,
-                } satisfies CanvasNodeData;
-            });
-            const outputIds = exportedNodes.map((node) => node.id);
-            nodesRef.current = [...nodesRef.current, ...exportedNodes];
-            connectionsRef.current = [...connectionsRef.current, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
-            setNodes((prev) => [
-                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []), ...outputIds] } } : node)),
-                ...exportedNodes,
-            ]);
-            setConnections((prev) => [...prev, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
-            setSelectedNodeIds(new Set(outputIds));
-            setSelectedConnectionId(null);
-            setDialogNodeId(exportedNodes[0]?.id ?? null);
-            message.success(`已导出 ${exportedNodes.length} 个分镜为${target === "video" ? "视频" : "ComfyUI"}节点，可在 composer 中继续编辑`);
-        },
-        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.videoModel, message],
     );
 
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
@@ -5976,9 +5932,8 @@ function LeaferCanvasPage() {
                         onAssetChange={(asset) => handleScriptAssetChange(scriptStudioNode, asset)}
                         onAssetAdd={(asset) => handleScriptAssetAdd(scriptStudioNode, asset)}
                         onAssetRemove={(assetId) => handleScriptAssetRemove(scriptStudioNode, assetId)}
-                        onGenerateBeat={(beat, index) => createScriptBeatNode(scriptStudioNode, beat, index)}
+                        onGenerateBeat={(beat, index, target) => createScriptBeatNode(scriptStudioNode, beat, index, target)}
                         onGenerateAsset={(asset, target) => generateScriptAssetNode(scriptStudioNode, asset, target)}
-                        onExportBeats={(target) => exportScriptBeatNodes(scriptStudioNode, target)}
                         outputStates={scriptOutputStates}
                     />
                 ) : null}
