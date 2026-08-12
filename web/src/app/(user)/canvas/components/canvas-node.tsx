@@ -1206,9 +1206,9 @@ const nodeStarterVisuals: Record<NodeStarterKind, { label: string; description: 
     audio: { label: "音频素材", description: "导入声音素材，或连接到音频生成流程。", icon: Music2 },
 };
 
-function MediaNodePlaceholder({ kind, theme }: { kind: "image" | "video" | "audio"; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const Icon = kind === "image" ? ImageIcon : kind === "video" ? Video : Music2;
-    const label = kind === "image" ? "图片" : kind === "video" ? "视频" : "音频";
+function MediaNodePlaceholder({ kind, theme }: { kind: "image" | "video" | "audio" | "comfyui"; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const Icon = kind === "image" ? ImageIcon : kind === "video" ? Video : kind === "comfyui" ? Workflow : Music2;
+    const label = kind === "image" ? "图片" : kind === "video" ? "视频" : kind === "comfyui" ? "ComfyUI 工作流" : "音频";
     return (
         <div className="canvas-node-media-placeholder relative flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill, color: theme.node.placeholder }}>
             <span aria-hidden className="canvas-node-media-placeholder-band absolute inset-x-0 top-1/2 h-[34%] -translate-y-1/2" />
@@ -1345,13 +1345,8 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     );
 }
 
-function ComfyUiContent({ theme, onOpenComposer }: NodeContentRendererProps) {
-    return (
-        <NodeStarterPanel kind="comfyui"
-            theme={theme}
-            actions={[{ label: "配置工作流并运行", onClick: () => onOpenComposer?.() }]}
-        />
-    );
+function ComfyUiContent({ theme }: NodeContentRendererProps) {
+    return <MediaNodePlaceholder kind="comfyui" theme={theme} />;
 }
 
 function EmptyImageContent({ node, theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, onNodeAction, onUpload }: NodeContentRendererProps) {

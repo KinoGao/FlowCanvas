@@ -13,7 +13,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Image]: { width: 384, height: 216, title: "New Generation" },
     [CanvasNodeType.Text]: { width: 384, height: 216, title: "Note" },
     [CanvasNodeType.Config]: { width: 420, height: 240, title: "生成配置" },
-    [CanvasNodeType.ComfyUI]: { width: 420, height: 324, title: "ComfyUI" },
+    [CanvasNodeType.ComfyUI]: { width: 384, height: 216, title: "ComfyUI" },
     [CanvasNodeType.Video]: { width: 384, height: 216, title: "Video" },
     [CanvasNodeType.Audio]: { width: 220, height: 96, title: "Audio" },
     [CanvasNodeType.Group]: { width: 360, height: 260, title: "分组" },

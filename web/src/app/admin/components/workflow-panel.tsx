@@ -60,6 +60,10 @@ export function WorkflowPanel(props: Props) {
     };
     const save = async () => {
         if (!props.selectedWorkflow) return;
+        if (!capability) {
+            message.warning("请先选择工作流能力分类");
+            return;
+        }
         setSaving(true);
         try {
             const saved = await saveAdminWorkflowConfig(props.authCode, props.selectedWorkflow.id, { title: title.trim() || props.selectedWorkflow.title, fields, capability });
@@ -98,7 +102,7 @@ export function WorkflowPanel(props: Props) {
 
         {props.selectedWorkflow ? <Space direction="vertical" size={18} className="min-w-0 w-full">
             <AdminCard title="工作流参数" description="只把创作端真正需要调整的输入暴露出来。" action={<Space><Button danger icon={<Trash2 className="size-4" />} onClick={remove}>删除</Button><Button type="primary" loading={saving} icon={<Save className="size-4" />} onClick={() => void save()}>保存参数</Button></Space>}>
-                <div className="mb-5 grid gap-4 md:grid-cols-3"><label className="text-sm"><span className="mb-2 block text-gray-500">显示名称</span><Input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">工作流 ID</span><Input disabled value={props.selectedWorkflow.id} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">能力分类</span><Select className="w-full" value={capability} onChange={(value) => setCapability(value as ComfyUiCapability | "")} options={[{ value: "", label: "自动识别" }, { label: "文本", options: [{ value: "text-to-text", label: "文生文" }, { value: "image-to-text", label: "图生文" }] }, { label: "图像", options: [{ value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "参考图生图" }] }, { label: "视频", options: [{ value: "text-to-video", label: "文生视频" }, { value: "image-to-video", label: "图片生视频" }, { value: "reference-video", label: "全能参考生视频" }] }]} /></label></div>
+                <div className="mb-5 grid gap-4 md:grid-cols-3"><label className="text-sm"><span className="mb-2 block text-gray-500">显示名称</span><Input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">工作流 ID</span><Input disabled value={props.selectedWorkflow.id} /></label><label className="text-sm"><span className="mb-2 block text-gray-500">能力分类</span><Select className="w-full" placeholder="选择创作端筛选分类" value={capability || undefined} onChange={(value) => setCapability(value as ComfyUiCapability)} options={[{ label: "文本", options: [{ value: "text-to-text", label: "文生文" }, { value: "image-to-text", label: "图生文" }] }, { label: "图像", options: [{ value: "text-to-image", label: "文生图" }, { value: "image-to-image", label: "参考图生图" }] }, { label: "视频", options: [{ value: "text-to-video", label: "文生视频" }, { value: "image-to-video", label: "图片生视频" }, { value: "reference-video", label: "全能参考生视频" }] }]} /></label></div>
                 <Table rowKey="id" pagination={false} dataSource={fields} scroll={{ x: 950 }} locale={{ emptyText: "从下方候选输入中添加参数" }} columns={[
                     { title: "参数名", key: "name", width: 180, render: (_, field) => <Input value={field.name} onChange={(event) => updateField(field.id, { name: event.target.value })} /> },
                     { title: "节点输入", key: "path", width: 190, render: (_, field) => <div className="flex items-center justify-between gap-1"><div className="min-w-0"><div className="truncate text-xs">{field.node}:{field.input}</div><Input size="small" className="!h-6 !text-xs" value={field.default === undefined || field.default === "" ? "" : String(field.default)} placeholder="默认值" onChange={(event) => updateField(field.id, { default: event.target.value === "" ? undefined : event.target.value })} /></div><Button danger type="text" size="small" icon={<Trash2 className="size-3.5" />} title="删除该参数" onClick={() => setFields(fields.filter((item) => item.id !== field.id))} /></div> },

@@ -6,7 +6,7 @@ export function createDefaultCanvasNodeMetadata(type: CanvasNodeType): CanvasNod
     if (type === CanvasNodeType.Text) return { ...base, fontSize: 14 };
     if (type === CanvasNodeType.Image) return { ...base, size: "16:9" };
     if (type === CanvasNodeType.Config) return { ...base, generationMode: "image" };
-    if (type === CanvasNodeType.ComfyUI) return { ...base, generationMode: "comfyui" };
+    if (type === CanvasNodeType.ComfyUI) return { ...base, generationMode: "comfyui", comfyCapability: "text-to-text" };
 
     return base;
 }

@@ -11,6 +11,12 @@ import java.util.*;
 @Service
 public class WorkflowService {
 
+    private static final Set<String> CAPABILITIES = Set.of(
+            "text-to-text", "image-to-text",
+            "text-to-image", "image-to-image",
+            "text-to-video", "image-to-video", "reference-video"
+    );
+
     private final Path workflowDir;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -78,7 +84,9 @@ public class WorkflowService {
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("title", config.getOrDefault("title", id));
         normalized.put("fields", config.getOrDefault("fields", new ArrayList<>()));
-        normalized.put("capability", config.getOrDefault("capability", ""));
+        String capability = Objects.toString(config.get("capability"), "").trim();
+        if (!CAPABILITIES.contains(capability)) throw new IllegalArgumentException("请选择有效的工作流能力分类");
+        normalized.put("capability", capability);
 
         try {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(cfgFile.toFile(), normalized);

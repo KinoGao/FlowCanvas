@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, Users, WandSparkles } from "lucide-react";
-import { App, Button, Input, InputNumber, Popover, Segmented, Select, Switch, Tooltip } from "antd";
+import { App, Button, Input, InputNumber, Popover, Select, Switch, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
@@ -22,7 +22,7 @@ import { useVideoModelCapability } from '@/hooks/use-video-model-capability';
 import { videoRatiosForMode, type VideoGenerationMode, type VideoModelCapability } from '@/services/api/model-capabilities';
 import { normalizeRuntimeModelOption } from '@/services/runtime-config';
 import { normalizeResolutionToken, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import { COMFY_CAPABILITY_META, inferComfyWorkflowCapability, listComfyWorkflows, type ComfyOutputType, type ComfyUiCapability, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
+import { COMFY_CAPABILITY_META, listComfyWorkflows, type ComfyOutputType, type ComfyUiCapability, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { normalizeVideoConfig, supportedVideoMode, validateVideoReferenceCounts, videoCapabilitySignature } from "./canvas-video-capability";
 import { CAMERA_APERTURES, CAMERA_BODY_OPTIONS, CAMERA_FOCAL_LENGTHS, CAMERA_LENS_OPTIONS, CANVAS_VIDEO_CAMERA_PRESETS, buildImageCameraPrompt, imageCameraSummaryLabel, videoCameraPresetPrompt, type CanvasImageCameraSettings } from "../utils/canvas-camera-presets";
 import { imageStylePresetPrompt, resolveImageStylePreset } from "../utils/canvas-image-style-presets";
@@ -126,6 +126,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (reference.active && reference.kind !== "text") counts[reference.kind] += 1;
         return counts;
     }, { image: 0, video: 0, audio: 0 }), [stableMentionReferences]);
+    const selectedComfyWorkflow = mode === "comfyui" ? comfyWorkflows.find((workflow) => workflow.id === node.metadata?.comfyWorkflowId) : undefined;
     const videoReferenceValidationMessage = mode === "video" && selectedVideoMode && videoCapability
         ? validateVideoReferenceCounts(selectedVideoMode, videoCapability, activeReferenceCounts)
         : "";
@@ -194,7 +195,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     const submit = () => {
         const text = normalizePromptReferences(prompt, stableMentionReferences, mentionLabels).trim();
-        if ((!text && !videoPromptOptional) || isRunning) return;
+        if ((!text && !videoPromptOptional && mode !== "comfyui") || isRunning) return;
+        if (mode === "comfyui" && !selectedComfyWorkflow) {
+            message.warning("请先选择后台已分类的 ComfyUI 工作流");
+            return;
+        }
         if (mode === "video" && (isVideoCapabilityLoading || isVideoCapabilityFetching)) {
             message.info("正在读取当前模型的视频能力，请稍候");
             return;
@@ -358,12 +363,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             ) : null}
             <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" />
 
-            {mode === "comfyui" ? <ComfyUiCapabilityBar node={node} workflows={comfyWorkflows} onConfigChange={onConfigChange} theme={theme} /> : null}
-
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
                     <CanvasPromptLibrary onSelect={updatePrompt} />
-                    {mode === "audio" ? (
+                    {mode === "comfyui" ? (
+                        <ComfyUiWorkflowFilters node={node} workflows={comfyWorkflows} onConfigChange={onConfigChange} theme={theme} />
+                    ) : mode === "audio" ? (
                         <>
                             <div className="w-[150px] shrink-0">
                                 <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} fullWidth />
@@ -383,7 +388,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     type="primary"
                     className="creative-os-primary-action !h-9 !min-w-9 shrink-0 !rounded-full !px-0"
                     danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
+                    disabled={!isRunning && (mode === "comfyui" ? !selectedComfyWorkflow : !prompt.trim())}
                     onClick={isRunning ? () => onStop(node.id) : submit}
                 >
                     <span className="flex items-center gap-1.5">
@@ -1230,6 +1235,7 @@ function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: bool
     if (mode === "video") return "描述你想要生成的画面内容，@引用素材";
     if (mode === "audio") return "描述想要生成的音频内容";
     if (mode === "image") return hasImageContent ? "请输入你想把这张图修改成什么" : "描述想要生成的图片内容";
+    if (mode === "comfyui") return "描述工作流输入，输入 @ 可引用画布素材";
     return hasTextContent ? "请输入你想要将这段文本修改成什么" : "写下你想讲的故事、场景或角色设定";
 }
 
@@ -1291,66 +1297,59 @@ const COMFY_CAPABILITY_HINTS: Record<ComfyUiCapability, string> = {
     "reference-video": "连接图片/视频/音频参考 + 提示词，输出视频节点",
 };
 
-/** 按能力过滤并分组工作流选项（匹配 capability 的工作流 + 未分类兜底）。 */
-function comfyWorkflowOptions(workflows: ComfyWorkflow[], capability: ComfyUiCapability) {
-    const meta = COMFY_CAPABILITY_META[capability];
-    const groups: Array<{ label: string; options: Array<{ value: string; label: string }> }> = [];
-    const matched = workflows.filter((item) => item.capability === capability);
-    const unclassified = workflows.filter((item) => !item.capability);
-    const push = (label: string, items: ComfyWorkflow[]) => {
-        if (!items.length) return;
-        groups.push({ label, options: items.map((item) => ({ value: item.id, label: item.title || item.name })) });
-    };
-    push(meta.label, matched);
-    // 同输出类型下其他能力的工作流与未分类工作流也列出，便于发现与切换
-    const siblings = workflows.filter((item) => { const c = item.capability as ComfyUiCapability | undefined; return c && COMFY_CAPABILITY_META[c]?.output === meta.output && c !== capability; });
-    push("同类型其他能力", siblings);
-    push("未分类", unclassified);
-    return groups;
-}
-
-function ComfyUiCapabilityBar({ node, workflows, onConfigChange, theme }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+function ComfyUiWorkflowFilters({ node, workflows, onConfigChange, theme }: { node: CanvasNodeData; workflows: ComfyWorkflow[]; onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const selectedWorkflowId = node.metadata?.comfyWorkflowId || "";
     const selectedWorkflow = workflows.find((item) => item.id === selectedWorkflowId) || null;
-    const inferred = selectedWorkflow ? inferComfyWorkflowCapability(selectedWorkflow.workflow, selectedWorkflow.fields) : "text-to-image";
-    const capability = node.metadata?.comfyCapability || (selectedWorkflow?.capability as ComfyUiCapability | undefined) || inferred;
-    const output = COMFY_CAPABILITY_META[capability]?.output || "image";
+    const capability = node.metadata?.comfyCapability || (selectedWorkflow?.capability as ComfyUiCapability | undefined) || "text-to-text";
+    const output = COMFY_CAPABILITY_META[capability]?.output || "text";
+    const workflowOptions = workflows
+        .filter((item) => item.capability === capability)
+        .map((item) => ({ value: item.id, label: item.title || item.name }));
+    const updateCapability = (nextCapability: ComfyUiCapability) => {
+        const workflowStillMatches = selectedWorkflow?.capability === nextCapability;
+        onConfigChange(node.id, {
+            comfyCapability: nextCapability,
+            comfyWorkflowId: workflowStillMatches ? selectedWorkflowId : undefined,
+            comfyFieldValues: workflowStillMatches ? node.metadata?.comfyFieldValues : {},
+        });
+    };
 
     return (
-        <div className="mb-2 flex flex-col gap-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-                <Segmented
-                    size="small"
-                    value={output}
-                    onChange={(value: ComfyOutputType) => {
-                        const next = COMFY_CAPABILITY_BY_OUTPUT[value][0];
-                        onConfigChange(node.id, { comfyCapability: next });
-                    }}
-                    options={COMFY_OUTPUT_OPTIONS}
-                />
-                <Segmented
-                    size="small"
-                    value={capability}
-                    onChange={(value: ComfyUiCapability) => onConfigChange(node.id, { comfyCapability: value })}
-                    options={COMFY_CAPABILITY_BY_OUTPUT[output].map((value) => ({ value, label: COMFY_CAPABILITY_META[value].label }))}
-                />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+            <Select
+                size="small"
+                className="w-[82px] shrink-0"
+                value={output}
+                options={COMFY_OUTPUT_OPTIONS}
+                onChange={(value: ComfyOutputType) => updateCapability(COMFY_CAPABILITY_BY_OUTPUT[value][0])}
+            />
+            <Select
+                size="small"
+                className="w-[132px] shrink-0"
+                value={capability}
+                options={COMFY_CAPABILITY_BY_OUTPUT[output].map((value) => ({ value, label: COMFY_CAPABILITY_META[value].label }))}
+                onChange={updateCapability}
+            />
+            <Tooltip title={workflowOptions.length ? COMFY_CAPABILITY_HINTS[capability] : "请先在后台为工作流设置此能力分类"}>
                 <Select
                     size="small"
-                    style={{ minWidth: 220 }}
-                    placeholder="选择 ComfyUI 工作流"
+                    className="min-w-[180px] flex-1"
+                    placeholder="选择工作流"
                     value={selectedWorkflowId || undefined}
-                    onChange={(workflowId) => {
-                        const workflow = workflows.find((item) => item.id === workflowId);
-                        const nextCapability = workflow?.capability as ComfyUiCapability | undefined || (workflow ? inferComfyWorkflowCapability(workflow.workflow, workflow.fields) : capability);
-                        onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: node.metadata?.comfyCapability || nextCapability });
-                    }}
-                    options={comfyWorkflowOptions(workflows, capability)}
+                    options={workflowOptions}
+                    notFoundContent="后台暂无此分类工作流"
+                    onChange={(workflowId) => onConfigChange(node.id, { comfyWorkflowId: workflowId, comfyCapability: capability, comfyFieldValues: {} })}
                 />
-                <span className="text-[11px] leading-5 opacity-60" style={{ color: theme.node.muted }}>{COMFY_CAPABILITY_HINTS[capability]}</span>
-            </div>
-            {selectedWorkflow && selectedWorkflow.fields.length ? <ComfyWorkflowFields fields={selectedWorkflow.fields} values={node.metadata?.comfyFieldValues || {}} onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })} theme={theme} /> : null}
+            </Tooltip>
+            {selectedWorkflow?.fields.length ? (
+                <Popover
+                    trigger="click"
+                    placement="topLeft"
+                    content={<div className="w-[430px] max-w-[70vw]"><ComfyWorkflowFields fields={selectedWorkflow.fields} values={node.metadata?.comfyFieldValues || {}} onValuesChange={(fieldId, value) => onConfigChange(node.id, { comfyFieldValues: { ...(node.metadata?.comfyFieldValues || {}), [fieldId]: value } })} theme={theme} /></div>}
+                >
+                    <Button size="small" className="!h-8 shrink-0 !rounded-lg">参数</Button>
+                </Popover>
+            ) : null}
         </div>
     );
 }

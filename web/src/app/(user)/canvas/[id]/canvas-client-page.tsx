@@ -5548,8 +5548,8 @@ function LeaferCanvasPage() {
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
     const composerWidth = dialogNode
         ? Math.min(
-              isGenerationConfigNode(dialogNode.type) ? 500 : dialogNode.type === CanvasNodeType.Video ? 1040 : dialogNode.type === CanvasNodeType.Image ? 880 : 760,
-              Math.max(isGenerationConfigNode(dialogNode.type) ? 420 : dialogNode.type === CanvasNodeType.Video ? 680 : dialogNode.type === CanvasNodeType.Image ? 620 : 520, composerShellWidth - 48),
+              dialogNode.type === CanvasNodeType.ComfyUI ? 1040 : dialogNode.type === CanvasNodeType.Config ? 500 : dialogNode.type === CanvasNodeType.Video ? 1040 : dialogNode.type === CanvasNodeType.Image ? 880 : 760,
+              Math.max(dialogNode.type === CanvasNodeType.ComfyUI ? 680 : dialogNode.type === CanvasNodeType.Config ? 420 : dialogNode.type === CanvasNodeType.Video ? 680 : dialogNode.type === CanvasNodeType.Image ? 620 : 520, composerShellWidth - 48),
           )
         : 0;
     dialogNodeRef.current = dialogNode;
