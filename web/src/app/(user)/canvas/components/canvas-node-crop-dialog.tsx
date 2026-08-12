@@ -5,20 +5,14 @@ import { Button, Modal } from "antd";
 import { Check, Lock, LockOpen, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
+import { moveCrop, resizeCrop, type CanvasCropRect, type CropResizeHandle } from "../utils/canvas-crop-geometry";
 
-export type CanvasImageCropRect = {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-};
+export type CanvasImageCropRect = CanvasCropRect;
 
 type DragMode = "move" | "resize";
-type ResizeHandle = "n" | "e" | "s" | "w" | "ne" | "nw" | "se" | "sw";
 
-const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-const minSize = 0.06;
-const defaultCrop = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
+const handles: CropResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const defaultCrop: CanvasCropRect = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 
 export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
     const boxRef = useRef<HTMLDivElement>(null);
@@ -36,7 +30,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
         void readImageMeta(dataUrl).then(setImage);
     }, [dataUrl, open]);
 
-    const startDrag = (mode: DragMode, event: ReactPointerEvent, handle?: ResizeHandle) => {
+    const startDrag = (mode: DragMode, event: ReactPointerEvent, handle?: CropResizeHandle) => {
         const box = boxRef.current?.getBoundingClientRect();
         if (!box) return;
         event.preventDefault();
@@ -114,41 +108,11 @@ function CropMask({ crop }: { crop: CanvasImageCropRect }) {
     );
 }
 
-function moveCrop(crop: CanvasImageCropRect, dx: number, dy: number): CanvasImageCropRect {
-    return { ...crop, x: clamp(crop.x + dx, 0, 1 - crop.width), y: clamp(crop.y + dy, 0, 1 - crop.height) };
-}
-
-function resizeCrop(crop: CanvasImageCropRect, dx: number, dy: number, handle: ResizeHandle, locked: boolean, box: DOMRect): CanvasImageCropRect {
-    let next = { ...crop };
-    if (handle.includes("e")) next.width = crop.width + dx;
-    if (handle.includes("s")) next.height = crop.height + dy;
-    if (handle.includes("w")) {
-        next.x = crop.x + dx;
-        next.width = crop.width - dx;
-    }
-    if (handle.includes("n")) {
-        next.y = crop.y + dy;
-        next.height = crop.height - dy;
-    }
-    if (locked) {
-        const size = Math.max(next.width * box.width, next.height * box.height);
-        next.width = size / box.width;
-        next.height = size / box.height;
-        if (handle.includes("w")) next.x = crop.x + crop.width - next.width;
-        if (handle.includes("n")) next.y = crop.y + crop.height - next.height;
-    }
-    next.width = clamp(next.width, minSize, 1);
-    next.height = clamp(next.height, minSize, 1);
-    next.x = clamp(next.x, 0, 1 - next.width);
-    next.y = clamp(next.y, 0, 1 - next.height);
-    return next;
-}
-
 function cropStyle(crop: CanvasImageCropRect) {
     return { left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.width * 100}%`, height: `${crop.height * 100}%` };
 }
 
-function handleStyle(handle: ResizeHandle) {
+function handleStyle(handle: CropResizeHandle) {
     const top = handle.includes("n") ? "-6px" : handle.includes("s") ? "calc(100% - 6px)" : "calc(50% - 6px)";
     const left = handle.includes("w") ? "-6px" : handle.includes("e") ? "calc(100% - 6px)" : "calc(50% - 6px)";
     return { top, left, cursor: `${handle}-resize` };
