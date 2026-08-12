@@ -4875,9 +4875,9 @@ function LeaferCanvasPage() {
             setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
-            void handleGenerateNode(node.id, target, prompt, target === "comfyui" ? comfyui.defaultWorkflowId : undefined);
+            setDialogNodeId(node.id);
         },
-        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
+        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, handleConfigNodeChange],
     );
 
     const exportScriptBeatNodes = useCallback(
