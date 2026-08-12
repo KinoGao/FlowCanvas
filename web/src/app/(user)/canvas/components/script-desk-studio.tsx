@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { Button, Dropdown, Select } from "antd";
-import { Clapperboard, Image as ImageIcon, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
+import { Clapperboard, Download, Image as ImageIcon, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 import { buildScriptBeats } from "../utils/canvas-script-beats";
@@ -41,6 +41,7 @@ export function ScriptDeskStudio({
     onAssetRemove,
     onGenerateBeat,
     onGenerateAsset,
+    onExportBeats,
     outputStates,
 }: {
     node: CanvasNodeData;
@@ -59,6 +60,7 @@ export function ScriptDeskStudio({
     onAssetRemove: (assetId: string) => void;
     onGenerateBeat: (beat: CanvasScriptBeat, index: number, target: "video" | "comfyui") => void;
     onGenerateAsset: (asset: CanvasScriptAsset, target: "image" | "comfyui") => void;
+    onExportBeats: (target: "video" | "comfyui") => void;
     outputStates: Record<string, ScriptOutputState>;
 }) {
     const body = node.metadata?.scriptBody ?? node.metadata?.content ?? "";
@@ -98,6 +100,18 @@ export function ScriptDeskStudio({
                             从上游导入
                         </Button>
                     ) : null}
+                    <Dropdown
+                        menu={{
+                            items: [
+                                { key: "video", label: "导出为视频节点", icon: <Clapperboard className="size-3.5" /> },
+                                { key: "comfyui", label: "导出为 ComfyUI 节点", icon: <Workflow className="size-3.5" /> },
+                            ],
+                            onClick: ({ key }) => onExportBeats(key as "video" | "comfyui"),
+                        }}
+                        disabled={!beats.length}
+                    >
+                        <Button icon={<Download className="size-4" />}>导出</Button>
+                    </Dropdown>
                     <Button type="text" shape="circle" icon={<X className="size-4" />} onClick={onClose} aria-label="关闭脚本工作台" />
                 </div>
             </div>
@@ -176,7 +190,7 @@ export function ScriptDeskStudio({
                 <div className="flex min-h-0 flex-col p-4">
                     <div className="mb-2 flex items-center justify-between">
                         <div className="text-sm font-medium opacity-70">分镜表</div>
-                        <div className="text-xs opacity-45">{beats.length} 个分镜 · 点「生成」可将分镜导出为视频或 ComfyUI 节点</div>
+                        <div className="text-xs opacity-45">{beats.length} 个分镜 · 逐镜点「生成」选视频 / ComfyUI 节点，或「导出」批量创建节点</div>
                     </div>
                     <div className="thin-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                         <table className="w-full border-collapse text-left text-xs">

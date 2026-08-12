@@ -4880,6 +4880,47 @@ function LeaferCanvasPage() {
         [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, handleConfigNodeChange, handleGenerateNode],
     );
 
+    const exportScriptBeatNodes = useCallback(
+        (scriptNode: CanvasNodeData, target: "video" | "comfyui") => {
+            const beats = scriptNode.metadata?.scriptBeats ?? [];
+            if (!beats.length) {
+                message.warning("分镜表为空，无法导出");
+                return;
+            }
+            const type = target === "video" ? CanvasNodeType.Video : CanvasNodeType.ComfyUI;
+            const spec = NODE_DEFAULT_SIZE[type];
+            const startX = scriptNode.position.x + scriptNode.width + 96;
+            const startY = scriptNode.position.y;
+            const exportedNodes = beats.map((beat, index) => {
+                const exportText = buildScriptBeatExportText(beat);
+                const position = { x: startX, y: startY + index * (spec.height + 36) };
+                const metadata: CanvasNodeMetadata =
+                    target === "video"
+                        ? { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model }
+                        : { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId };
+                return {
+                    ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
+                    position,
+                    width: spec.width,
+                    height: spec.height,
+                } satisfies CanvasNodeData;
+            });
+            const outputIds = exportedNodes.map((node) => node.id);
+            nodesRef.current = [...nodesRef.current, ...exportedNodes];
+            connectionsRef.current = [...connectionsRef.current, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
+            setNodes((prev) => [
+                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []), ...outputIds] } } : node)),
+                ...exportedNodes,
+            ]);
+            setConnections((prev) => [...prev, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
+            setSelectedNodeIds(new Set(outputIds));
+            setSelectedConnectionId(null);
+            setDialogNodeId(exportedNodes[0]?.id ?? null);
+            message.success(`已导出 ${exportedNodes.length} 个分镜为${target === "video" ? "视频" : "ComfyUI"}节点，可在 composer 中继续编辑`);
+        },
+        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.videoModel, message],
+    );
+
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
         const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
@@ -5934,6 +5975,7 @@ function LeaferCanvasPage() {
                         onAssetRemove={(assetId) => handleScriptAssetRemove(scriptStudioNode, assetId)}
                         onGenerateBeat={(beat, index, target) => createScriptBeatNode(scriptStudioNode, beat, index, target)}
                         onGenerateAsset={(asset, target) => generateScriptAssetNode(scriptStudioNode, asset, target)}
+                        onExportBeats={(target) => exportScriptBeatNodes(scriptStudioNode, target)}
                         outputStates={scriptOutputStates}
                     />
                 ) : null}
