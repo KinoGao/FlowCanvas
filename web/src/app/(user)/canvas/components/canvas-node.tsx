@@ -665,7 +665,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Text]: TextContent,
     [CanvasNodeType.Image]: ImageNodeContent,
     [CanvasNodeType.Config]: EmptyImageContent,
-    [CanvasNodeType.ComfyUI]: EmptyImageContent,
+    [CanvasNodeType.ComfyUI]: ComfyUiContent,
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupContent,
@@ -1341,6 +1341,15 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
             onSetBatchPrimary={props.onSetBatchPrimary}
+        />
+    );
+}
+
+function ComfyUiContent({ theme, onOpenComposer }: NodeContentRendererProps) {
+    return (
+        <NodeStarterPanel kind="comfyui"
+            theme={theme}
+            actions={[{ label: "配置工作流并运行", onClick: () => onOpenComposer?.() }]}
         />
     );
 }

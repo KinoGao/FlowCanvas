@@ -5032,7 +5032,7 @@ function LeaferCanvasPage() {
 
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
-            isGenerationConfigNode(panelNode.type) ? (
+            panelNode.type === CanvasNodeType.Config ? (
                 <CanvasConfigComposer
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}

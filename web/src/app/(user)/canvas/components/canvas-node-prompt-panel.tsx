@@ -1127,7 +1127,7 @@ function RatioIcon({ ratio }: { ratio: string }) {
 }
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
-    return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
+    return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : type === CanvasNodeType.ComfyUI ? "comfyui" : "image";
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {
