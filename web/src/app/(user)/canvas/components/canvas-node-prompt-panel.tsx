@@ -99,7 +99,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
-    const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.prompt || "");
+    const [prompt, setPrompt] = useState(isEditingExistingContent ? "" : node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
     useEffect(() => {
         if (node.type !== CanvasNodeType.ComfyUI) return;
         let cancelled = false;

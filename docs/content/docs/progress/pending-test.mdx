@@ -14,6 +14,18 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 
 
+## 脚本工作台导出 ComfyUI 节点提示词只存 Composer
+
+- 修复脚本工作台导出（分镜/资产）的 ComfyUI 节点把提示词写入节点级 `metadata.prompt` 的问题：导出节点现在只设置 `composerContent`；ComfyUI 节点 Composer 编辑写入 `composerContent`（`handleNodePromptChange` 按节点类型分流），重试/恢复生成优先读 `composerContent`。用户修改 Composer 提示词即可生效，不再被节点旧提示词覆盖。
+- 缩小画布（<50%）时 ComfyUI / Config / Audio 节点的 Leafer 文本只显示标题，不再显示提示词，避免遮挡画布内容。
+- 需要确认：脚本工作台导出 ComfyUI 节点后，节点本体不显示提示词（缩小画布时只显示标题）；Composer 中可编辑提示词且修改后生成生效；重试生成用 Composer 最新提示词；视频节点导出（prompt + composerContent 并存）行为不变。
+
+## 脚本工作台导出 ComfyUI 节点提示词只存 Composer
+
+- 修复脚本工作台导出（分镜/资产）的 ComfyUI 节点把提示词写入节点级 `metadata.prompt` 的问题：导出节点现在只设置 `composerContent`；ComfyUI 节点 Composer 编辑写入 `composerContent`（`handleNodePromptChange` 按节点类型分流），重试/恢复生成优先读 `composerContent`。用户修改 Composer 提示词即可生效，不再被节点旧提示词覆盖。
+- 缩小画布（<50%）时 ComfyUI / Config / Audio 节点的 Leafer 文本只显示标题，不再显示提示词，避免遮挡画布内容。
+- 需要确认：脚本工作台导出 ComfyUI 节点后，节点本体不显示提示词（缩小画布时只显示标题）；Composer 中可编辑提示词且修改后生成生效；重试生成用 Composer 最新提示词；视频节点导出（prompt + composerContent 并存）行为不变。
+
 ## 脚本节点不参与上游文本引用
 
 - 脚本节点（canvasTool="script"）明确不作为上游文本资源：脚本正文是剧本工作台内容，即使链接到下游节点也不被引用——Composer 引用列表、上游文本拼接、标签收集均排除脚本节点。
@@ -369,9 +381,3 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 ## Canvas Minimum Zoom
 
-- 画布滚轮、加减按钮和快捷键统一按当前比例的 20% 递增或递减（例如当前为 20%、40%、70% 时，一次放大约增加 4%、8%、14%）；手动百分比输入、旧画布视口恢复和适合屏幕统一限制在 `20%–125%`。需要确认所有缩放入口均不会越界，滚轮缩放保持以鼠标位置为中心，旧项目中超过范围的缩放值会自动收口。
-
-
-## Leafer Canvas Interaction Engine
-
-- Leafer 拖动和连线仍按动画帧直接更新视觉位置，React 节点状态改为约 10fps 同步并在松手时强制提交最终位置；未选中的 DOM 节点保持挂载，同时允许浏览器跳过视口外绘制。需要在 100 个以上节点的画布中确认拖动连续、连线不脱离、松手后位置准确且媒体不会重新请求。

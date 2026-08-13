@@ -2869,6 +2869,12 @@ function LeaferCanvasPage() {
         setNodes((prev) =>
             prev.map((node) => {
                 if (node.id !== nodeId) return node;
+                // ComfyUI 节点：提示词只存 composerContent（Composer 编辑区），不写入节点级 prompt，
+                // 避免缩小画布时节点显示提示词、生成时强制引用节点 prompt 而忽略用户修改。
+                if (node.type === CanvasNodeType.ComfyUI) {
+                    if (node.metadata?.composerContent === prompt) return node;
+                    return { ...node, metadata: { ...node.metadata, composerContent: prompt } };
+                }
                 if (node.metadata?.prompt === prompt) return node;
                 return { ...node, metadata: { ...node.metadata, prompt } };
             }),
@@ -4313,7 +4319,7 @@ function LeaferCanvasPage() {
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData, resume = false) => {
             if (node.type === CanvasNodeType.ComfyUI) {
-                await generateNodeRef.current?.(node.id, "comfyui", node.metadata?.prompt || "");
+                await generateNodeRef.current?.(node.id, "comfyui", node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
                 return;
             }
             if (resume && node.type === CanvasNodeType.Image && node.metadata?.model === "ComfyUI" && node.metadata.comfyWorkflowId && node.metadata.generationJobId) {
@@ -4810,7 +4816,7 @@ function LeaferCanvasPage() {
             const prompt = buildScriptBeatExportText(beat);
             const metadata: CanvasNodeMetadata =
                 target === "comfyui"
-                    ? { status: NODE_STATUS_IDLE, prompt, composerContent: prompt, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId }
+                    ? { status: NODE_STATUS_IDLE, composerContent: prompt, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId }
                     : { status: NODE_STATUS_IDLE, prompt, composerContent: prompt, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model };
             const node: CanvasNodeData = {
                 ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
@@ -4886,7 +4892,7 @@ function LeaferCanvasPage() {
             const prompt = buildAssetPrompt(asset);
             const metadata: CanvasNodeMetadata =
                 target === "comfyui"
-                    ? { status: NODE_STATUS_IDLE, prompt, composerContent: prompt, generationMode: "comfyui", comfyCapability: "text-to-image", comfyWorkflowId: comfyui.defaultWorkflowId }
+                    ? { status: NODE_STATUS_IDLE, composerContent: prompt, generationMode: "comfyui", comfyCapability: "text-to-image", comfyWorkflowId: comfyui.defaultWorkflowId }
                     : { status: NODE_STATUS_IDLE, prompt, generationMode: "image", generationType: "generation" };
             const node: CanvasNodeData = {
                 ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
@@ -4923,7 +4929,7 @@ function LeaferCanvasPage() {
                 const metadata: CanvasNodeMetadata =
                     target === "video"
                         ? { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model }
-                        : { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId };
+                        : { status: NODE_STATUS_IDLE, composerContent: exportText, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId };
                 return {
                     ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
                     position,
