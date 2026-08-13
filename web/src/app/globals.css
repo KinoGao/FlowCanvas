@@ -1089,32 +1089,6 @@
         visibility: hidden;
     }
 
-    /* 远景缩放时保留可读的节点标题/类型标签（对齐 TapNow），反向缩放抵消视口 scale */
-    .canvas-node-overview-label {
-        display: none;
-    }
-
-    .node-element[data-leafer-overview="true"] .canvas-node-overview-label {
-        position: absolute;
-        bottom: 100%;
-        left: 0;
-        z-index: 5;
-        display: inline-flex;
-        max-width: 260px;
-        margin-bottom: 8px;
-        padding: 3px 8px;
-        overflow: hidden;
-        border: 1px solid;
-        border-radius: 6px;
-        font-size: 12px;
-        line-height: 1.4;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        pointer-events: none;
-        transform: scale(calc(1 / var(--canvas-k, 1)));
-        transform-origin: bottom left;
-    }
-
     .creative-os-composer {
         border-radius: 8px;
         transform-origin: top center;

@@ -19,6 +19,18 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 需要确认：在线 Agent 与本地 Agent（production 模式）的「导演」下拉可选择 8 位导演风格，选中后生成的分镜/图片/视频提示词呈现对应导演的镜头语言与用光色彩特征，清空后恢复默认；脚本节点「AI 拆解」与视频节点「解析」生成的分镜表在角色服饰、场景细节上前后一致，不出现跳戏；未选择任何风格时 Agent 仍按影视制作规范组织提示词。
 
 
+## 画布缩放后连线端口命中与节点标签清理
+
+- 端口磁吸区补全缩放补偿：除磁吸条（加宽到 64px 屏幕恒定）与 96px 磁吸区外，圆球本体（32px）、激活光晕（6px）、+ 号笔画也按 1/k 补偿，缩小画布时圆球保持清晰可点，放大画布时不过度膨胀。
+- 移除远景缩放（zoom < 0.5，overview）时节点上方的名称/类型标签：删除 overview 标签组件与其全局 CSS，普通节点标题徽标（NodeTitleBadge）在 overview 时不再渲染；分组标题保留。缩小画布后不再有标签按比例显示遮挡画布内容。
+- 需要确认：缩小到 10%~50% 时节点两侧圆球清晰可见且可直接拉线；放大到 300% 时圆球/磁吸区不偏离节点过多；overview 缩放时节点上方无任何名称/类型标签遮挡；恢复到正常缩放（≥0.5）后标题徽标恢复显示；分组标题不受影响。
+
+## 画布缩放后连线端口命中与节点标签清理
+
+- 端口磁吸区补全缩放补偿：除磁吸条（加宽到 64px 屏幕恒定）与 96px 磁吸区外，圆球本体（32px）、激活光晕（6px）、+ 号笔画也按 1/k 补偿，缩小画布时圆球保持清晰可点，放大画布时不过度膨胀。
+- 移除远景缩放（zoom < 0.5，overview）时节点上方的名称/类型标签：删除 overview 标签组件与其全局 CSS，普通节点标题徽标（NodeTitleBadge）在 overview 时不再渲染；分组标题保留。缩小画布后不再有标签按比例显示遮挡画布内容。
+- 需要确认：缩小到 10%~50% 时节点两侧圆球清晰可见且可直接拉线；放大到 300% 时圆球/磁吸区不偏离节点过多；overview 缩放时节点上方无任何名称/类型标签遮挡；恢复到正常缩放（≥0.5）后标题徽标恢复显示；分组标题不受影响。
+
 ## 画布缩放后连线端口命中修复
 
 - 修复画布缩小（zoom < 1）后节点左右连接端口（+ 圆球）无法识别的问题：端口磁吸区（48px 磁吸条、96px 磁吸区、-58px 外延）原为画布坐标固定值，节点处于 `scale(k)` 缩放容器内，缩小后磁吸区屏幕尺寸随之变小，鼠标难以命中，必须放大画布才能出现圆球拉线。
@@ -368,9 +380,3 @@ description: 当前版本已实现但仍需人工验证的变更项
 - Canvas nodes are mounted once when the project opens and are no longer added or removed according to the current viewport. Leafer panning and zooming only transform the canvas layer; image, video and audio elements do not use viewport `content-visibility` pruning, and audio remains mounted even when its low-zoom summary is rendered by Leafer. Collapsed batch children remain the only intentionally hidden nodes. Confirm on a large canvas that repeated panning and zooming preserve media readiness, video playback position, audio state, text editing state, and stable request counts.
 
 ## Canvas Node Panels
-
-- Empty text, image, and video nodes now expose a compact spotlight card with node-specific identity, guidance, and action rows; ComfyUI keeps its existing controls inside the same material system. Confirm light and dark themes, image/video readability, node dragging, resize handles, selection, and connection creation on both dense and sparse canvases.
-
-## Canvas Generation Run Ledger
-
-- Generation nodes now persist up to six recent runs in node metadata, including the run ID, model, mode, prompt snapshot, status, and error details. The Composer exposes the current run state, refresh-resume hint, recent run list, and a direct retry action for failed runs; the loading node also makes the refresh-resume behavior visible. Confirm text, image, video, audio, and ComfyUI runs across success, failure, stop, refresh, and reopen flows, and verify that a retry creates a new run without removing the previous record.

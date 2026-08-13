@@ -21,17 +21,6 @@ import { useCanvasScaleRef } from "./canvas-scale-context";
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
-/** 远景缩放（overview）时节点上方显示的类型兜底文案。 */
-const NODE_OVERVIEW_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
-    [CanvasNodeType.Image]: "图片",
-    [CanvasNodeType.Video]: "视频",
-    [CanvasNodeType.Audio]: "音频",
-    [CanvasNodeType.Text]: "文本",
-    [CanvasNodeType.ComfyUI]: "工作流",
-    [CanvasNodeType.Config]: "配置",
-    [CanvasNodeType.Group]: "分组",
-};
-
 type ResizeStartEvent = React.PointerEvent;
 
 function isGenerationConfigNode(type: CanvasNodeType) {
@@ -510,11 +499,6 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
-            {editorManaged ? (
-                <div className="canvas-node-overview-label" style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}>
-                    {data.title?.trim() || NODE_OVERVIEW_TYPE_LABEL[data.type] || "节点"}
-                </div>
-            ) : null}
             <Card
                 className="creative-os-node canvas-node-card relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
@@ -591,7 +575,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />}
                 </div>
 
-                {!isGroup ? <NodeTitleBadge node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
+                {!isGroup && !shouldUseOverview ? <NodeTitleBadge node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
@@ -1890,7 +1874,7 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             data-handle
             data-handle-type={isSource ? "source" : "target"}
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
-            style={{ [side]: `${-58 / scaleRef.current}px`, width: `${48 / scaleRef.current}px` }}
+            style={{ [side]: `${-64 / scaleRef.current}px`, width: `${64 / scaleRef.current}px` }}
         >
             {/* 磁吸区在屏幕上保持恒定大小（约 96px），缩放时按 1/k 反向补偿，
                 否则缩小画布后磁吸条被压窄、鼠标难以命中，必须放大才能连线。 */}
@@ -1903,16 +1887,18 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             >
                 <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
                     <span
-                        className={`canvas-node-connection-dot pointer-events-none relative grid size-8 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                        className={`canvas-node-connection-dot pointer-events-none relative grid place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                         style={{
+                            width: `${32 / scaleRef.current}px`,
+                            height: `${32 / scaleRef.current}px`,
                             background: active ? theme.ui.accent : theme.ui.materialElevated,
                             borderColor: active ? theme.ui.accent : theme.node.stroke,
                             color: active ? theme.canvas.background : theme.node.muted,
-                            boxShadow: active ? `0 0 0 6px ${theme.ui.accentSoft}` : undefined,
+                            boxShadow: active ? `0 0 0 ${6 / scaleRef.current}px ${theme.ui.accentSoft}` : undefined,
                         }}
                     >
-                        <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-                        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                        <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style={{ height: `${12 / scaleRef.current}px`, width: `${1.5 / scaleRef.current}px` }} />
+                        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style={{ height: `${1.5 / scaleRef.current}px`, width: `${12 / scaleRef.current}px` }} />
                     </span>
                 </span>
             </span>
