@@ -21,7 +21,28 @@ export type UploadedImage = {
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
 const imageBlobs = createBlobStorage(store);
 
+const dataUrlUploadCache = new Map<string, UploadedImage>();
+
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+    const cacheKey = typeof input === "string" && input.startsWith("data:") ? input : null;
+    if (cacheKey) {
+        const cached = dataUrlUploadCache.get(cacheKey);
+        if (cached) {
+            // 后端签名 URL 过期时重新签名，但不重复上传
+            if (cached.storageKey.startsWith("backend:")) {
+                const token = useUserStore.getState().token || "";
+                if (token && !peekBackendFileUrl(cached.storageKey, token)) {
+                    try {
+                        const url = await resolveBackendFileUrl(cached.storageKey, token);
+                        if (url) return { ...cached, url };
+                    } catch {
+                        // 签名失败时回退缓存结果
+                    }
+                }
+            }
+            return cached;
+        }
+    }
     const blob = typeof input === "string" ? await fetchImageBlob(input) : input;
     const { saveMode, token } = useUserStore.getState();
     if (saveMode === "backend") {
@@ -34,7 +55,12 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     const storageKey = `image:${nanoid()}`;
     const url = await imageBlobs.setBlob(storageKey, blob);
     const meta = await readImageMeta(url);
-    return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
+    const result: UploadedImage = { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
+    if (cacheKey) {
+        if (dataUrlUploadCache.size >= 200) dataUrlUploadCache.clear();
+        dataUrlUploadCache.set(cacheKey, result);
+    }
+    return result;
 }
 
 /** Synchronous check for a cached blob URL. Returns undefined if not yet resolved. */

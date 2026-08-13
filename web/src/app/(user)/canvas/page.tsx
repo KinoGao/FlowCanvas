@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
 import { readZip } from "@/lib/zip";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 import { replaceBackendStorageReferences, uploadBackendFile, type BackendUploadedFile } from "@/services/api/backend-storage";
 import { setMediaBlob } from "@/services/file-storage";
 import { setImageBlob } from "@/services/image-storage";
@@ -14,7 +16,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "./components/canvas-project-card";
 import type { CanvasExportFile } from "./export-types";
-import { useCanvasStore } from "./stores/use-canvas-store";
+import { useCanvasStore, type CanvasProject } from "./stores/use-canvas-store";
+import { countProjectMedia, preloadCanvasMedia } from "./utils/canvas-media-preload";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
 import { exportCanvasProjects } from "./utils/canvas-export";
 
@@ -35,9 +38,26 @@ export default function CanvasPage() {
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
 
-    const enterProject = (id: string) => {
-        navigate(`/canvas/${id}`);
-    };
+    const [enteringProject, setEnteringProject] = useState<CanvasProject | null>(null);
+    const enterProject = useCallback(
+        (id: string) => {
+            const project = projects.find((item) => item.id === id);
+            if (!project) {
+                navigate(`/canvas/${id}`);
+                return;
+            }
+            setEnteringProject(project);
+            void (async () => {
+                try {
+                    // 预加载媒体内容（上传 data:image 图片、预热签名 URL），超时兜底不阻塞进入画布
+                    await Promise.race([preloadCanvasMedia(project), new Promise<void>((resolve) => setTimeout(resolve, 12000))]);
+                } finally {
+                    navigate(`/canvas/${id}`);
+                }
+            })();
+        },
+        [navigate, projects],
+    );
     const createAndEnter = () => enterProject(createProject(`无限画布 ${projects.length + 1}`));
     const importCanvas = async (file?: File) => {
         if (!file) return;
@@ -88,6 +108,7 @@ export default function CanvasPage() {
     if (!backendWorkspaceReady) return <BackendWorkspaceGate title="画布工作区" />;
 
     return (
+        <>
         <main className="h-full overflow-auto bg-background text-foreground">
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
@@ -134,7 +155,7 @@ export default function CanvasPage() {
                 ) : projects.length ? (
                     <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                         {projects.map((project) => (
-                            <CanvasProjectCard key={project.id} project={project} />
+                            <CanvasProjectCard key={project.id} project={project} onOpen={() => enterProject(project.id)} />
                         ))}
                     </div>
                 ) : (
@@ -150,6 +171,45 @@ export default function CanvasPage() {
 
             <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
             <CanvasDeleteProjectsDialog />
-        </main>
+            </main>
+            {enteringProject ? <CanvasEnteringCover project={enteringProject} /> : null}
+        </>
+    );
+}
+
+function CanvasEnteringCover({ project }: { project: CanvasProject }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const stats = useMemo(() => countProjectMedia(project), [project]);
+    const mediaText = stats.total
+        ? `${stats.images} 张图片 · ${stats.videos} 个视频 · ${stats.audios} 个音频`
+        : "画布内容";
+    return (
+        <div
+            className="fixed inset-0 z-[300] grid place-items-center"
+            style={{ backgroundColor: theme.canvas.background }}
+            aria-live="polite"
+            aria-busy="true"
+        >
+            <div className="flex flex-col items-center gap-6">
+                <div className="relative size-16">
+                    <div
+                        className="absolute inset-0 animate-spin rounded-full border-2 border-transparent"
+                        style={{ borderTopColor: theme.ui.accent, borderRightColor: theme.ui.accentSoft, borderBottomColor: theme.ui.accentSoft }}
+                    />
+                    <div
+                        className="absolute inset-3 animate-pulse rounded-full"
+                        style={{ background: theme.ui.accent, boxShadow: `0 0 0 6px ${theme.ui.accentSoft}` }}
+                    />
+                </div>
+                <div className="text-center">
+                    <p className="text-base font-medium" style={{ color: theme.node.text }}>
+                        {project.title}
+                    </p>
+                    <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>
+                        正在加载{mediaText}…
+                    </p>
+                </div>
+            </div>
+        </div>
     );
 }
