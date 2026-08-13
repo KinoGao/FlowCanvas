@@ -57,7 +57,8 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
     const layoutSignature = layout.items.map((item) => `${item.clip.id}:${item.start}:${item.end}`).join("|") + `|${layout.totalDuration}`;
 
     const updatePlayhead = useCallback((time: number) => {
-        if (playheadRef.current === time) return;
+        // 容差比较：拖动/播放的浮点值微小抖动不触发 setState，避免受控 Slider 校正死循环。
+        if (Math.abs(playheadRef.current - time) < 0.001) return;
         playheadRef.current = time;
         setPlayhead(time);
     }, []);
@@ -257,7 +258,11 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                         max={Math.max(layout.totalDuration, 0.01)}
                         step={0.05}
                         value={Math.min(playhead, layout.totalDuration)}
-                        onChange={(value) => applyPlayhead(value)}
+                        onChange={(value) => {
+                            // 拖动播放头：与当前值一致时不重复 setState，避免受控循环。
+                            if (Math.abs(value - playheadRef.current) < 0.001) return;
+                            applyPlayhead(value);
+                        }}
                         tooltip={{ formatter: (value) => formatTrimTime(value ?? 0) }}
                     />
                     <span className="shrink-0 text-xs tabular-nums opacity-70">
@@ -309,7 +314,20 @@ export function CanvasVideoCompositionDialog({ open, sources, onClose, onExport 
                             value={[selectedVideoItem.clip.inPoint, selectedVideoItem.clip.outPoint]}
                             onChange={(value) => {
                                 const [start, end] = value as [number, number];
-                                setVideoClips((current) => current.map((clip) => (clip.id === selectedVideoItem.clip.id ? updateClipRange(clip, start, end) : clip)));
+                                setVideoClips((current) => {
+                                    // 用 updateClipRange 的结果回写，但仅在实际变化时触发渲染；
+                                    // 浮点误差（如 2.3499999999999996）经 roundTime 对齐后与 Slider
+                                    // value 不一致会触发 antd 受控校正死循环，这里保持结果稳定。
+                                    let changed = false;
+                                    const next = current.map((clip) => {
+                                        if (clip.id !== selectedVideoItem.clip.id) return clip;
+                                        const updated = updateClipRange(clip, start, end);
+                                        if (updated.inPoint === clip.inPoint && updated.outPoint === clip.outPoint) return clip;
+                                        changed = true;
+                                        return updated;
+                                    });
+                                    return changed ? next : current;
+                                });
                             }}
                             tooltip={{ formatter: (value) => formatTrimTime(value ?? 0) }}
                         />
