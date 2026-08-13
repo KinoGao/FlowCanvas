@@ -257,6 +257,8 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 }
 
 function readNodeTextInput(node: CanvasNodeData) {
+    // 脚本节点（canvasTool="script"）正文在 scriptBody，同样作为上游文本输入。
+    if (node.metadata?.canvasTool === "script") return node.metadata?.scriptBody || node.metadata?.content || node.metadata?.prompt || "";
     if (node.type === CanvasNodeType.Text) return node.metadata?.content || node.metadata?.prompt || "";
     return node.metadata?.prompt || "";
 }

@@ -207,3 +207,89 @@ test("collects all upstream reference images when prompt mentions multiple label
     const result = buildNodeGenerationContext(target.id, nodes, connections, "参考图片1 让色彩对比移动 图片2 中的位置关系");
     assert.equal(result.referenceImages.length, 2, "应收集两张上游参考图");
 });
+
+test("collects all upstream reference images when prompt mentions 5 labels", () => {
+    const nodes: CanvasNodeData[] = [];
+    const connections: CanvasConnection[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+        nodes.push({
+            id: `img-${i}`,
+            type: CanvasNodeType.Image,
+            title: `图片节点 ${i}`,
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 180,
+            metadata: { content: `data:image/png;base64,IMG${i}`, storageKey: `backend:${i}` },
+        });
+        connections.push({ id: `e${i}`, fromNodeId: `img-${i}`, toNodeId: "img-target" });
+    }
+    nodes.push({
+        id: "img-target",
+        type: CanvasNodeType.Image,
+        title: "目标图片",
+        position: { x: 500, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: {},
+    });
+    const result = buildNodeGenerationContext("img-target", nodes, connections, "请结合 图片1、图片2、图片3、图片4、图片5 生成一张综合效果图");
+    assert.equal(result.referenceImages.length, 5, "应收集五张上游参考图");
+    assert.equal(result.imageCount, 5);
+});
+
+test("label matching does not confuse 图片1 with 图片10", () => {
+    const nodes: CanvasNodeData[] = [];
+    const connections: CanvasConnection[] = [];
+    for (let i = 1; i <= 2; i += 1) {
+        nodes.push({
+            id: `img-${i}`,
+            type: CanvasNodeType.Image,
+            title: `图片节点 ${i}`,
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 180,
+            metadata: { content: `data:image/png;base64,IMG${i}`, storageKey: `backend:${i}` },
+        });
+        connections.push({ id: `e${i}`, fromNodeId: `img-${i}`, toNodeId: "img-target" });
+    }
+    nodes.push({
+        id: "img-target",
+        type: CanvasNodeType.Image,
+        title: "目标图片",
+        position: { x: 500, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: {},
+    });
+    // 提示词提到 图片10（不存在）和 图片1（存在）
+    const result = buildNodeGenerationContext("img-target", nodes, connections, "参考 图片10 和 图片1 的构图");
+    assert.equal(result.referenceImages.length, 1, "图片10 不应被当作 图片1 匹配");
+    assert.equal(result.referenceImages[0]?.id, "img-1");
+});
+
+test("script node (canvasTool=script) is collected as upstream text reference", () => {
+    const scriptNode: CanvasNodeData = {
+        id: "script-1",
+        type: CanvasNodeType.Text,
+        title: "剧本节点",
+        position: { x: 0, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: { canvasTool: "script", scriptBody: "第一幕：主角在雨夜走进咖啡馆。" },
+    };
+    const target: CanvasNodeData = {
+        id: "img-target",
+        type: CanvasNodeType.Image,
+        title: "目标图片",
+        position: { x: 500, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: {},
+    };
+    const nodes = [scriptNode, target];
+    const connections: CanvasConnection[] = [{ id: "e1", fromNodeId: scriptNode.id, toNodeId: target.id }];
+    const result = buildNodeGenerationContext(target.id, nodes, connections, "根据剧本生成封面图");
+    assert.equal(result.textCount, 1, "脚本节点应作为文本输入收集");
+    assert.equal(result.inputs[0]?.type, "text");
+    assert.ok(result.prompt.includes("第一幕：主角在雨夜走进咖啡馆。"), "脚本正文应拼入提示词");
+});
