@@ -19,6 +19,18 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 需要确认：在线 Agent 与本地 Agent（production 模式）的「导演」下拉可选择 8 位导演风格，选中后生成的分镜/图片/视频提示词呈现对应导演的镜头语言与用光色彩特征，清空后恢复默认；脚本节点「AI 拆解」与视频节点「解析」生成的分镜表在角色服饰、场景细节上前后一致，不出现跳戏；未选择任何风格时 Agent 仍按影视制作规范组织提示词。
 
 
+## 画布缩放后连线端口命中修复
+
+- 修复画布缩小（zoom < 1）后节点左右连接端口（+ 圆球）无法识别的问题：端口磁吸区（48px 磁吸条、96px 磁吸区、-58px 外延）原为画布坐标固定值，节点处于 `scale(k)` 缩放容器内，缩小后磁吸区屏幕尺寸随之变小，鼠标难以命中，必须放大画布才能出现圆球拉线。
+- 改为通过 `useCanvasScaleRef` 读取当前缩放值并按 1/k 反向补偿磁吸条宽度、外延与磁吸区尺寸，使端口命中区域在屏幕上保持恒定大小（约 96px），任意缩放级别下鼠标经过节点两侧即可出现圆球并直接拉线。
+- 需要确认：画布缩小到 10%~50% 时，鼠标经过节点左右两侧仍能出现 + 圆球并拉线；圆球跟随（48px 内跟随 24px）与离开回弹行为不变；放大到 300% 时端口不因补偿过大而超出节点过多；连线吸附（拖线到目标节点 48px/64px 半径）行为不变。
+
+## 画布缩放后连线端口命中修复
+
+- 修复画布缩小（zoom < 1）后节点左右连接端口（+ 圆球）无法识别的问题：端口磁吸区（48px 磁吸条、96px 磁吸区、-58px 外延）原为画布坐标固定值，节点处于 `scale(k)` 缩放容器内，缩小后磁吸区屏幕尺寸随之变小，鼠标难以命中，必须放大画布才能出现圆球拉线。
+- 改为通过 `useCanvasScaleRef` 读取当前缩放值并按 1/k 反向补偿磁吸条宽度、外延与磁吸区尺寸，使端口命中区域在屏幕上保持恒定大小（约 96px），任意缩放级别下鼠标经过节点两侧即可出现圆球并直接拉线。
+- 需要确认：画布缩小到 10%~50% 时，鼠标经过节点左右两侧仍能出现 + 圆球并拉线；圆球跟随（48px 内跟随 24px）与离开回弹行为不变；放大到 300% 时端口不因补偿过大而超出节点过多；连线吸附（拖线到目标节点 48px/64px 半径）行为不变。
+
 ## 在线 Agent 思考模式模型多轮回传 reasoning_content
 
 - 修复在线 Agent 使用 DeepSeek 等思考模式模型时，工具循环第二步起报错「The `reasoning_content` in the thinking mode must be passed back to the API」：此类模型要求多轮对话中 assistant 消息必须原样回传上一轮的 `reasoning_content`。
@@ -362,9 +374,3 @@ description: 当前版本已实现但仍需人工验证的变更项
 ## Canvas Generation Run Ledger
 
 - Generation nodes now persist up to six recent runs in node metadata, including the run ID, model, mode, prompt snapshot, status, and error details. The Composer exposes the current run state, refresh-resume hint, recent run list, and a direct retry action for failed runs; the loading node also makes the refresh-resume behavior visible. Confirm text, image, video, audio, and ComfyUI runs across success, failure, stop, refresh, and reopen flows, and verify that a retry creates a new run without removing the previous record.
-
-## 节点圆角与交互反馈
-
-- 文本、图片、视频、音频、ComfyUI、配置和组节点统一使用 8px 圆角，React 内容层与 Leafer 绘制层共用同一轮廓，媒体内容会沿节点边缘裁切。悬停、选中、连接目标和拖动分别提供轻微提亮、强调描边与按层级增强的阴影，视觉更新只作用于当前交互节点，不触发整张画布 React 重渲染或常驻动画。需要确认浅色/深色主题、图片与视频边缘、批量图片叠层、组节点、节点拖动和连接吸附状态下圆角与反馈均保持一致，并在百节点画布中观察帧率没有明显下降。
-
-## 已有画布刷新稳定性

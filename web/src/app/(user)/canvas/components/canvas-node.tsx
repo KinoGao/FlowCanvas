@@ -1812,6 +1812,7 @@ function NodePinIndicator({ node, theme }: { node: CanvasNodeData; theme: (typeo
 
 function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "left" | "right"; visible: boolean; active: boolean; onClickCreate?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const scaleRef = useCanvasScaleRef();
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
     const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
@@ -1889,14 +1890,16 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
             data-handle
             data-handle-type={isSource ? "source" : "target"}
             className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
-            style={{ [side]: "-58px", width: "48px" }}
+            style={{ [side]: `${-58 / scaleRef.current}px`, width: `${48 / scaleRef.current}px` }}
         >
-            {/* 96px 磁吸区始终响应鼠标，无需先选中节点；圆球最多跟随 24px，离开 48px 半径后回弹。 */}
+            {/* 磁吸区在屏幕上保持恒定大小（约 96px），缩放时按 1/k 反向补偿，
+                否则缩小画布后磁吸条被压窄、鼠标难以命中，必须放大才能连线。 */}
             <span
                 onPointerDown={handlePointerDown}
                 onPointerMove={handleMagnetMove}
                 onPointerLeave={resetMagnet}
-                className="pointer-events-auto absolute left-1/2 top-1/2 flex size-24 -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center"
+                className="pointer-events-auto absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center"
+                style={{ width: `${96 / scaleRef.current}px`, height: `${96 / scaleRef.current}px` }}
             >
                 <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
                     <span
