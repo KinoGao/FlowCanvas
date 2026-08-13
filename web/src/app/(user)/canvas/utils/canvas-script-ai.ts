@@ -1,4 +1,4 @@
-import type { CanvasScriptAsset, CanvasScriptBeat } from "../types";
+import type { CanvasScriptAct, CanvasScriptAsset, CanvasScriptBeat } from "../types";
 
 /**
  * 脚本节点 AI 拆解与提示词合成（对标 LibTV 脚本节点 v2 的"剧本拆解 + 资产提取"）：
@@ -6,32 +6,33 @@ import type { CanvasScriptAsset, CanvasScriptBeat } from "../types";
  * 生成图片/视频提示词时引用资产描述，保证角色与场景一致性。
  */
 
-/** 脚本 AI 拆解提示词：要求模型返回资产与分镜 JSON。 */
+/** 脚本 AI 拆解提示词：要求模型返回资产、幕结构与分镜 JSON。 */
 export function buildScriptAiPrompt(body: string): string {
     return [
         "你是专业影视分镜师，请把下面的剧本拆解为可拍摄的分镜脚本。",
         "先完整提取资产（顺序：人物 → 道具 → 场景）：角色（人物名称 + 外貌/服装/气质描述）、道具（关键物品 + 外观描述）、场景（地点 + 环境/氛围描述）；资产是后续分镜生成时保持一致的引用基础。",
-        "再按剧情推进拆成连续分镜，每个分镜给出：标题（2-8 字）、画面描述（主体、动作、场景、氛围，写可拍的具体画面）、景别（大远景/远景/全景/中景/近景/特写）、时长（如 \"3s\"）、角色（引用资产名）、场景（引用资产名）、机位（如 中景跟拍、特写推近）、台词（本镜对白，无则空字符串）。",
-        "画面优先：写\"人怎么干\"而非\"人干什么\"，避免抽象隐喻；镜头数量适中（短剧本 4-10 镜）。",
+        "再识别幕/集结构：按剧情推进把整部剧本划分为若干幕（第一幕、第二幕……），每幕给出标题（如「第一幕」）、幕名（如「解读与分裂」）、梗概（一句话）和时长（如「约 45 分钟」）；剧本明确标注了幕/集/章节时严格沿用其划分与名称，不得合并或遗漏任何一幕。",
+        "然后按幕顺序逐幕拆分镜（第一幕的镜头排在最前，依次排完所有幕），每个分镜给出：所属幕（如「第一幕」，与 acts 中 title 对应）、标题（2-8 字）、画面描述（主体、动作、场景、氛围，写可拍的具体画面）、景别（大远景/远景/全景/中景/近景/特写）、时长（如 \"3s\"）、角色（引用资产名）、场景（引用资产名）、机位（如 中景跟拍、特写推近）、台词（本镜对白，无则空字符串）。",
+        "画面优先：写\"人怎么干\"而非\"人干什么\"，避免抽象隐喻；镜头数量与剧本体量匹配（短剧本每幕 4-10 镜，长剧本每幕可适当增加），所有幕都要拆出分镜，不得遗漏任何一幕。",
         "分镜规范：同一场戏中角色位置、服装、道具与场景细节必须前后连贯，不得出现同一角色跨镜换装、场景对不上等跳戏；景别遵循 远-全-中-近-特 的节奏变化，情绪高点用近景/特写，交代环境用远景/全景；运镜描述写具体运动方式（推近/拉远/横移/跟拍/环绕/升降/固定），不写抽象形容词；动作连贯，相邻镜头衔接时画面元素保持空间一致性。",
-        '只输出一个 JSON 对象，不要输出其他内容，格式：{"assets":[{"kind":"character"|"scene"|"prop","name":"...","description":"..."}],"beats":[{"title":"...","content":"...","shotType":"中景","duration":"3s","character":"","scene":"","camera":"","dialogue":""}]}',
+        '只输出一个 JSON 对象，不要输出其他内容，格式：{"assets":[{"kind":"character"|"scene"|"prop","name":"...","description":"..."}],"acts":[{"title":"第一幕","name":"...","summary":"...","duration":"约 45 分钟"}],"beats":[{"act":"第一幕","title":"...","content":"...","shotType":"中景","duration":"3s","character":"","scene":"","camera":"","dialogue":""}]}',
         "",
         "剧本：",
-        body.trim().slice(0, 4000),
+        body.trim().slice(0, 6000),
     ].join("\n");
 }
 
 /** 解析模型返回的拆解 JSON（容忍代码围栏与前后说明文字）；失败返回空结构。 */
-export function parseScriptAiResponse(text: string): { beats: CanvasScriptBeat[]; assets: CanvasScriptAsset[] } {
+export function parseScriptAiResponse(text: string): { beats: CanvasScriptBeat[]; assets: CanvasScriptAsset[]; acts: CanvasScriptAct[] } {
     const json = extractJsonObject(text);
-    if (!json) return { beats: [], assets: [] };
+    if (!json) return { beats: [], assets: [], acts: [] };
     let raw: unknown;
     try {
         raw = JSON.parse(json);
     } catch {
-        return { beats: [], assets: [] };
+        return { beats: [], assets: [], acts: [] };
     }
-    if (!raw || typeof raw !== "object") return { beats: [], assets: [] };
+    if (!raw || typeof raw !== "object") return { beats: [], assets: [], acts: [] };
     const record = raw as Record<string, unknown>;
     const assets = (Array.isArray(record.assets) ? record.assets : []).slice(0, 40).map((item, index): CanvasScriptAsset | null => {
         if (!item || typeof item !== "object") return null;
@@ -46,7 +47,21 @@ export function parseScriptAiResponse(text: string): { beats: CanvasScriptBeat[]
             description: typeof asset.description === "string" ? asset.description.trim().slice(0, 200) : "",
         };
     }).filter((asset): asset is CanvasScriptAsset => Boolean(asset));
-    const beats = (Array.isArray(record.beats) ? record.beats : []).slice(0, 24).map((item, index): CanvasScriptBeat | null => {
+    const acts = (Array.isArray(record.acts) ? record.acts : []).slice(0, 40).map((item, index): CanvasScriptAct | null => {
+        if (!item || typeof item !== "object") return null;
+        const act = item as Record<string, unknown>;
+        const title = typeof act.title === "string" ? act.title.trim() : "";
+        if (!title) return null;
+        return {
+            id: `act-${index + 1}`,
+            title: title.slice(0, 32),
+            name: typeof act.name === "string" ? act.name.trim().slice(0, 48) : undefined,
+            summary: typeof act.summary === "string" ? act.summary.trim().slice(0, 200) : undefined,
+            duration: typeof act.duration === "string" ? act.duration.trim().slice(0, 32) : undefined,
+        };
+    }).filter((act): act is CanvasScriptAct => Boolean(act));
+    // 长剧本分镜可能很多，不设硬性截断上限（保留全部幕的镜头，避免第二幕等被截断丢失）。
+    const beats = (Array.isArray(record.beats) ? record.beats : []).map((item, index): CanvasScriptBeat | null => {
         if (!item || typeof item !== "object") return null;
         const beat = item as Record<string, unknown>;
         const content = typeof beat.content === "string" ? beat.content.trim() : "";
@@ -63,11 +78,12 @@ export function parseScriptAiResponse(text: string): { beats: CanvasScriptBeat[]
             scene: text(beat.scene) || undefined,
             camera: text(beat.camera) || undefined,
             dialogue: text(beat.dialogue) || undefined,
+            act: text(beat.act) || undefined,
             prompt: "",
         };
         return { ...draft, prompt: buildScriptBeatPrompt(draft, assets) };
     }).filter((beat): beat is CanvasScriptBeat => Boolean(beat));
-    return { beats, assets };
+    return { beats, assets, acts };
 }
 
 /** 从模型回复中提取第一个 JSON 对象（容忍代码围栏与前后说明文字）。 */
@@ -130,9 +146,9 @@ export function buildAssetPrompt(asset: CanvasScriptAsset): string {
     return `${kindLabel}设定图：${asset.name}。${asset.description}。要求：${subject}，干净背景，风格统一，电影质感。`;
 }
 
-/** 分镜导出文本：把景别/时长/标题/画面描述/角色场景机位/台词排布为可直接填入视频或 ComfyUI 节点 composer 的提示词。 */
+/** 分镜导出文本：把幕/景别/时长/标题/画面描述/角色场景机位/台词排布为可直接填入视频或 ComfyUI 节点 composer 的提示词。 */
 export function buildScriptBeatExportText(beat: CanvasScriptBeat): string {
-    const header = [beat.shotType, beat.duration].filter((item): item is string => Boolean(item)).join("    ");
+    const header = [beat.act, beat.shotType, beat.duration].filter((item): item is string => Boolean(item)).join("    ");
     const refs = [beat.character, beat.scene, beat.camera].filter((item): item is string => Boolean(item));
     const lines = [header, beat.title, beat.content].filter(Boolean);
     if (refs.length) lines.push("—", ...refs);

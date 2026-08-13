@@ -90,6 +90,8 @@ export type CanvasScriptBeat = {
     camera?: string;
     /** 本镜台词/对白，无则空 */
     dialogue?: string;
+    /** 所属幕/集（如「第一幕」「第二幕」），未分幕为空 */
+    act?: string;
 };
 
 /** 脚本拆解出的可复用资产（角色/场景/道具），生成提示词时引用其描述 */
@@ -100,12 +102,26 @@ export type CanvasScriptAsset = {
     description: string;
 };
 
+export type CanvasScriptAct = {
+    id: string;
+    /** 幕标题，如「第一幕」 */
+    title: string;
+    /** 幕名/主题，如「解读与分裂」 */
+    name?: string;
+    /** 幕梗概 */
+    summary?: string;
+    /** 幕时长，如「约 45 分钟」 */
+    duration?: string;
+};
+
 export type CanvasScriptMetadata = {
     scriptTitle?: string;
     scriptLogline?: string;
     scriptBody?: string;
     scriptBeats?: CanvasScriptBeat[];
     scriptAssets?: CanvasScriptAsset[];
+    /** 幕/集结构（分镜按幕分组，一幕一幕制作） */
+    scriptActs?: CanvasScriptAct[];
     scriptOutputIds?: string[];
     /** 分镜 id → 输出节点 id（脚本工作台生成状态回显） */
     scriptBeatOutputs?: Record<string, string>;

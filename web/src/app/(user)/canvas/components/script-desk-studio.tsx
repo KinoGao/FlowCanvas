@@ -1,10 +1,10 @@
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button, Dropdown, Select } from "antd";
 import { Clapperboard, Download, Image as ImageIcon, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 import { buildScriptBeats } from "../utils/canvas-script-beats";
-import type { CanvasNodeData, CanvasNodeMetadata, CanvasScriptAsset, CanvasScriptBeat } from "../types";
+import type { CanvasNodeData, CanvasNodeMetadata, CanvasScriptAct, CanvasScriptAsset, CanvasScriptBeat } from "../types";
 
 type Theme = (typeof canvasThemes)[keyof typeof canvasThemes];
 export type ScriptOutputState = "idle" | "loading" | "success" | "error";
@@ -65,6 +65,7 @@ export function ScriptDeskStudio({
 }) {
     const body = node.metadata?.scriptBody ?? node.metadata?.content ?? "";
     const beats = node.metadata?.scriptBeats?.length ? node.metadata.scriptBeats : buildScriptBeats(body);
+    const acts = node.metadata?.scriptActs ?? [];
     const assets = node.metadata?.scriptAssets ?? [];
     const fieldStyle = { background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text };
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -81,6 +82,30 @@ export function ScriptDeskStudio({
         setEditingIndex(null);
         setDraft(null);
     };
+
+    // 按幕分组：有幕信息时先显示幕标题行，再渲染该幕的分镜；无幕信息时全部归入「未分幕」。
+    const actGroups = useMemo(() => {
+        const groups: Array<{ actTitle: string; act?: (typeof acts)[number]; beats: Array<{ beat: CanvasScriptBeat; index: number }> }> = [];
+        const actByTitle = new Map(acts.map((act) => [act.title, act]));
+        const order: string[] = [];
+        const buckets = new Map<string, Array<{ beat: CanvasScriptBeat; index: number }>>();
+        beats.forEach((beat, index) => {
+            const actTitle = beat.act?.trim() || "";
+            if (!buckets.has(actTitle)) {
+                buckets.set(actTitle, []);
+                order.push(actTitle);
+            }
+            buckets.get(actTitle)!.push({ beat, index });
+        });
+        order.forEach((actTitle) => {
+            groups.push({
+                actTitle: actTitle || "未分幕",
+                act: actByTitle.get(actTitle),
+                beats: buckets.get(actTitle) || [],
+            });
+        });
+        return groups;
+    }, [acts, beats]);
     const patchDraft = (patch: Partial<CanvasScriptBeat>) => setDraft((current) => (current ? { ...current, ...patch } : current));
     const assetLabel = (kind: CanvasScriptAsset["kind"]) => (kind === "character" ? "人物" : kind === "scene" ? "场景" : "道具");
 
@@ -206,78 +231,91 @@ export function ScriptDeskStudio({
                                 </tr>
                             </thead>
                             <tbody>
-                                {beats.map((beat, index) => {
-                                    const state = outputStates[beat.id] || "idle";
-                                    return (
-                                        <Fragment key={beat.id}>
-                                            <tr className="align-top" style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
-                                                <td className="px-3 py-2 opacity-55">{index + 1}</td>
-                                                <td className="px-2 py-2">{beat.shotType || "—"}</td>
-                                                <td className="px-2 py-2">{beat.duration || "—"}</td>
-                                                <td className="px-2 py-2">
-                                                    <div className="font-medium">{beat.title}</div>
-                                                    <div className="mt-0.5 line-clamp-2 leading-5 opacity-60">{beat.content}</div>
-                                                </td>
-                                                <td className="px-2 py-2">
-                                                    <div className="truncate opacity-70">{beat.character || "—"}</div>
-                                                    <div className="mt-0.5 truncate opacity-50">{beat.scene || "—"}</div>
-                                                    <div className="mt-0.5 truncate opacity-50">{beat.camera || "—"}</div>
-                                                </td>
-                                                <td className="px-2 py-2" style={{ color: state === "success" ? theme.connection.activeColor : state === "loading" ? theme.ui.accent : state === "error" ? "#ef4444" : theme.node.muted }}>
-                                                    {SCRIPT_OUTPUT_STATUS_MARK[state]}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <div className="flex flex-wrap items-center gap-1">
-                                                        <Dropdown
-                                                            menu={{
-                                                                items: [
-                                                                    { key: "video", label: "视频节点", icon: <Clapperboard className="size-3.5" /> },
-                                                                    { key: "comfyui", label: "ComfyUI 节点", icon: <Workflow className="size-3.5" /> },
-                                                                ],
-                                                                onClick: ({ key }) => onGenerateBeat(beat, index, key as "video" | "comfyui"),
-                                                            }}
-                                                            disabled={!beat.content.trim() && !beat.title.trim()}
-                                                        >
-                                                            <Button size="small" type="primary" ghost>
-                                                                生成
-                                                            </Button>
-                                                        </Dropdown>
-                                                        <Button size="small" onClick={() => startEdit(beat, index)}>
-                                                            编辑
-                                                        </Button>
-                                                        <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === 0} onClick={() => onBeatMove(index, -1)} aria-label="上移">↑</button>
-                                                        <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === beats.length - 1} onClick={() => onBeatMove(index, 1)} aria-label="下移">↓</button>
-                                                        <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100" onClick={() => onBeatRemove(index)} aria-label="删除分镜">删</button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                            {editingIndex === index && draft ? (
-                                                <tr style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
-                                                    <td colSpan={7} className="px-3 py-2">
-                                                        <div className="space-y-1.5">
-                                                            <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.title} placeholder="分镜标题" onChange={(event) => patchDraft({ title: event.target.value })} style={fieldStyle} />
-                                                            <textarea className="h-16 w-full resize-none rounded border px-2 py-1 text-xs leading-5 outline-none" value={draft.content} placeholder="画面描述" onChange={(event) => patchDraft({ content: event.target.value })} style={fieldStyle} />
-                                                            <div className="grid grid-cols-3 gap-1.5">
-                                                                <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.shotType || ""} placeholder="景别" onChange={(event) => patchDraft({ shotType: event.target.value })} style={fieldStyle} />
-                                                                <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.duration || ""} placeholder="时长 3s" onChange={(event) => patchDraft({ duration: event.target.value })} style={fieldStyle} />
-                                                                <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.camera || ""} placeholder="机位" onChange={(event) => patchDraft({ camera: event.target.value })} style={fieldStyle} />
+                                {actGroups.map((group) => (
+                                    <Fragment key={group.actTitle}>
+                                        <tr style={{ background: theme.ui.controlFill }}>
+                                            <td colSpan={7} className="px-3 py-1.5 font-semibold">
+                                                <span className="opacity-80">{group.actTitle}</span>
+                                                {group.act?.name ? <span className="ml-2 opacity-60">{group.act.name}</span> : null}
+                                                {group.act?.duration ? <span className="ml-2 text-[11px] opacity-45">{group.act.duration}</span> : null}
+                                                <span className="ml-2 text-[11px] opacity-45">{group.beats.length} 镜</span>
+                                                {group.act?.summary ? <div className="mt-0.5 text-[11px] leading-4 opacity-45">{group.act.summary}</div> : null}
+                                            </td>
+                                        </tr>
+                                        {group.beats.map(({ beat, index }) => {
+                                            const state = outputStates[beat.id] || "idle";
+                                            return (
+                                                <Fragment key={beat.id}>
+                                                    <tr className="align-top" style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
+                                                        <td className="px-3 py-2 opacity-55">{index + 1}</td>
+                                                        <td className="px-2 py-2">{beat.shotType || "—"}</td>
+                                                        <td className="px-2 py-2">{beat.duration || "—"}</td>
+                                                        <td className="px-2 py-2">
+                                                            <div className="font-medium">{beat.title}</div>
+                                                            <div className="mt-0.5 line-clamp-2 leading-5 opacity-60">{beat.content}</div>
+                                                        </td>
+                                                        <td className="px-2 py-2">
+                                                            <div className="truncate opacity-70">{beat.character || "—"}</div>
+                                                            <div className="mt-0.5 truncate opacity-50">{beat.scene || "—"}</div>
+                                                            <div className="mt-0.5 truncate opacity-50">{beat.camera || "—"}</div>
+                                                        </td>
+                                                        <td className="px-2 py-2" style={{ color: state === "success" ? theme.connection.activeColor : state === "loading" ? theme.ui.accent : state === "error" ? "#ef4444" : theme.node.muted }}>
+                                                            {SCRIPT_OUTPUT_STATUS_MARK[state]}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex flex-wrap items-center gap-1">
+                                                                <Dropdown
+                                                                    menu={{
+                                                                        items: [
+                                                                            { key: "video", label: "视频节点", icon: <Clapperboard className="size-3.5" /> },
+                                                                            { key: "comfyui", label: "ComfyUI 节点", icon: <Workflow className="size-3.5" /> },
+                                                                        ],
+                                                                        onClick: ({ key }) => onGenerateBeat(beat, index, key as "video" | "comfyui"),
+                                                                    }}
+                                                                    disabled={!beat.content.trim() && !beat.title.trim()}
+                                                                >
+                                                                    <Button size="small" type="primary" ghost>
+                                                                        生成
+                                                                    </Button>
+                                                                </Dropdown>
+                                                                <Button size="small" onClick={() => startEdit(beat, index)}>
+                                                                    编辑
+                                                                </Button>
+                                                                <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === 0} onClick={() => onBeatMove(index, -1)} aria-label="上移">↑</button>
+                                                                <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100 disabled:opacity-20" disabled={index === beats.length - 1} onClick={() => onBeatMove(index, 1)} aria-label="下移">↓</button>
+                                                                <button type="button" className="px-0.5 opacity-50 transition hover:opacity-100" onClick={() => onBeatRemove(index)} aria-label="删除分镜">删</button>
                                                             </div>
-                                                            <div className="grid grid-cols-2 gap-1.5">
-                                                                <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.character || ""} placeholder="角色（引用资产名）" onChange={(event) => patchDraft({ character: event.target.value })} style={fieldStyle} />
-                                                                <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.scene || ""} placeholder="场景（引用资产名）" onChange={(event) => patchDraft({ scene: event.target.value })} style={fieldStyle} />
-                                                            </div>
-                                                            <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.dialogue || ""} placeholder="台词（无则留空）" onChange={(event) => patchDraft({ dialogue: event.target.value })} style={fieldStyle} />
-                                                            <div className="flex justify-end gap-2">
-                                                                <Button size="small" onClick={() => setEditingIndex(null)}>取消</Button>
-                                                                <Button size="small" type="primary" onClick={saveEdit}>保存</Button>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ) : null}
-                                        </Fragment>
-                                    );
-                                })}
+                                                        </td>
+                                                    </tr>
+                                                    {editingIndex === index && draft ? (
+                                                        <tr style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
+                                                            <td colSpan={7} className="px-3 py-2">
+                                                                <div className="space-y-1.5">
+                                                                    <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.title} placeholder="分镜标题" onChange={(event) => patchDraft({ title: event.target.value })} style={fieldStyle} />
+                                                                    <textarea className="h-16 w-full resize-none rounded border px-2 py-1 text-xs leading-5 outline-none" value={draft.content} placeholder="画面描述" onChange={(event) => patchDraft({ content: event.target.value })} style={fieldStyle} />
+                                                                    <div className="grid grid-cols-3 gap-1.5">
+                                                                        <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.shotType || ""} placeholder="景别" onChange={(event) => patchDraft({ shotType: event.target.value })} style={fieldStyle} />
+                                                                        <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.duration || ""} placeholder="时长 3s" onChange={(event) => patchDraft({ duration: event.target.value })} style={fieldStyle} />
+                                                                        <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.camera || ""} placeholder="机位" onChange={(event) => patchDraft({ camera: event.target.value })} style={fieldStyle} />
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                                        <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.character || ""} placeholder="角色（引用资产名）" onChange={(event) => patchDraft({ character: event.target.value })} style={fieldStyle} />
+                                                                        <input className="h-7 rounded border px-2 text-xs outline-none" value={draft.scene || ""} placeholder="场景（引用资产名）" onChange={(event) => patchDraft({ scene: event.target.value })} style={fieldStyle} />
+                                                                    </div>
+                                                                    <input className="h-7 w-full rounded border px-2 text-xs outline-none" value={draft.dialogue || ""} placeholder="台词（无则留空）" onChange={(event) => patchDraft({ dialogue: event.target.value })} style={fieldStyle} />
+                                                                    <div className="flex justify-end gap-2">
+                                                                        <Button size="small" onClick={() => setEditingIndex(null)}>取消</Button>
+                                                                        <Button size="small" type="primary" onClick={saveEdit}>保存</Button>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ) : null}
+                                                </Fragment>
+                                            );
+                                        })}
+                                    </Fragment>
+                                ))}
                             </tbody>
                         </table>
                     </div>

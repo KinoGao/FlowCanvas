@@ -5020,10 +5020,10 @@ function LeaferCanvasPage() {
             try {
                 const messages: AiTextMessage[] = [{ role: "user", content: [{ type: "text", text: buildScriptAiPrompt(body) }] }];
                 const answer = await requestImageQuestion(requestConfig, messages, () => {});
-                const { beats, assets } = parseScriptAiResponse(answer);
+                const { beats, assets, acts } = parseScriptAiResponse(answer);
                 if (!beats.length) throw new Error("模型没有返回可识别的分镜，请确认当前文本模型可用后重试");
-                handleConfigNodeChange(scriptNode.id, { scriptBeats: beats, scriptAssets: assets, status: NODE_STATUS_SUCCESS });
-                message.success(`已拆解 ${beats.length} 个分镜、${assets.length} 项资产`);
+                handleConfigNodeChange(scriptNode.id, { scriptBeats: beats, scriptAssets: assets, scriptActs: acts.length ? acts : undefined, status: NODE_STATUS_SUCCESS });
+                message.success(`已拆解 ${beats.length} 个分镜${acts.length ? `、${acts.length} 幕` : ""}、${assets.length} 项资产`);
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "剧本拆解失败");
             } finally {
