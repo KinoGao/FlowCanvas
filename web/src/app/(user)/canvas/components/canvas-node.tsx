@@ -1796,7 +1796,6 @@ function NodePinIndicator({ node, theme }: { node: CanvasNodeData; theme: (typeo
 
 function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "left" | "right"; visible: boolean; active: boolean; onClickCreate?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const scaleRef = useCanvasScaleRef();
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
     const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
@@ -1873,32 +1872,31 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
         <div
             data-handle
             data-handle-type={isSource ? "source" : "target"}
-            className="group/connection-handle pointer-events-none !z-40 absolute top-0 h-full"
-            style={{ [side]: `${-64 / scaleRef.current}px`, width: `${64 / scaleRef.current}px` }}
+            className="pointer-events-none !z-40 absolute top-0 h-full"
+            style={{ [side]: "-48px", width: "48px" }}
         >
-            {/* 磁吸区在屏幕上保持恒定大小（约 96px），缩放时按 1/k 反向补偿，
-                否则缩小画布后磁吸条被压窄、鼠标难以命中，必须放大才能连线。 */}
+            {/* 磁吸区在屏幕上保持恒定大小（64px）：节点处于 scale(k) 视口内，
+                用 transform: scale(calc(1 / var(--canvas-k))) 反向补偿，CSS 变量随缩放
+                实时更新，无需节点重渲染。group-hover 挂在磁吸区上，保证任意缩放
+                下鼠标经过 64px 恒定区域即显示圆球；尺寸适中避免相邻节点误触。 */}
             <span
                 onPointerDown={handlePointerDown}
                 onPointerMove={handleMagnetMove}
                 onPointerLeave={resetMagnet}
-                className="pointer-events-auto absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 cursor-crosshair items-center justify-center"
-                style={{ width: `${96 / scaleRef.current}px`, height: `${96 / scaleRef.current}px` }}
+                className="canvas-connection-handle group/connection-handle pointer-events-auto absolute left-1/2 top-1/2 flex size-16 cursor-crosshair items-center justify-center"
             >
                 <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
                     <span
-                        className={`canvas-node-connection-dot pointer-events-none relative grid place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
+                        className={`canvas-node-connection-dot pointer-events-none relative grid size-6 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                         style={{
-                            width: `${32 / scaleRef.current}px`,
-                            height: `${32 / scaleRef.current}px`,
                             background: active ? theme.ui.accent : theme.ui.materialElevated,
                             borderColor: active ? theme.ui.accent : theme.node.stroke,
                             color: active ? theme.canvas.background : theme.node.muted,
-                            boxShadow: active ? `0 0 0 ${6 / scaleRef.current}px ${theme.ui.accentSoft}` : undefined,
+                            boxShadow: active ? `0 0 0 4px ${theme.ui.accentSoft}` : undefined,
                         }}
                     >
-                        <span className="absolute left-1/2 top-1/2 h-3 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style={{ height: `${12 / scaleRef.current}px`, width: `${1.5 / scaleRef.current}px` }} />
-                        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style={{ height: `${1.5 / scaleRef.current}px`, width: `${12 / scaleRef.current}px` }} />
+                        <span className="absolute left-1/2 top-1/2 h-2.5 w-[1.5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                        <span className="absolute left-1/2 top-1/2 h-[1.5px] w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
                     </span>
                 </span>
             </span>

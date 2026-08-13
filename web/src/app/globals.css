@@ -943,6 +943,15 @@
         box-shadow: 0 4px 14px color-mix(in srgb, var(--creative-text) 16%, transparent);
     }
 
+    /* 连接端口磁吸区：反向缩放抵消视口 scale(k)，使端口在屏幕上保持恒定大小（64px）。
+       依赖视口容器上的 --canvas-k CSS 变量，缩放时无需重渲染节点树。
+       translate 用独立属性居中，transform 只做反向缩放，避免与 Tailwind translate 冲突。 */
+    .canvas-connection-handle {
+        translate: -50% -50%;
+        transform: scale(calc(1 / var(--canvas-k, 1)));
+        transform-origin: center;
+    }
+
     .node-element[data-node-selected="true"] .canvas-node-connection-dot {
         animation: canvas-node-port-ready 260ms cubic-bezier(.2, .8, .2, 1) backwards;
     }
