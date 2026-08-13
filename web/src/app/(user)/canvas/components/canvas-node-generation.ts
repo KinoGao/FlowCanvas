@@ -274,12 +274,12 @@ function escapeRegExp(value: string) {
 
 function replaceLabelToken(value: string, label: string, replacement: string) {
     const escaped = escapeRegExp(label);
-    return value.replace(new RegExp(`【${escaped}】`, "g"), replacement).replace(new RegExp(`(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
+    return value.replace(new RegExp(`【${escaped}】`, "g"), replacement).replace(new RegExp(`(^|.)${escaped}(?![\\p{L}\\p{N}_】])`, "gu"), (_match, prefix: string) => `${prefix}${replacement}`);
 }
 
 function hasLabelToken(value: string, label: string) {
     const escaped = escapeRegExp(label);
-    return new RegExp(`【${escaped}】|(^|[^\\p{L}\\p{N}_【])${escaped}(?![\\p{L}\\p{N}_】])`, "u").test(value);
+    return new RegExp(`【${escaped}】|(^|.)${escaped}(?![\\p{L}\\p{N}_】])`, "u").test(value);
 }
 
 function appendTextBlocks(prompt: string, blocks: string[]) {

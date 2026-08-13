@@ -170,3 +170,40 @@ test("text composer confirmation has no media spec and defaults count to 1", () 
     assert.equal(result.mediaSpec, "");
     assert.equal(result.count, 1);
 });
+
+test("collects all upstream reference images when prompt mentions multiple labels", () => {
+    const imageA: CanvasNodeData = {
+        id: "img-a",
+        type: CanvasNodeType.Image,
+        title: "图片节点 21",
+        position: { x: 0, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: { content: "data:image/png;base64,AAA", storageKey: "backend:a" },
+    };
+    const imageB: CanvasNodeData = {
+        id: "img-b",
+        type: CanvasNodeType.Image,
+        title: "图片节点 22",
+        position: { x: 0, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: { content: "data:image/png;base64,BBB", storageKey: "backend:b" },
+    };
+    const target: CanvasNodeData = {
+        id: "img-target",
+        type: CanvasNodeType.Image,
+        title: "图片节点 23",
+        position: { x: 500, y: 0 },
+        width: 320,
+        height: 180,
+        metadata: {},
+    };
+    const nodes = [imageA, imageB, target];
+    const connections: CanvasConnection[] = [
+        { id: "e1", fromNodeId: imageA.id, toNodeId: target.id },
+        { id: "e2", fromNodeId: imageB.id, toNodeId: target.id },
+    ];
+    const result = buildNodeGenerationContext(target.id, nodes, connections, "参考图片1 让色彩对比移动 图片2 中的位置关系");
+    assert.equal(result.referenceImages.length, 2, "应收集两张上游参考图");
+});
