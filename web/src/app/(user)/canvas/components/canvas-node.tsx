@@ -607,8 +607,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 />
             ) : null}
 
-            {!isGroup && !shouldUseOverview ? <ConnectionHandleDot side="left" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup && !shouldUseOverview && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
+            {!isGroup ? <ConnectionHandleDot side="left" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
+            {!isGroup && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
 
             {showPanel && renderPanel ? (
                 <div

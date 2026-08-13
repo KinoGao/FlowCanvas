@@ -386,3 +386,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 视频控制层只保留进度条和按钮的实际命中区域，其他透明区域继续用于 Leafer 节点拖动；节点拖动和缩放事件会同步更新 DOM 媒体层及相邻连接线，选中节点、选中连线或悬停连线时恢复动态导电粒子。需要确认有内容和无内容的视频节点均可从非控件区域拖动，播放/进度/音量仍可操作，拖动过程中连线无脱节。
 - 高频滚轮、平移和节点变换先直接更新 Leafer/DOM 展示层，再按受控频率同步 React；40% 以下的未选中文字、配置和 ComfyUI 静态内容由 Leafer 文本层绘制，图片在 Leafer 确认解码成功后才隐藏原 DOM 图像。需要确认 20%-50% 缩放下无空白图片、无缩放闪烁，选中节点后编辑控件立即恢复。
 - Canvas appearance settings now expose an independent `辅助基准线` switch next to grid snapping. It defaults to enabled for existing projects; when disabled, node dragging skips alignment scanning, guide rendering, and guide snapping while optional grid snapping remains active. Confirm the setting persists after reopening the canvas and participates in undo/redo with the other canvas appearance settings.
+
+## 画布缩小后端口连线可用（overview 模式）
+
+- 修复画布缩放低于 50%（远景 overview 模式）时节点两侧连线端口（圆球）不渲染、无法拉线的问题：端口圆球不再随 overview 模式隐藏，配合磁吸区 CSS 反向缩放补偿（`scale(1/var(--canvas-k))`），任意缩放级别下鼠标经过节点两侧 64px 恒定磁吸区即显示圆球并可直接拉线、拉线时可被吸附为目标节点。
+- 需要确认：画布缩放到 10%~49% 时，鼠标移到节点左右两侧仍出现圆球并能正常拉线到其他节点；连线目标吸附（48px/64px）在缩小态下依旧准确；放大恢复后端口行为与之前一致；overview 下端口不遮挡节点拖拽/选中/双击；深浅主题下缩小态端口显示正常。
