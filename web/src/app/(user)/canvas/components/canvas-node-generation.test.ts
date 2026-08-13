@@ -267,7 +267,7 @@ test("label matching does not confuse 图片1 with 图片10", () => {
     assert.equal(result.referenceImages[0]?.id, "img-1");
 });
 
-test("script node (canvasTool=script) is collected as upstream text reference", () => {
+test("script node (canvasTool=script) is NOT collected as upstream text reference", () => {
     const scriptNode: CanvasNodeData = {
         id: "script-1",
         type: CanvasNodeType.Text,
@@ -289,7 +289,7 @@ test("script node (canvasTool=script) is collected as upstream text reference", 
     const nodes = [scriptNode, target];
     const connections: CanvasConnection[] = [{ id: "e1", fromNodeId: scriptNode.id, toNodeId: target.id }];
     const result = buildNodeGenerationContext(target.id, nodes, connections, "根据剧本生成封面图");
-    assert.equal(result.textCount, 1, "脚本节点应作为文本输入收集");
-    assert.equal(result.inputs[0]?.type, "text");
-    assert.ok(result.prompt.includes("第一幕：主角在雨夜走进咖啡馆。"), "脚本正文应拼入提示词");
+    assert.equal(result.textCount, 0, "脚本节点不应作为文本输入收集");
+    assert.equal(result.inputs.length, 0, "脚本节点不应出现在输入中");
+    assert.ok(!result.prompt.includes("第一幕：主角在雨夜走进咖啡馆。"), "脚本正文不应拼入提示词");
 });

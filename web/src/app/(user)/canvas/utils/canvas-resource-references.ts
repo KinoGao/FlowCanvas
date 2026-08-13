@@ -101,7 +101,7 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
                 title: node.title || label,
                 previewUrl: node.metadata?.content,
                 storageKey: node.metadata?.storageKey,
-                text: node.type === CanvasNodeType.Text ? readNodeTextForReference(node) : undefined,
+                text: node.type === CanvasNodeType.Text && node.metadata?.canvasTool !== "script" ? node.metadata?.content || node.metadata?.prompt : undefined,
                 active,
             },
         ];
@@ -129,15 +129,9 @@ function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
     if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) return "image";
     if (node.type === CanvasNodeType.Video && (node.metadata?.content || node.metadata?.storageKey)) return "video";
     if (node.type === CanvasNodeType.Audio && (node.metadata?.content || node.metadata?.storageKey)) return "audio";
-    // 文本节点与脚本节点（canvasTool="script"，正文在 scriptBody）都可作为上游文本引用。
-    if (node.type === CanvasNodeType.Text && readNodeTextForReference(node)) return "text";
+    // 脚本节点（canvasTool="script"）不参与上游文本引用：正文是剧本工作台内容，不作为下游提示词输入。
+    if (node.type === CanvasNodeType.Text && node.metadata?.canvasTool !== "script" && (node.metadata?.content || node.metadata?.prompt)) return "text";
     return null;
-}
-
-/** 读取节点承载的文本（脚本节点优先 scriptBody，普通文本取 content / prompt）。 */
-function readNodeTextForReference(node: CanvasNodeData) {
-    if (node.metadata?.canvasTool === "script") return node.metadata?.scriptBody || node.metadata?.content || node.metadata?.prompt || "";
-    return node.metadata?.content || node.metadata?.prompt || "";
 }
 
 function isGenerationConfigNode(node: CanvasNodeData | undefined) {
