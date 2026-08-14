@@ -28,8 +28,7 @@ function resolveSkillsDir(): string {
   return path.join(srcDir, "prompts", "skills");
 }
 
-export type CanvasWorkspaceConfig = { workspacePath: string; activeThreadId?: string; pinnedThreadIds?: string[] };
-export type CanvasAgentConfig = { url: string; token: string; origins?: string[]; canvases?: Record<string, CanvasWorkspaceConfig> };
+export type CanvasAgentConfig = { url: string; token: string; origins?: string[] };
 
 export function loadConfig(create = false): CanvasAgentConfig {
     try {
@@ -44,42 +43,6 @@ export function loadConfig(create = false): CanvasAgentConfig {
 export function saveConfig(config: CanvasAgentConfig) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-export function ensureCanvasWorkspace(config: CanvasAgentConfig, canvasId: string) {
-    const id = safeSegment(canvasId || "default");
-    config.canvases ||= {};
-    const current = config.canvases[id];
-    if (current?.workspacePath) {
-        fs.mkdirSync(resolveWorkspacePath(current.workspacePath), { recursive: true });
-        return { canvasId: id, ...current, workspacePath: resolveWorkspacePath(current.workspacePath) };
-    }
-    const workspacePath = path.join(CONFIG_DIR, "codex-workspaces", id);
-    config.canvases[id] = { workspacePath };
-    fs.mkdirSync(workspacePath, { recursive: true });
-    saveConfig(config);
-    return { canvasId: id, workspacePath };
-}
-
-export function updateCanvasWorkspace(config: CanvasAgentConfig, canvasId: string, patch: Partial<CanvasWorkspaceConfig>) {
-    const current = ensureCanvasWorkspace(config, canvasId);
-    const workspacePath = patch.workspacePath ? resolveWorkspacePath(patch.workspacePath) : current.workspacePath;
-    const next = { ...current, ...patch, workspacePath };
-    config.canvases ||= {};
-    config.canvases[current.canvasId] = { workspacePath: next.workspacePath, activeThreadId: next.activeThreadId, pinnedThreadIds: next.pinnedThreadIds };
-    fs.mkdirSync(workspacePath, { recursive: true });
-    saveConfig(config);
-    return { canvasId: current.canvasId, ...config.canvases[current.canvasId] };
-}
-
-function resolveWorkspacePath(value: string) {
-    if (value === "~") return os.homedir();
-    if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
-    return path.resolve(value);
-}
-
-function safeSegment(value: string) {
-    return value.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120) || "default";
 }
 
 function readPackageVersion() {

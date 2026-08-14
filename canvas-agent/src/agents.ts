@@ -15,12 +15,11 @@ import type { ConsistencyAssets, StageOutput } from "./pipeline/types.js";
 type Json = Record<string, unknown>;
 type AgentEvent = Json & { type: string; usage?: unknown };
 type PendingRequest = { resolve: (value: unknown) => void; reject: (error: Error) => void };
-type CodexRunOptions = { threadId?: string; cwd?: string; mode?: AgentMode; storySkill?: string; artSkill?: string; directorSkill?: string; pipelineId?: string };
+type CodexRunOptions = { mode?: AgentMode; storySkill?: string; artSkill?: string; directorSkill?: string; pipelineId?: string };
 type AgentHistoryMessage = { id: string; role: "user" | "assistant" | "tool" | "error"; title?: string; text: string; detail?: unknown; streamId?: string };
 
 let codexQueue: Promise<unknown> = Promise.resolve();
 let codexApp: CodexAppClient | null = null;
-let codexThreadId = "";
 let currentSystemPrompt = AGENT_PROMPT;
 const canvasAgentMcp = canvasAgentMcpCommand();
 const require = createRequire(import.meta.url);
@@ -59,7 +58,10 @@ async function runCodexTurnNow(prompt: string, emit: AgentEmit, attachments: Age
 
         files = await writeAttachmentFiles(attachments);
         codexApp ||= await CodexAppClient.start(emit);
-        const threadId = await ensureCodexThread(codexApp, options);
+        // 独立画布助手：不维护 Codex 线程/工作空间，每次 turn 使用一次性线程，画布状态即上下文
+        const thread = await codexApp.startThread();
+        const threadId = String(field(thread, "id") || "");
+        if (!threadId) throw new Error("Codex app-server 没有返回 thread id");
         const result = await codexApp.startTurn(threadId, fullPrompt, files);
         // 自动推进链路：turn 完成后聚合全文，检测 [STAGE_COMPLETE:xxx] 标记并推进流水线
         await maybeAdvancePipeline(emit, options.pipelineId, result.replyText);
@@ -158,72 +160,11 @@ function parseStageAssets(raw: string | undefined): Partial<ConsistencyAssets> |
     return undefined;
 }
 
-export async function startCodexThread(emit: AgentEmit, cwd?: string) {
-    codexApp ||= await CodexAppClient.start(emit);
-    const thread = await codexApp.startThread(cwd);
-    codexThreadId = String(field(thread, "id") || "");
-    return thread;
-}
-
-export async function resumeCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
-    codexApp ||= await CodexAppClient.start(emit);
-    await loadCodexThread(emit, threadId, cwd, false);
-    const thread = await codexApp.resumeThread(threadId, cwd);
-    assertThreadWorkspace(thread, cwd);
-    codexThreadId = String(field(thread, "id") || threadId);
-    return { thread, messages: threadMessages(thread) };
-}
-
-export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number }) {
-    codexApp ||= await CodexAppClient.start(emit);
-    const result = await codexApp.listThreads({
-        limit: options.limit || 40,
-        sortKey: "updated_at",
-        sortDirection: "desc",
-        sourceKinds: ["cli", "vscode", "appServer", "exec"],
-        cwd: options.cwd,
-        ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
-    });
-    const data = Array.isArray(field(result, "data")) ? (field(result, "data") as unknown[]).map(summarizeCodexThread).filter((thread) => threadInWorkspace(thread, options.cwd)) : [];
-    return { data, nextCursor: field(result, "nextCursor") || null, backwardsCursor: field(result, "backwardsCursor") || null };
-}
-
-export async function readCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
-    const thread = await loadCodexThread(emit, threadId, cwd, true);
-    return { thread: summarizeCodexThread(thread), messages: threadMessages(thread) };
-}
-
-export async function verifyCodexThreadWorkspace(emit: AgentEmit, threadId: string, cwd: string) {
-    await loadCodexThread(emit, threadId, cwd, false);
-}
-
-export async function archiveCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
-    codexApp ||= await CodexAppClient.start(emit);
-    await loadCodexThread(emit, threadId, cwd, false);
-    await codexApp.archiveThread(threadId);
-}
-
 export function runClaudeTurn(prompt: string, emit: AgentEmit) {
     if (!prompt.trim()) return;
     const child = spawnAgent("claude", ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--allowedTools", "mcp__infinite-canvas__*", prompt], ["ignore", "pipe", "pipe"], emit);
     if (!child) return;
     pipeJsonLines(child, emit, "claude");
-}
-
-async function ensureCodexThread(app: CodexAppClient, options: CodexRunOptions) {
-    if (options.threadId) {
-        const result = await app.readThread(options.threadId, false);
-        assertThreadWorkspace(field(result, "thread") || {}, options.cwd);
-        const thread = await app.resumeThread(options.threadId, options.cwd);
-        assertThreadWorkspace(thread, options.cwd);
-        codexThreadId = String(field(thread, "id") || options.threadId);
-        return codexThreadId;
-    }
-    if (!codexThreadId) {
-        const thread = await app.startThread(options.cwd);
-        codexThreadId = String(field(thread, "id") || "");
-    }
-    return codexThreadId;
 }
 
 class CodexAppClient {
@@ -248,7 +189,6 @@ class CodexAppClient {
         child.on("exit", (code) => {
             client.failAll(`Codex app-server exited: ${code ?? 0}`);
             codexApp = null;
-            codexThreadId = "";
             emit("agent_log", { text: `Codex app-server exited: ${code ?? 0}` });
         });
         await client.request("initialize", { clientInfo: { name: "canvas-agent", title: "Infinite Canvas Agent", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
@@ -256,32 +196,12 @@ class CodexAppClient {
         return client;
     }
 
-    async startThread(cwd?: string) {
-        const result = await this.request("thread/start", { approvalPolicy: "never", sandbox: "workspace-write", config: codexConfig(), ...(cwd ? { cwd } : {}), threadSource: "user" });
+    async startThread() {
+        const result = await this.request("thread/start", { approvalPolicy: "never", sandbox: "workspace-write", config: codexConfig(), threadSource: "user" });
         const thread = field(result, "thread") as Json | undefined;
         const id = String(field(thread, "id") || "");
         if (!id) throw new Error("Codex app-server 没有返回 thread id");
         return thread || {};
-    }
-
-    async resumeThread(threadId: string, cwd?: string) {
-        const result = await this.request("thread/resume", { threadId, approvalPolicy: "never", sandbox: "workspace-write", config: codexConfig(), ...(cwd ? { cwd } : {}) });
-        const thread = field(result, "thread") as Json | undefined;
-        const id = String(field(thread, "id") || "");
-        if (!id) throw new Error("Codex app-server 没有返回 thread id");
-        return thread || {};
-    }
-
-    listThreads(params: Json) {
-        return this.request("thread/list", params);
-    }
-
-    readThread(threadId: string, includeTurns = true) {
-        return this.request("thread/read", { threadId, includeTurns });
-    }
-
-    archiveThread(threadId: string) {
-        return this.request("thread/archive", { threadId });
     }
 
     async startTurn(threadId: string, prompt: string, images: string[]): Promise<{ replyText: string }> {
@@ -438,32 +358,8 @@ function codexInput(prompt: string, images: string[]) {
     return [{ type: "text", text: prompt, text_elements: [] }, ...images.map((file) => ({ type: "localImage", path: file }))];
 }
 
-function normalizeCodexNotification(method: string, params: Json): AgentEvent | null {
-    if (method === "thread/started") return { type: "thread.started", thread_id: field(field(params, "thread"), "id") };
-    if (method === "turn/started") return { type: "turn.started" };
-    if (method === "turn/completed") return { type: "turn.completed", usage: null };
-    if (method === "item/started") return { type: "item.started", item: normalizeItem(field(params, "item")) };
-    if (method === "item/completed") return { type: "item.completed", item: normalizeItem(field(params, "item")) };
-    if (method === "error") return { type: "error", message: field(params, "message") };
-    return null;
-}
-
-async function loadCodexThread(emit: AgentEmit, threadId: string, cwd: string | undefined, includeTurns: boolean) {
-    codexApp ||= await CodexAppClient.start(emit);
-    const result = await codexApp.readThread(threadId, includeTurns);
-    const thread = field(result, "thread") || {};
-    assertThreadWorkspace(thread, cwd);
-    return thread;
-}
-
-function assertThreadWorkspace(thread: unknown, cwd?: string) {
-    if (!cwd || threadInWorkspace(thread, cwd)) return;
-    throw new Error("该 Codex 会话不属于当前画布工作空间");
-}
-
-function threadInWorkspace(thread: unknown, cwd: string) {
-    const threadCwd = String(field(thread, "cwd") || "");
-    return Boolean(threadCwd && path.resolve(threadCwd) === path.resolve(cwd));
+function arrayValue(value: unknown) {
+    return Array.isArray(value) ? value : [];
 }
 
 function normalizeItem(item: unknown) {
@@ -473,6 +369,16 @@ function normalizeItem(item: unknown) {
     if (value.type === "agent_message" && typeof value.id === "string") value.text = String(value.text || "");
     if ("arguments" in value) value.arguments = parseMaybeJson(value.arguments);
     return value;
+}
+
+function normalizeCodexNotification(method: string, params: Json): AgentEvent | null {
+    if (method === "thread/started") return { type: "thread.started", thread_id: field(field(params, "thread"), "id") };
+    if (method === "turn/started") return { type: "turn.started" };
+    if (method === "turn/completed") return { type: "turn.completed", usage: null };
+    if (method === "item/started") return { type: "item.started", item: normalizeItem(field(params, "item")) };
+    if (method === "item/completed") return { type: "item.completed", item: normalizeItem(field(params, "item")) };
+    if (method === "error") return { type: "error", message: field(params, "message") };
+    return null;
 }
 
 function normalizeUsage(params: Json) {
@@ -496,95 +402,6 @@ function parseMaybeJson(value: unknown) {
 
 function field(value: unknown, key: string) {
     return value && typeof value === "object" ? (value as Json)[key] : undefined;
-}
-
-export function summarizeCodexThread(thread: unknown) {
-    return {
-        id: String(field(thread, "id") || ""),
-        sessionId: String(field(thread, "sessionId") || ""),
-        preview: displayUserText(String(field(thread, "preview") || "")),
-        name: stringOrNull(field(thread, "name")),
-        cwd: String(field(thread, "cwd") || ""),
-        status: String(field(thread, "status") || ""),
-        source: field(thread, "source"),
-        threadSource: field(thread, "threadSource"),
-        createdAt: Number(field(thread, "createdAt") || 0),
-        updatedAt: Number(field(thread, "updatedAt") || 0),
-    };
-}
-
-function threadMessages(thread: unknown): AgentHistoryMessage[] {
-    const turns = arrayValue(field(thread, "turns"));
-    const messages: AgentHistoryMessage[] = [];
-    turns.forEach((turn, turnIndex) => {
-        arrayValue(field(turn, "items")).forEach((item, itemIndex) => {
-            const type = String(field(item, "type") || "");
-            const id = String(field(item, "id") || `${turnIndex}-${itemIndex}`);
-            if (type === "userMessage") {
-                const text = displayUserText(userInputText(field(item, "content")));
-                if (text) messages.push({ id, role: "user", text });
-            }
-            if (type === "agentMessage") {
-                const text = String(field(item, "text") || "").trim();
-                if (text) messages.push({ id, role: "assistant", title: "Codex", text, streamId: id });
-            }
-            if (type === "mcpToolCall") {
-                const tool = String(field(item, "tool") || "工具调用");
-                const error = field(field(item, "error"), "message");
-                messages.push({ id, role: error ? "error" : "tool", title: toolName(tool), text: error ? String(error) : `${toolName(tool)} ${String(field(item, "status") || "完成")}`, detail: item });
-            }
-            if (type === "commandExecution") {
-                const command = String(field(item, "command") || "").trim();
-                if (command) messages.push({ id, role: "tool", title: "命令", text: command, detail: { cwd: field(item, "cwd"), status: field(item, "status"), exitCode: field(item, "exitCode") } });
-            }
-            if (type === "fileChange") messages.push({ id, role: "tool", title: "文件变更", text: "Codex 修改了文件", detail: item });
-        });
-    });
-    return messages.filter((item) => item.text).slice(-120);
-}
-
-function userInputText(content: unknown) {
-    return arrayValue(content)
-        .map((item) => {
-            const type = String(field(item, "type") || "");
-            if (type === "text") return String(field(item, "text") || "");
-            if (type === "image" || type === "localImage") return "图片附件";
-            if (type === "mention") return `@${String(field(item, "name") || "文件")}`;
-            return "";
-        })
-        .filter(Boolean)
-        .join("\n");
-}
-
-function displayUserText(text: string) {
-    const value = text.trim();
-    const marker = "用户请求：";
-    const index = value.lastIndexOf(marker);
-    return (index >= 0 ? value.slice(index + marker.length) : value).trim();
-}
-
-function arrayValue(value: unknown) {
-    return Array.isArray(value) ? value : [];
-}
-
-function stringOrNull(value: unknown) {
-    return typeof value === "string" && value.trim() ? value : null;
-}
-
-function toolName(name: string) {
-    if (name === "canvas_apply_ops") return "画布操作";
-    if (name === "canvas_get_state") return "读取画布";
-    if (name === "canvas_get_selection") return "读取选区";
-    if (name === "canvas_export_snapshot") return "导出快照";
-    if (name === "canvas_create_text_node") return "创建文本";
-    if (name === "canvas_create_image_prompt_flow") return "创建生图流程";
-    if (name === "canvas_create_generation_flow") return "创建生成流程";
-    if (name === "canvas_generate_text") return "生成文本";
-    if (name === "canvas_generate_image") return "生成图片";
-    if (name === "canvas_generate_video") return "生成视频";
-    if (name === "canvas_generate_audio") return "生成音频";
-    if (name === "canvas_run_generation") return "触发生成";
-    return name;
 }
 
 async function writeAttachmentFiles(attachments: AgentAttachment[]) {

@@ -179,6 +179,9 @@ const passthroughOpTypes = {
     canvas_video_compose: "video_compose",
     canvas_save_template: "save_template",
     canvas_insert_template: "insert_template",
+    canvas_comfyui_list_workflows: "comfyui_list_workflows",
+    canvas_comfyui_get_workflow: "comfyui_get_workflow",
+    canvas_comfyui_set_workflow: "comfyui_set_workflow",
 } as const;
 
 function textNodeOp(input: { id?: string; text?: string; title?: string; width?: number; height?: number }, x: number | undefined, y: number | undefined) {

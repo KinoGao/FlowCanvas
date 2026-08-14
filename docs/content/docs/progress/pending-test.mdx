@@ -18,6 +18,16 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 
 
+## 画布 Agent 去 Codex 线程化与 ComfyUI 工作流适配
+
+- 本地 Agent 移除 Codex 线程管理：后端删除 `/agent/codex/workspace`、`/agent/codex/threads*` 系列端点与工作空间机制，每次对话使用一次性 Codex 线程（画布状态即上下文，不做本地线程持久化）；前端本地 Agent 面板去掉「历史」Tab、线程列表、工作空间显示，只剩 连接 / 对话 / 日志。
+- Agent 新增 ComfyUI 工作流适配：
+  - `canvas_comfyui_list_workflows`：列出已发布工作流（id/名称/能力 capability/默认标记）与当前默认工作流
+  - `canvas_comfyui_get_workflow`：读取工作流字段定义（类型/默认值/选项/bindPrompt）
+  - `canvas_comfyui_set_workflow`：为 ComfyUI 节点设置工作流与字段值（写入 metadata.comfyWorkflowId / comfyWorkflowValues）
+  - Agent 提示词内置判断规则：按用户任务匹配工作流 capability（放大/重绘/转绘/生成等），匹配不到时用默认工作流
+- 需要确认：本地 Agent 连接后对话正常（不再涉及线程/历史）；让 Agent「创建一个 ComfyUI 节点并选放大工作流跑一次」能正确列工作流、选工作流、写字段并运行；默认工作流在后台配置后 Agent 能识别并使用；在线 Agent 面板（CanvasAssistantPanel）工具执行正常（onApplyOps 异步化后无回归）。
+
 ## 进入画布前媒体预加载与加载动画
 
 - 画布列表页点击画布卡片时，先显示全屏加载动画（主题色旋转光环 + 脉冲圆点 + 画布标题 + 媒体数量统计），后台预加载该画布媒体内容：

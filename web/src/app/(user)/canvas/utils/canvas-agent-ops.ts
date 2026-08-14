@@ -24,7 +24,10 @@ export type CanvasAgentOp =
     | { type: "video_trim"; id: string; start: number; end: number }
     | { type: "video_compose"; id: string; clips?: { nodeId: string; start?: number; end?: number }[] }
     | { type: "save_template"; ids: string[]; name: string }
-    | { type: "insert_template"; templateId?: string; name?: string };
+    | { type: "insert_template"; templateId?: string; name?: string }
+    | { type: "comfyui_list_workflows" }
+    | { type: "comfyui_get_workflow"; workflowId: string }
+    | { type: "comfyui_set_workflow"; nodeId: string; workflowId: string; values?: Record<string, unknown> };
 
 /** 有副作用（调用页面 handler、产生新任务）的 op：不进纯函数 apply，由页面层摘出分发。 */
 export const CANVAS_AGENT_SIDE_EFFECT_OP_TYPES = new Set<CanvasAgentOp["type"]>([
@@ -42,6 +45,9 @@ export const CANVAS_AGENT_SIDE_EFFECT_OP_TYPES = new Set<CanvasAgentOp["type"]>(
     "video_compose",
     "save_template",
     "insert_template",
+    "comfyui_list_workflows",
+    "comfyui_get_workflow",
+    "comfyui_set_workflow",
 ]);
 
 export type CanvasAgentSnapshot = {

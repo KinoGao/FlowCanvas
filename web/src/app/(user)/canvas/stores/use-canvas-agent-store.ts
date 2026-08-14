@@ -7,8 +7,7 @@ export type AgentAttachment = { id: string; name: string; type: string; size: nu
 export type AgentChatItem = { id: string; role: AgentChatRole; title?: string; text: string; meta?: string; detail?: unknown; attachments?: AgentAttachment[]; streamId?: string };
 export type AgentEventLog = { id: string; time: string; title: string; text: string; raw?: unknown };
 export type AgentPendingToolCall = { requestId: string; name: string; input?: { ops?: CanvasAgentOp[] } };
-export type AgentThreadSummary = { id: string; preview: string; name?: string | null; cwd?: string; status?: string; source?: unknown; createdAt?: number; updatedAt?: number };
-export type AgentPanelTab = "chat" | "setup" | "history" | "log";
+export type AgentPanelTab = "chat" | "setup" | "log";
 export type AgentMode = "default" | "script" | "production";
 
 export type PipelineStageInfo = { name: string; order: number; completed: boolean };
@@ -26,10 +25,6 @@ type CanvasAgentStore = {
     waiting: boolean;
     messages: AgentChatItem[];
     eventLogs: AgentEventLog[];
-    threads: AgentThreadSummary[];
-    activeThreadId: string;
-    workspacePath: string;
-    loadingThreads: boolean;
     activeTab: AgentPanelTab;
     agentMode: AgentMode;
     storySkill: string | null;
@@ -59,10 +54,6 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     waiting: false,
     messages: [],
     eventLogs: [],
-    threads: [],
-    activeThreadId: "",
-    workspacePath: "",
-    loadingThreads: false,
     activeTab: "setup",
     agentMode: (typeof window === "undefined" ? "default" : localStorage.getItem("canvas-agent-mode") || "default") as AgentMode,
     storySkill: typeof window === "undefined" ? null : localStorage.getItem("canvas-agent-story-skill") || null,

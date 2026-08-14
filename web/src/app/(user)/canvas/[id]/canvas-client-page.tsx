@@ -13,7 +13,7 @@ import { createVideoGenerationTask, storeGeneratedVideo, waitForVideoGenerationT
 import { pushBackendProjects } from "@/services/api/backend-storage";
 import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "@/services/api/canvas-templates";
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
-import { applyComfyWorkflowFields, getComfyWorkflow, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
+import { applyComfyWorkflowFields, getComfyWorkflow, listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { imageToDataUrl, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
@@ -821,7 +821,7 @@ function LeaferCanvasPage() {
     const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const retryNodeRef = useRef<((node: CanvasNodeData) => void) | null>(null);
     /** Agent 副作用 op 分发器：在所有画布 handler 定义完之后赋值（见 handleExecuteGroup 之后）。 */
-    const agentOpsDispatcherRef = useRef<(sideEffectOps: CanvasAgentOp[], configPatchOps: Extract<CanvasAgentOp, { type: "update_node" }>[]) => void>(() => undefined);
+    const agentOpsDispatcherRef = useRef<(sideEffectOps: CanvasAgentOp[], configPatchOps: Extract<CanvasAgentOp, { type: "update_node" }>[]) => Promise<Record<string, unknown>>>(async () => ({}));
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1721,10 +1721,8 @@ function LeaferCanvasPage() {
             setSelectedConnectionId(null);
             setViewport(next.viewport);
             setContextMenu(null);
-            if (sideEffectOps.length || configPatchOps.length) {
-                queueMicrotask(() => agentOpsDispatcherRef.current(sideEffectOps, configPatchOps));
-            }
-            return { ...next, projectId, title: projectTitle || "未命名画布" };
+            const sideEffectResult = sideEffectOps.length || configPatchOps.length ? agentOpsDispatcherRef.current(sideEffectOps, configPatchOps) : Promise.resolve({});
+            return Promise.resolve(sideEffectResult).then((extra) => ({ ...next, projectId, title: projectTitle || "未命名画布", ...(extra || {}) }));
         },
         [createCanvasConnection, createCanvasNode, projectTitle, projectId],
     );
@@ -5312,11 +5310,12 @@ function LeaferCanvasPage() {
     );
 
     // Agent 副作用 op 分发器：所有被引用的 handler 都已定义完毕，赋值给 ref 供 applyAgentOps 使用。
-    agentOpsDispatcherRef.current = (sideEffectOps, configPatchOps) => {
+    agentOpsDispatcherRef.current = async (sideEffectOps, configPatchOps) => {
+        const toolResults: Record<string, unknown> = {};
         configPatchOps.forEach((op) => {
             if (op.metadata) handleConfigNodeChange(op.id, op.metadata);
         });
-        sideEffectOps.forEach((op) => {
+        for (const op of sideEffectOps) {
             const nodeById = (id?: string) => (id ? nodesRef.current.find((node) => node.id === id) : undefined);
             switch (op.type) {
                 case "run_generation": {
@@ -5400,8 +5399,42 @@ function LeaferCanvasPage() {
                     if (template) insertWorkflowTemplate(template);
                     break;
                 }
+                case "comfyui_list_workflows": {
+                    try {
+                        const [workflows, comfyConfig] = await Promise.all([listComfyWorkflows(), Promise.resolve(useConfigStore.getState().comfyui)]);
+                        toolResults.comfyuiList = {
+                            workflows: workflows.map((workflow) => ({ id: workflow.id, name: workflow.name, title: workflow.title, capability: workflow.capability || "" })),
+                            defaultWorkflowId: comfyConfig.defaultWorkflowId || "",
+                        };
+                    } catch (error) {
+                        toolResults.comfyuiList = { workflows: [], defaultWorkflowId: "", error: error instanceof Error ? error.message : "加载工作流失败" };
+                    }
+                    break;
+                }
+                case "comfyui_get_workflow": {
+                    try {
+                        const workflow = await getComfyWorkflow(op.workflowId);
+                        toolResults.comfyuiWorkflow = workflow
+                            ? { id: workflow.id, name: workflow.name, title: workflow.title, capability: workflow.capability || "", fields: workflow.fields.map((field) => ({ id: field.id, name: field.name, type: field.type, default: field.default ?? null, options: field.options || [], bindPrompt: Boolean(field.bindPrompt) })) }
+                            : { error: `工作流不存在：${op.workflowId}` };
+                    } catch (error) {
+                        toolResults.comfyuiWorkflow = { error: error instanceof Error ? error.message : "读取工作流失败" };
+                    }
+                    break;
+                }
+                case "comfyui_set_workflow": {
+                    const target = nodeById(op.nodeId);
+                    if (!target) {
+                        toolResults.comfyuiSet = { error: `节点不存在：${op.nodeId}` };
+                        break;
+                    }
+                    handleConfigNodeChange(op.nodeId, { comfyWorkflowId: op.workflowId, ...(op.values ? { comfyWorkflowValues: op.values } : {}) });
+                    toolResults.comfyuiSet = { nodeId: op.nodeId, workflowId: op.workflowId, ok: true };
+                    break;
+                }
             }
-        });
+        }
+        return toolResults;
     };
     const handleViewNodeImage = useCallback((node: CanvasNodeData) => setPreviewNodeId(node.id), []);
     const insertPanoramaSnapshot = useCallback(

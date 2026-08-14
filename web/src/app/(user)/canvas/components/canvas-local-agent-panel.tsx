@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { ART_SKILL_OPTIONS, DIRECTOR_SKILL_OPTIONS, STORY_SKILL_OPTIONS } from "../agent-skills/options";
 import { App, Button, Input, Segmented, Select, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
-import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
+import { Copy, KeyRound, Link2, LoaderCircle, PlugZap, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMode, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary, type PipelineInfo } from "../stores/use-canvas-agent-store";
+import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentMode, type AgentPanelTab, type AgentPendingToolCall, type PipelineInfo } from "../stores/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 
@@ -36,9 +36,6 @@ type AgentEventPayload = {
 type AgentEventItem = { id?: string; type?: string; text?: unknown; message?: unknown; server?: string; tool?: string; status?: string; arguments?: unknown; result?: unknown; error?: { message?: string } };
 
 type AgentLogContext = { endpoint: string; connected: boolean; enabled: boolean; activity: string; waiting: boolean; sending: boolean; messages: number; pendingTool?: string };
-type AgentWorkspace = { canvasId: string; workspacePath: string; activeThreadId?: string };
-type AgentThreadsResponse = { ok?: boolean; workspace?: AgentWorkspace; data?: AgentThreadSummary[] };
-type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; thread?: AgentThreadSummary; messages?: AgentChatItem[] };
 
 export function CanvasLocalAgentPanel({
     snapshot,
@@ -70,10 +67,6 @@ export function CanvasLocalAgentPanel({
         waiting,
         messages,
         eventLogs,
-        threads,
-        activeThreadId,
-        workspacePath,
-        loadingThreads,
         activeTab,
         agentMode,
         storySkill,
@@ -101,30 +94,6 @@ export function CanvasLocalAgentPanel({
     const attachmentUrlsRef = useRef(new Set<string>());
     const clientIdRef = useRef(typeof crypto === "undefined" ? `${Date.now()}` : crypto.randomUUID());
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
-    const loadThreads = useCallback(async () => {
-        const projectId = snapshotRef.current.projectId;
-        if ((!connectedRef.current && !useCanvasAgentStore.getState().connected) || !projectId) return;
-        setAgentState({ loadingThreads: true });
-        try {
-            const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, `/agent/codex/threads?canvasId=${encodeURIComponent(projectId)}`);
-            const current = useCanvasAgentStore.getState();
-            setAgentState({
-                threads: data.data || [],
-                workspacePath: data.workspace?.workspacePath || current.workspacePath,
-                activeThreadId: data.workspace?.activeThreadId || current.activeThreadId,
-            });
-            const nextThreadId = data.workspace?.activeThreadId || current.activeThreadId;
-            if (nextThreadId && !current.messages.length) {
-                const thread = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(nextThreadId)}?canvasId=${encodeURIComponent(projectId)}`);
-                setAgentState({ messages: normalizeHistoryMessages(thread.messages || []) });
-            }
-        } catch (error) {
-            addEventLog("读取历史失败", error);
-        } finally {
-            setAgentState({ loadingThreads: false });
-        }
-    }, [endpoint, setAgentState, token]);
-
     useEffect(() => {
         snapshotRef.current = snapshot;
     }, [snapshot]);
@@ -179,7 +148,6 @@ export function CanvasLocalAgentPanel({
         });
         source.addEventListener("agent_done", () => {
             setAgentState({ activity: "完成", waiting: false, sending: false });
-            void loadThreads();
         });
         source.onerror = () => {
             const wasConnected = connectedRef.current;
@@ -201,11 +169,7 @@ export function CanvasLocalAgentPanel({
             connectedRef.current = false;
             setAgentState({ connected: false });
         };
-    }, [enabled, endpoint, loadThreads, message, setAgentState, token]);
-
-    useEffect(() => {
-        if (connected) void loadThreads();
-    }, [connected, loadThreads, snapshot.projectId]);
+    }, [enabled, endpoint, message, setAgentState, token]);
 
     useEffect(() => {
         if (!connected) return;
@@ -229,11 +193,9 @@ export function CanvasLocalAgentPanel({
             const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, directorSkill: useCanvasAgentStore.getState().directorSkill || undefined, pipelineId: shouldSendPipelineId(useCanvasAgentStore.getState().agentMode) ? useCanvasAgentStore.getState().pipelineId || undefined : undefined }),
+                body: JSON.stringify({ prompt: requestPrompt, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })), mode: useCanvasAgentStore.getState().agentMode, storySkill: useCanvasAgentStore.getState().storySkill || undefined, artSkill: useCanvasAgentStore.getState().artSkill || undefined, directorSkill: useCanvasAgentStore.getState().directorSkill || undefined, pipelineId: shouldSendPipelineId(useCanvasAgentStore.getState().agentMode) ? useCanvasAgentStore.getState().pipelineId || undefined : undefined }),
             });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
-            const data = (await res.json()) as { threadId?: string };
-            if (data.threadId) setAgentState({ activeThreadId: data.threadId });
             addEventLog("本地 Agent 已接收", { status: res.status });
             files.forEach((item) => {
                 URL.revokeObjectURL(item.url);
@@ -305,7 +267,7 @@ export function CanvasLocalAgentPanel({
             const input: { ops?: CanvasAgentOp[] } = payload.input || {};
             setAgentState({ activity: payload.name === "canvas_apply_ops" ? "执行画布操作" : "读取画布", waiting: true });
             addEventLog(toolName(payload.name), payload, payload);
-            const result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
+            const result = payload.name === "canvas_apply_ops" ? await onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
             await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
             if (payload.name === "canvas_apply_ops") void postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
             setAgentState({ activity: "工具完成", waiting: true });
@@ -382,10 +344,6 @@ export function CanvasLocalAgentPanel({
     function clearAgentSession(patch: Parameters<typeof setAgentState>[0] = {}) {
         setAgentState({
             messages: [],
-            threads: [],
-            activeThreadId: "",
-            workspacePath: "",
-            loadingThreads: false,
             waiting: false,
             sending: false,
             pendingTool: null,
@@ -393,75 +351,6 @@ export function CanvasLocalAgentPanel({
         });
         pendingToolRef.current = null;
     }
-
-    const startNewThread = async () => {
-        const projectId = snapshotRef.current.projectId;
-        if (!connected || !projectId) return;
-        setAgentState({ loadingThreads: true });
-        try {
-            const data = await fetchAgentJson<AgentThreadResponse>(endpoint, token, "/agent/codex/threads/new", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ canvasId: projectId }) });
-            setAgentState({ activeThreadId: data.thread?.id || data.workspace?.activeThreadId || "", messages: [], activeTab: "chat", activity: "新对话" });
-            await loadThreads();
-        } catch (error) {
-            addEventLog("新建对话失败", error);
-            message.error(error instanceof Error ? error.message : "新建对话失败");
-        } finally {
-            setAgentState({ loadingThreads: false });
-        }
-    };
-
-    const resumeThread = async (threadId: string) => {
-        const projectId = snapshotRef.current.projectId;
-        if (!connected || !projectId || !threadId) return;
-        setAgentState({ loadingThreads: true });
-        try {
-            const data = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ canvasId: projectId }),
-            });
-            setAgentState({ activeThreadId: data.thread?.id || threadId, messages: normalizeHistoryMessages(data.messages || []), activeTab: "chat", activity: "已恢复会话" });
-            await loadThreads();
-        } catch (error) {
-            addEventLog("恢复对话失败", error);
-            message.error(error instanceof Error ? error.message : "恢复对话失败");
-        } finally {
-            setAgentState({ loadingThreads: false });
-        }
-    };
-
-    const deleteThread = async (threadId: string) => {
-        const projectId = snapshotRef.current.projectId;
-        if (!connected || !projectId || !threadId) return;
-        setAgentState({ loadingThreads: true });
-        try {
-            await fetchAgentJson(endpoint, token, `/agent/codex/threads/${encodeURIComponent(threadId)}/delete`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ canvasId: projectId }) });
-            const current = useCanvasAgentStore.getState();
-            setAgentState({
-                threads: current.threads.filter((thread) => thread.id !== threadId),
-                activeThreadId: current.activeThreadId === threadId ? "" : current.activeThreadId,
-                messages: current.activeThreadId === threadId ? [] : current.messages,
-            });
-            message.success("记录已删除");
-        } catch (error) {
-            addEventLog("删除对话失败", error);
-            message.error(error instanceof Error ? error.message : "删除对话失败");
-        } finally {
-            setAgentState({ loadingThreads: false });
-        }
-    };
-
-    const confirmDeleteThread = (thread: AgentThreadSummary) => {
-        const label = thread.name || thread.preview || "未命名对话";
-        modal.confirm({
-            title: "删除对话记录",
-            content: `确定删除「${label.length > 48 ? `${label.slice(0, 48)}...` : label}」吗？`,
-            okText: "删除",
-            okType: "danger",
-            cancelText: "取消",
-            onOk: () => deleteThread(thread.id),
-        });
-    };
 
     const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
         event.preventDefault();
@@ -511,7 +400,6 @@ export function CanvasLocalAgentPanel({
 
     const handleAgentEvent = (event: AgentEventPayload) => {
         if (shouldLogAgentEvent(event)) addEventLog(eventTitle(event), event, event);
-        if (event.type === "thread.started" && event.thread_id) setAgentState({ activeThreadId: event.thread_id });
         const nextActivity = activityText(event);
         if (nextActivity) setAgentState({ activity: nextActivity });
         if (event.type === "turn.started") setAgentState({ waiting: true });
@@ -546,12 +434,10 @@ export function CanvasLocalAgentPanel({
                 items={[
                     { value: "setup", label: "连接", icon: <PlugZap className="size-3.5" /> },
                     { value: "chat", label: "对话" },
-                    { value: "history", label: "历史", icon: <History className="size-3.5" />, count: threads.length },
                     { value: "log", label: "日志", icon: <Terminal className="size-3.5" />, count: eventLogs.length },
                 ]}
                 onChange={(activeTab) => {
                     setAgentState({ activeTab });
-                    if (activeTab === "history") void loadThreads();
                 }}
                 right={
                     <>
@@ -574,19 +460,6 @@ export function CanvasLocalAgentPanel({
                     onUrlChange={(url) => setAgentState({ url, connectError: "" })}
                     onTokenChange={(token) => setAgentState({ token, connectError: "" })}
                     onToggleEnabled={toggleAgentConnection}
-                />
-            ) : activeTab === "history" ? (
-                <AgentHistoryView
-                    theme={theme}
-                    threads={threads}
-                    activeThreadId={activeThreadId}
-                    workspacePath={workspacePath}
-                    loading={loadingThreads}
-                    connected={connected}
-                    onRefresh={() => void loadThreads()}
-                    onNewThread={() => void startNewThread()}
-                    onResumeThread={(threadId) => void resumeThread(threadId)}
-                    onDeleteThread={confirmDeleteThread}
                 />
             ) : activeTab === "log" ? (
                 <AgentLogView
@@ -876,93 +749,6 @@ function AgentConnectView({
     );
 }
 
-function AgentHistoryView({
-    theme,
-    threads,
-    activeThreadId,
-    workspacePath,
-    loading,
-    connected,
-    onRefresh,
-    onNewThread,
-    onResumeThread,
-    onDeleteThread,
-}: {
-    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
-    threads: AgentThreadSummary[];
-    activeThreadId: string;
-    workspacePath: string;
-    loading: boolean;
-    connected: boolean;
-    onRefresh: () => void;
-    onNewThread: () => void;
-    onResumeThread: (threadId: string) => void;
-    onDeleteThread: (thread: AgentThreadSummary) => void;
-}) {
-    return (
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-            <div className="space-y-3">
-                <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
-                    <FolderOpen className="size-3.5 shrink-0" />
-                    <span className="shrink-0">工作空间</span>
-                    <span className="min-w-0 truncate" title={workspacePath}>
-                        {workspacePath || "默认画布目录"}
-                    </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm" style={{ color: theme.node.muted }}>
-                        {threads.length ? `${threads.length} 条历史` : connected ? "暂无历史" : "未连接"}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button size="small" icon={<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />} disabled={!connected || loading} onClick={onRefresh}>
-                            刷新
-                        </Button>
-                        <Button size="small" type="primary" icon={<Plus className="size-3.5" />} disabled={!connected || loading} onClick={onNewThread}>
-                            新对话
-                        </Button>
-                    </div>
-                </div>
-                <div className="space-y-2">
-                    {threads.map((thread) => {
-                        const active = thread.id === activeThreadId;
-                        return (
-                            <div key={thread.id} className="rounded-lg border px-2.5 py-1.5 transition" style={{ borderColor: active ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}>
-                                <div className="flex items-center gap-2">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="flex min-w-0 items-center gap-1.5">
-                                            {active ? (
-                                                <span className="shrink-0 text-[10px] font-medium" style={{ color: theme.node.text }}>
-                                                    当前
-                                                </span>
-                                            ) : null}
-                                            <div className="truncate text-sm font-medium leading-5">{thread.name || thread.preview || "未命名对话"}</div>
-                                        </div>
-                                        <div className="truncate text-[11px] leading-4 opacity-65">{thread.preview || thread.id}</div>
-                                    </div>
-                                    <div className="flex shrink-0 items-center gap-1">
-                                        <span className="text-[10px] opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
-                                        <Button size="small" className="!h-6 !px-2" disabled={loading} onClick={() => onResumeThread(thread.id)}>
-                                            进入
-                                        </Button>
-                                        <Tooltip title="删除记录">
-                                            <Button size="small" danger type="text" className="!h-6 !w-6 !min-w-6" disabled={loading} icon={<Trash2 className="size-3.5" />} onClick={() => onDeleteThread(thread)} />
-                                        </Tooltip>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
-                    {!threads.length ? (
-                        <div className="px-3 py-8 text-center text-sm" style={{ color: theme.node.muted }}>
-                            {connected ? "当前工作空间还没有对话记录" : "连接本地 Agent 后显示历史记录"}
-                        </div>
-                    ) : null}
-                </div>
-            </div>
-        </div>
-    );
-}
-
 async function postState(endpoint: string, token: string, clientId: string, snapshot: CanvasAgentSnapshot) {
     try {
         await fetch(`${endpoint}/canvas/state?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(snapshot) });
@@ -1186,21 +972,6 @@ async function fetchAgentJson<T>(endpoint: string, token: string, path: string, 
     const data = (await res.json().catch(() => ({}))) as T & { error?: string; msg?: string };
     if (!res.ok) throw new Error(data.error || data.msg || "本地 Agent 请求失败");
     return data;
-}
-
-function normalizeHistoryMessages(messages: AgentChatItem[]) {
-    return messages
-        .map((item, index) => ({
-            ...item,
-            id: item.id || `history-${index}`,
-            text: normalizeText(item.text),
-        }))
-        .filter((item) => item.text);
-}
-
-function formatThreadTime(value?: number) {
-    if (!value) return "";
-    return new Date(value * 1000).toLocaleString();
 }
 
 function createId() {

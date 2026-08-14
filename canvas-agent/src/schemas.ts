@@ -42,6 +42,9 @@ export const toolNames = [
     "canvas_video_compose",
     "canvas_save_template",
     "canvas_insert_template",
+    "canvas_comfyui_list_workflows",
+    "canvas_comfyui_get_workflow",
+    "canvas_comfyui_set_workflow",
 ] as const;
 export type ToolName = (typeof toolNames)[number];
 
@@ -124,6 +127,9 @@ export const toolInputSchemas = {
     canvas_video_compose: z.object({ id: z.string(), clips: z.array(z.object({ nodeId: z.string(), start: z.number().optional(), end: z.number().optional() })).optional() }),
     canvas_save_template: z.object({ ids: z.array(z.string()).min(1), name: z.string() }),
     canvas_insert_template: z.object({ templateId: z.string().optional(), name: z.string().optional() }),
+    canvas_comfyui_list_workflows: z.object({}).passthrough(),
+    canvas_comfyui_get_workflow: z.object({ workflowId: z.string().min(1) }),
+    canvas_comfyui_set_workflow: z.object({ nodeId: z.string().min(1), workflowId: z.string().min(1), values: z.record(z.unknown()).optional() }),
 } satisfies Record<ToolName, z.AnyZodObject>;
 
 export const toolDescriptions: Record<ToolName, string> = {
@@ -162,4 +168,7 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_video_compose: "视频合成：clips 指定片段（nodeId + 可选 start/end 出入点），不传 clips 则按现有连线合成。",
     canvas_save_template: "把指定节点组（含连线）保存为账号级画布模板。",
     canvas_insert_template: "把已保存的画布模板插入当前画布，按 templateId 或 name 定位。",
+    canvas_comfyui_list_workflows: "列出当前可用的 ComfyUI 工作流（含 id/名称/能力 capability/是否默认），用于选择工作流。判断规则：按用户任务匹配 capability（如 放大/重绘/转绘/生成），匹配不到时使用默认工作流。",
+    canvas_comfyui_get_workflow: "读取 ComfyUI 工作流详情（字段定义/类型/默认值），生成前用 canvas_comfyui_set_workflow 把字段值写入节点。",
+    canvas_comfyui_set_workflow: "为 ComfyUI 节点指定工作流并写入字段值（values 为字段 id 到值的映射）。创建 ComfyUI 节点后必须先调用本工具设置工作流再运行。",
 };

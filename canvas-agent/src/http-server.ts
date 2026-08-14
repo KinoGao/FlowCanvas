@@ -1,8 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 
-import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, pipelineManager, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
+import { DEFAULT_PORT, loadConfig, pipelineManager, saveConfig, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
-import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
+import { runClaudeTurn, runCodexTurn, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
 import { getStages } from "./pipeline/stages.js";
 import { runQualityChecks } from "./pipeline/quality.js";
@@ -42,60 +42,16 @@ export function startHttpServer() {
         res.json({ ok: true });
     });
     app.post("/api/tools", route(async (req, res) => res.json({ ok: true, result: await session.callTool(req.body?.name, req.body?.input || {}) })));
-    app.get("/agent/codex/workspace", (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        res.json({ ok: true, workspace });
-    });
-    app.get("/agent/codex/threads", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
-        res.json({ ok: true, workspace, ...result });
-    }));
-    app.post("/agent/codex/threads/new", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
-        const thread = await startCodexThread(emit, workspace.workspacePath);
-        const activeThreadId = String((thread as Record<string, unknown>).id || "");
-        updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId });
-        res.json({ ok: true, workspace: { ...workspace, activeThreadId }, thread: summarizeCodexThread(thread), messages: [] });
-    }));
-    app.get("/agent/codex/threads/:threadId", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        const threadId = routeParam(req.params.threadId);
-        res.json({ ok: true, workspace, ...(await readCodexThread(emit, threadId, workspace.workspacePath)) });
-    }));
-    app.post("/agent/codex/threads/:threadId/resume", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
-        const threadId = routeParam(req.params.threadId);
-        const result = await resumeCodexThread(emit, threadId, workspace.workspacePath);
-        updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
-        res.json({ ok: true, workspace: { ...workspace, activeThreadId: threadId }, ...result });
-    }));
-    app.post("/agent/codex/threads/:threadId/delete", route(async (req, res) => {
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
-        const threadId = routeParam(req.params.threadId);
-        await archiveCodexThread(emit, threadId, workspace.workspacePath);
-        if (workspace.activeThreadId === threadId) updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: undefined });
-        res.json({ ok: true });
-    }));
+    // 独立画布助手：无线程/工作空间概念，每次 turn 使用一次性 Codex 线程，画布状态即上下文
     app.post("/agent/codex/turn", route(async (req, res) => {
         const attachments = Array.isArray(req.body?.attachments) ? (req.body.attachments as AgentAttachment[]) : [];
-        const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
-        let threadId = String(req.body?.threadId || workspace.activeThreadId || "");
         const mode = validateMode(req.body?.mode);
         const storySkill = String(req.body?.storySkill || "") || undefined;
         const artSkill = String(req.body?.artSkill || "") || undefined;
         const directorSkill = String(req.body?.directorSkill || "") || undefined;
         const pipelineId = String(req.body?.pipelineId || "") || undefined;
-        if (!threadId) {
-            const thread = await startCodexThread(emit, workspace.workspacePath);
-            threadId = String((thread as Record<string, unknown>).id || "");
-            updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
-        } else if (threadId !== workspace.activeThreadId) {
-            await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
-            updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
-        }
-        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { threadId, cwd: workspace.workspacePath, mode, storySkill, artSkill, directorSkill, pipelineId });
-        res.json({ ok: true, threadId });
+        void runCodexTurn(String(req.body?.prompt || ""), emit, attachments, { mode, storySkill, artSkill, directorSkill, pipelineId });
+        res.json({ ok: true });
     }));
     app.post("/agent/claude/turn", (req, res) => {
         runClaudeTurn(withAgentPrompt(String(req.body?.prompt || "")), emit);

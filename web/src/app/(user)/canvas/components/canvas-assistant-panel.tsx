@@ -288,7 +288,7 @@ type CanvasAssistantPanelProps = {
     activeSessionId: string | null;
     onSelectNodeIds: (ids: Set<string>) => void;
     onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null) => void;
-    onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
+    onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot | Promise<CanvasAgentSnapshot>;
     canUndoOps: boolean;
     onUndoOps: () => CanvasAgentSnapshot | null;
     onPasteImage: (file: File) => void;
@@ -517,7 +517,7 @@ export function CanvasAssistantPanel({
     };
 
     const continueOnlineToolLoop = async (sessionId: string, assistantId: string, messages: ResponseInputMessage[], result: { content: string; toolCalls: ResponseToolCall[]; reasoningContent?: string }, step: number) => {
-        const toolResults = executeOnlineToolCalls(result.toolCalls);
+        const toolResults = await executeOnlineToolCalls(result.toolCalls);
         addOnlineLog("工具执行结果", toolResults);
         appendMessage(sessionId, {
             id: nanoid(),
@@ -559,10 +559,10 @@ export function CanvasAssistantPanel({
         upsertMessage(sessionId, { id: assistantId, role: "assistant", text: next.content || streamed || toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。", reasoningContent: next.reasoningContent });
     };
 
-    const executeOps = (ops: CanvasAgentOp[]) => {
+    const executeOps = async (ops: CanvasAgentOp[]) => {
         const beforeSnapshot = snapshotRef.current;
         const before = snapshotSignature(beforeSnapshot);
-        const next = onApplyOps(ops);
+        const next = await onApplyOps(ops);
         snapshotRef.current = next;
         // 副作用 op（生成/重跑/工具类）的结果异步落地，签名比对看不出来，恒算 changed
         const hasSideEffect = ops.some((op) => CANVAS_AGENT_SIDE_EFFECT_OP_TYPES.has(op.type));
@@ -571,7 +571,7 @@ export function CanvasAssistantPanel({
         return { changed, ops, ranGeneration: hasSideEffect, noopReason, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) };
     };
 
-    const executeOnlineTool = (name: string, args: Record<string, unknown>): OnlineToolResult => {
+    const executeOnlineTool = async (name: string, args: Record<string, unknown>): Promise<OnlineToolResult> => {
         const current = snapshotRef.current;
         try {
             if (name === "canvas_get_state") return { ok: true, message: describeCanvasSnapshot(current), data: compactSnapshot(current) };
@@ -585,34 +585,34 @@ export function CanvasAssistantPanel({
                 return { ok: true, message: list.length ? `共 ${list.length} 个模板。` : "还没有保存过工作流模板。", data: { templates: list } };
             }
             const ops = onlineToolToOps(name, args, current, effectiveConfig);
-            const result = executeOps(ops);
+            const result = await executeOps(ops);
             return { ok: result.changed, message: result.changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : result.noopReason, data: result };
         } catch (error) {
             return { ok: false, message: error instanceof Error ? error.message : "工具执行失败" };
         }
     };
 
-    const executeOnlineToolCall = (toolCall: ResponseToolCall): OnlineExecutedToolCall => {
+    const executeOnlineToolCall = async (toolCall: ResponseToolCall): Promise<OnlineExecutedToolCall> => {
         try {
-            const result = executeOnlineTool(toolCall.function.name, parseToolArguments(toolCall.function.arguments));
+            const result = await executeOnlineTool(toolCall.function.name, parseToolArguments(toolCall.function.arguments));
             return { toolCallId: toolCall.id, name: toolCall.function.name, result };
         } catch (error) {
             return { toolCallId: toolCall.id, name: toolCall.function.name, result: { ok: false, message: error instanceof Error ? error.message : "工具参数错误" } };
         }
     };
 
-    const executeOnlineToolCalls = (toolCalls: ResponseToolCall[]) => {
+    const executeOnlineToolCalls = async (toolCalls: ResponseToolCall[]) => {
         const results: OnlineExecutedToolCall[] = [];
         let stopped = false;
-        toolCalls.forEach((toolCall) => {
+        for (const toolCall of toolCalls) {
             if (stopped) {
                 results.push({ toolCallId: toolCall.id, name: toolCall.function.name, result: { ok: false, message: "前一个工具调用失败，未继续执行。" } });
-                return;
+                continue;
             }
-            const result = executeOnlineToolCall(toolCall);
+            const result = await executeOnlineToolCall(toolCall);
             results.push(result);
             if (!result.result.ok) stopped = true;
-        });
+        }
         return results;
     };
 
@@ -632,7 +632,7 @@ export function CanvasAssistantPanel({
         }
         try {
             setIsRunning(true);
-            const results = executeOnlineToolCalls(toolCalls);
+            const results = await executeOnlineToolCalls(toolCalls);
             addOnlineLog("工具执行结果", results);
             upsertMessage(session.id, { id: messageId, role: "tool", title: "工具执行完成", text: results.map((item) => toolResultText(item.result)).join("\n"), detail: { ...detail, results, status: "completed" } });
             pendingToolContextRef.current.delete(messageId);

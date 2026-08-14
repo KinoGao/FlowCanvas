@@ -6,6 +6,8 @@
 - 内置 Agent 与生成链路新增影视制作提示词：新增 8 位经典导演风格内置技能（斯皮尔伯格 / 库布里克 / 王家卫 / 诺兰 / 张艺谋 / 侯孝贤 / 韦斯·安德森 / 维伦纽瓦），在线与本地 Agent 选择器均可选用，选中后按导演镜头语言/光线色彩/运镜构图约束组织生成提示词；在线 Agent 系统提示词与本地 Agent BASE_PROMPT 新增影视制作规范（分镜按资产→连续分镜组织、可拍画面描述、景别/运镜术语、同场戏不跳戏、提示词忠于分镜内容、沿用既有角色/场景设定）；脚本节点 AI 拆解与视频解析提示词同步增强连贯性与景别节奏规范。
 
 
+- 画布 Agent 升级：移除 Codex 线程管理（不再维护线程/工作空间，每次对话使用一次性线程，画布状态即上下文），本地 Agent 面板去掉「历史」Tab 与线程相关 UI；Agent 补齐 ComfyUI 工作流适配——新增 3 个工具（`canvas_comfyui_list_workflows` 列出可用工作流与默认工作流、`canvas_comfyui_get_workflow` 读取字段定义、`canvas_comfyui_set_workflow` 为节点设置工作流与字段值），提示词内置工作流判断规则（按任务匹配 capability，匹配不到用默认工作流），ComfyUI 节点新增 `comfyWorkflowValues` 字段存储 Agent 写入的工作流参数。
+
 - 进入画布前预加载媒体内容：画布列表页点击画布卡片时先显示全屏加载动画（旋转光环 + 画布标题 + 媒体数量），后台预加载该画布的图片 / 视频 / 音频（data:image 图片转存、storageKey 签名 URL 与本地 blob URL 预热），媒体加载完成后再进入画布；预加载带 12 秒超时兜底，失败不阻塞进入。`uploadImage` 增加 dataUrl 内存缓存，画布页恢复时命中缓存避免重复上传。
 
 - 修复时间轴弹窗拖动进度条触发「Maximum update depth exceeded」：出入点裁剪滑块 onChange 直接用 `updateClipRange` 回写，浮点误差（如 2.3499999999999996）经 roundTime 对齐后与 Slider value 不一致，导致 antd 受控校正反复触发 setState 死循环；改为仅在结果实际变化时更新（changed 检测返回原引用）。播放头滑块与 `updatePlayhead` 增加 0.001 容差比较，浮点微小抖动不再触发 setState。
