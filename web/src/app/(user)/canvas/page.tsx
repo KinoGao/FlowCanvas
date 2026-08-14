@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
@@ -17,7 +17,7 @@ import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-
 import { CanvasProjectCard } from "./components/canvas-project-card";
 import type { CanvasExportFile } from "./export-types";
 import { useCanvasStore, type CanvasProject } from "./stores/use-canvas-store";
-import { countProjectMedia, preloadCanvasMedia, type CanvasMediaProgress } from "./utils/canvas-media-preload";
+import { preloadCanvasMedia } from "./utils/canvas-media-preload";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
 import { exportCanvasProjects } from "./utils/canvas-export";
 
@@ -39,7 +39,6 @@ export default function CanvasPage() {
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
 
     const [enteringProject, setEnteringProject] = useState<CanvasProject | null>(null);
-    const [enterProgress, setEnterProgress] = useState<CanvasMediaProgress | null>(null);
     const enterProject = useCallback(
         (id: string) => {
             const project = projects.find((item) => item.id === id);
@@ -48,13 +47,12 @@ export default function CanvasPage() {
                 return;
             }
             setEnteringProject(project);
-            setEnterProgress(null);
             void (async () => {
                 try {
                     // 预加载缩略图内容（data:image 转存 + 真实下载图片缩略图），
-                    // 进入动画等待内容就绪并展示进度，超时兜底不阻塞进入画布
+                    // 进入动画等待内容就绪，超时兜底不阻塞进入画布
                     await Promise.race([
-                        preloadCanvasMedia(project, setEnterProgress),
+                        preloadCanvasMedia(project),
                         new Promise<void>((resolve) => setTimeout(resolve, 12000)),
                     ]);
                 } finally {
@@ -178,21 +176,13 @@ export default function CanvasPage() {
             <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
             <CanvasDeleteProjectsDialog />
             </main>
-            {enteringProject ? <CanvasEnteringCover project={enteringProject} progress={enterProgress} /> : null}
+            {enteringProject ? <CanvasEnteringCover project={enteringProject} /> : null}
         </>
     );
 }
 
-function CanvasEnteringCover({ project, progress }: { project: CanvasProject; progress: CanvasMediaProgress | null }) {
+function CanvasEnteringCover({ project }: { project: CanvasProject }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const stats = useMemo(() => countProjectMedia(project), [project]);
-    const loadingImageCount = progress && progress.total > 0;
-    const mediaText = loadingImageCount
-        ? `正在加载图片 ${Math.min(progress.loaded, progress.total)}/${progress.total}…`
-        : stats.total
-          ? `正在加载${stats.images} 张图片 · ${stats.videos} 个视频 · ${stats.audios} 个音频…`
-          : "正在加载画布内容…";
-    const progressPercent = loadingImageCount ? Math.round((Math.min(progress.loaded, progress.total) / progress.total) * 100) : 0;
     return (
         <div
             className="fixed inset-0 z-[300] grid place-items-center"
@@ -216,13 +206,8 @@ function CanvasEnteringCover({ project, progress }: { project: CanvasProject; pr
                         {project.title}
                     </p>
                     <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>
-                        {mediaText}
+                        正在加载画布…
                     </p>
-                    {loadingImageCount ? (
-                        <div className="mx-auto mt-3 h-1 w-44 overflow-hidden rounded-full" style={{ background: theme.ui.controlFill }}>
-                            <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${progressPercent}%`, background: theme.ui.accent }} />
-                        </div>
-                    ) : null}
                 </div>
             </div>
         </div>
