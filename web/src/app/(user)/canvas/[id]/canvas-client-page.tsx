@@ -1365,11 +1365,12 @@ function LeaferCanvasPage() {
 
     const canvasToScreen = useCallback((position: Position) => {
         const rect = containerRef.current?.getBoundingClientRect();
+        const current = viewportRef.current;
         return {
-            x: (rect?.left || 0) + position.x * viewport.k + viewport.x,
-            y: (rect?.top || 0) + position.y * viewport.k + viewport.y,
+            x: (rect?.left || 0) + position.x * current.k + current.x,
+            y: (rect?.top || 0) + position.y * current.k + current.y,
         };
-    }, [viewport.k, viewport.x, viewport.y]);
+    }, [containerRef]);
 
     const setConnecting = useCallback((next: ConnectionHandle | null) => {
         connectingParamsRef.current = next;
@@ -5675,25 +5676,26 @@ function LeaferCanvasPage() {
         composerScrollRestoreRef.current = null;
         panel.scrollTop = restore;
     }, [composerContentHeight]);
-    const composerPosition = dialogNode
-        ? (() => {
-              const shellRect = canvasShellRef.current?.getBoundingClientRect();
-              const containerRect = containerRef.current?.getBoundingClientRect();
-              const nodeRect = findCanvasNodeElement(containerRef.current, dialogNode.id)?.getBoundingClientRect();
-              const shellOffsetX = shellRect ? shellRect.left : containerRect?.left || 0;
-              const shellOffsetY = shellRect ? shellRect.top : containerRect?.top || 0;
-              const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
-              const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
-              const rawLeft = nodeRect ? nodeRect.left - shellOffsetX + nodeRect.width / 2 : containerOffsetX + (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
-              const nodeBottom = nodeRect ? nodeRect.bottom - shellOffsetY : containerOffsetY + (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y;
-              return resolveComposerOverlayPosition({
-                  rawLeft,
-                  nodeBottom,
-                  composerHeight: composerContentHeight,
-                  canvasHeight: shellRect?.height || containerRect?.height || size.height,
-              });
-          })()
-        : null;
+    // 纯数学定位：节点 DOM 位于视口 transform 容器内，坐标可直接由 viewport 换算，
+    // 不再每帧 querySelector + getBoundingClientRect（平移/缩放触发的重渲染热点）。
+    // 与 handleViewportPresentation 的 60fps 命令式更新保持同一套公式，两路结果一致。
+    const composerPosition = useMemo(() => {
+        if (!dialogNode) return null;
+        const shellRect = canvasShellRef.current?.getBoundingClientRect();
+        const containerRect = containerRef.current?.getBoundingClientRect();
+        const shellOffsetX = shellRect ? shellRect.left : containerRect?.left || 0;
+        const shellOffsetY = shellRect ? shellRect.top : containerRect?.top || 0;
+        const containerOffsetX = containerRect ? containerRect.left - shellOffsetX : 0;
+        const containerOffsetY = containerRect ? containerRect.top - shellOffsetY : 0;
+        const rawLeft = containerOffsetX + (dialogNode.position.x + dialogNode.width / 2) * viewport.k + viewport.x;
+        const nodeBottom = containerOffsetY + (dialogNode.position.y + dialogNode.height) * viewport.k + viewport.y;
+        return resolveComposerOverlayPosition({
+            rawLeft,
+            nodeBottom,
+            composerHeight: composerContentHeight,
+            canvasHeight: shellRect?.height || containerRect?.height || size.height,
+        });
+    }, [composerContentHeight, dialogNode, size.height, viewport.k, viewport.x, viewport.y]);
 
     const handleViewportPresentation = useCallback((next: ViewportTransform) => {
         viewportRef.current = next;
@@ -6314,12 +6316,6 @@ function LeaferCanvasPage() {
 
 function stopCanvasPanelInteraction(event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement>) {
     event.stopPropagation();
-}
-
-function findCanvasNodeElement(root: HTMLElement | null, nodeId: string) {
-    if (!root) return null;
-    const escapedNodeId = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(nodeId) : nodeId.replace(/["\\]/g, "\\$&");
-    return root.querySelector<HTMLElement>(`[data-canvas-node-id="${escapedNodeId}"]`);
 }
 
 function CanvasPanelInput({ label, value, placeholder, onChange, style }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; style: CSSProperties }) {

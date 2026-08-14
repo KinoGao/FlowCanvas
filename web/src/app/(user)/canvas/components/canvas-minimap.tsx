@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -11,6 +11,57 @@ type CanvasViewport = { x: number; y: number; k: number };
 const MAP_WIDTH = 200;
 const MAP_HEIGHT = 140;
 const MAP_PADDING = 10;
+
+type MiniMapLayout = {
+    bounds: { left: number; top: number; right: number; bottom: number };
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+};
+
+/**
+ * 节点点位层单独 memo：平移/缩放时父组件每帧只更新视口矩形，
+ * 节点 span 列表仅在节点数据或选中集变化时才重渲染。
+ */
+const MiniMapNodeLayer = memo(function MiniMapNodeLayer({
+    nodes,
+    selectedNodeIds,
+    layout,
+    theme,
+}: {
+    nodes: CanvasNodeData[];
+    selectedNodeIds: Set<string>;
+    layout: MiniMapLayout;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+}) {
+    return (
+        <>
+            {nodes.map((node) => {
+                const point = {
+                    x: layout.offsetX + (node.position.x - layout.bounds.left) * layout.scale,
+                    y: layout.offsetY + (node.position.y - layout.bounds.top) * layout.scale,
+                };
+                const isGroup = node.type === CanvasNodeType.Group;
+                const selected = selectedNodeIds.has(node.id);
+                return (
+                    <span
+                        key={node.id}
+                        className="absolute rounded-[2px]"
+                        style={{
+                            left: point.x,
+                            top: point.y,
+                            width: Math.max(2.5, node.width * layout.scale),
+                            height: Math.max(2.5, node.height * layout.scale),
+                            background: isGroup ? "transparent" : selected ? theme.ui.accent : theme.node.faint,
+                            border: isGroup || selected ? `1px solid ${theme.ui.accent}` : "none",
+                            opacity: isGroup ? 0.7 : selected ? 0.95 : 0.55,
+                        }}
+                    />
+                );
+            })}
+        </>
+    );
+});
 
 /**
  * 画布小地图（对齐 TapNow）：DOM 实现，按节点包围盒等比缩放，
@@ -106,26 +157,7 @@ export function CanvasMiniMap({
                 </div>
             ) : (
                 <>
-                    {nodes.map((node) => {
-                        const point = toMapPoint(node.position.x, node.position.y);
-                        const isGroup = node.type === CanvasNodeType.Group;
-                        const selected = selectedNodeIds.has(node.id);
-                        return (
-                            <span
-                                key={node.id}
-                                className="absolute rounded-[2px]"
-                                style={{
-                                    left: point.x,
-                                    top: point.y,
-                                    width: Math.max(2.5, node.width * layout.scale),
-                                    height: Math.max(2.5, node.height * layout.scale),
-                                    background: isGroup ? "transparent" : selected ? theme.ui.accent : theme.node.faint,
-                                    border: isGroup || selected ? `1px solid ${theme.ui.accent}` : "none",
-                                    opacity: isGroup ? 0.7 : selected ? 0.95 : 0.55,
-                                }}
-                            />
-                        );
-                    })}
+                    <MiniMapNodeLayer nodes={nodes} selectedNodeIds={selectedNodeIds} layout={layout} theme={theme} />
                     <span
                         className="pointer-events-none absolute rounded-[3px]"
                         style={{

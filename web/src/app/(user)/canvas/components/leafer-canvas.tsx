@@ -141,6 +141,8 @@ export function LeaferCanvas({
     const draggingNodeIdsRef = useRef(new Set<string>());
     const backgroundCanvasRef = useRef<LUI.Canvas | null>(null);
     const backgroundSizeRef = useRef({ width: 0, height: 0 });
+    const backgroundPatternKeyRef = useRef("");
+    const backgroundPatternRef = useRef<CanvasPattern | null>(null);
     const verticalGuideRef = useRef<LUI.Line | null>(null);
     const horizontalGuideRef = useRef<LUI.Line | null>(null);
     const tempEdgeFlowPathRef = useRef<LUI.Path | null>(null);
@@ -245,32 +247,23 @@ export function LeaferCanvas({
             return;
         }
 
-        const gap = Math.max(8, 56 * next.k);
+        // 点阵/网格改为 pattern 瓦片渲染：低缩放下间距钳到 24px，且每帧只做一次
+        // pattern 填充——k→0.1 时旧的逐 arc 绘制每帧有数万个路径点，是平移/缩放的 60fps 热点。
+        const gap = Math.max(24, Math.round(56 * next.k));
         const offsetX = ((next.x % gap) + gap) % gap;
         const offsetY = ((next.y % gap) + gap) % gap;
-        if (backgroundModeRef.current === "dots") {
-            context.fillStyle = themeRef.current.canvas.dot;
-            context.beginPath();
-            for (let x = offsetX; x <= width; x += gap) {
-                for (let y = offsetY; y <= height; y += gap) {
-                    context.moveTo(x + 1.25, y);
-                    context.arc(x, y, 1.25, 0, Math.PI * 2);
-                }
-            }
-            context.fill();
-        } else {
-            context.strokeStyle = themeRef.current.canvas.line;
-            context.lineWidth = 1;
-            context.beginPath();
-            for (let x = offsetX; x <= width; x += gap) {
-                context.moveTo(x + 0.5, 0);
-                context.lineTo(x + 0.5, height);
-            }
-            for (let y = offsetY; y <= height; y += gap) {
-                context.moveTo(0, y + 0.5);
-                context.lineTo(width, y + 0.5);
-            }
-            context.stroke();
+        const patternKey = `${backgroundModeRef.current}|${gap}|${themeRef.current.canvas.dot}|${themeRef.current.canvas.line}`;
+        if (backgroundPatternKeyRef.current !== patternKey) {
+            backgroundPatternKeyRef.current = patternKey;
+            backgroundPatternRef.current = buildBackgroundPattern(backgroundModeRef.current, gap, themeRef.current);
+        }
+        const pattern = backgroundPatternRef.current;
+        if (pattern) {
+            context.save();
+            context.translate(offsetX, offsetY);
+            context.fillStyle = pattern;
+            context.fillRect(-offsetX, -offsetY, width + gap, height + gap);
+            context.restore();
         }
         background.paint();
     }, [containerRef]);
@@ -560,13 +553,12 @@ export function LeaferCanvas({
             }
         }
         if (updates.length) {
-            const liveNodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
             const movedNodeIds = new Set<string>();
             updates.forEach((update) => {
-                const node = liveNodeById.get(update.id);
+                const node = nodeMap.get(update.id);
                 if (!node) return;
                 movedNodeIds.add(update.id);
-                liveNodeById.set(update.id, {
+                nodeMap.set(update.id, {
                     ...node,
                     position: update.position,
                     width: update.width,
@@ -578,7 +570,7 @@ export function LeaferCanvas({
                 connectionsByNodeIdRef.current.get(nodeId)?.forEach((connection) => affectedConnections.set(connection.id, connection));
             });
             affectedConnections.forEach((connection) => {
-                const points = getConnectionPoints(connection, liveNodeById);
+                const points = getConnectionPoints(connection, nodeMap);
                 if (!points) return;
                 const path = buildConnectionPathFromPoints(points.from, points.to);
                 const visual = connectionVisualMapRef.current.get(connection.id);
@@ -833,6 +825,8 @@ export function LeaferCanvas({
             nodeElementMapRef.current.clear();
             connectionVisualMapRef.current.clear();
             backgroundCanvasRef.current = null;
+            backgroundPatternRef.current = null;
+            backgroundPatternKeyRef.current = "";
             verticalGuideRef.current = null;
             horizontalGuideRef.current = null;
             tempEdgeFlowPathRef.current = null;
@@ -1665,6 +1659,34 @@ function withAlpha(hex: string, alpha: number) {
     const g = parseInt(value.slice(2, 4), 16);
     const b = parseInt(value.slice(4, 6), 16);
     return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function buildBackgroundPattern(
+    mode: CanvasBackgroundMode,
+    gap: number,
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
+) {
+    const tile = document.createElement("canvas");
+    tile.width = gap;
+    tile.height = gap;
+    const context = tile.getContext("2d");
+    if (!context) return null;
+    if (mode === "dots") {
+        context.fillStyle = theme.canvas.dot;
+        context.beginPath();
+        context.arc(0, 0, 1.25, 0, Math.PI * 2);
+        context.fill();
+    } else {
+        context.strokeStyle = theme.canvas.line;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(0.5, 0);
+        context.lineTo(0.5, gap);
+        context.moveTo(0, 0.5);
+        context.lineTo(gap, 0.5);
+        context.stroke();
+    }
+    return context.createPattern(tile, "repeat");
 }
 
 function renderSelectionBox(app: LUI.App | null, rect: { x: number; y: number; w: number; h: number } | null, theme: (typeof canvasThemes)[keyof typeof canvasThemes]) {
