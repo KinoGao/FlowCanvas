@@ -80,6 +80,25 @@ export function resolveImageUrl(storageKey?: string, fallback = "") {
     return imageBlobs.resolveUrl(storageKey, fallback);
 }
 
+/** Canvas node rendering thumbnail width: originals are only used for preview/download/tools. */
+export const CANVAS_IMAGE_THUMBNAIL_WIDTH = 512;
+
+export function peekImageThumbnailUrl(storageKey?: string, width = CANVAS_IMAGE_THUMBNAIL_WIDTH): string | undefined {
+    const url = peekCachedImageUrl(storageKey);
+    return url ? withWidthParam(url, width) : undefined;
+}
+
+export function resolveImageThumbnailUrl(storageKey?: string, fallback = "", width = CANVAS_IMAGE_THUMBNAIL_WIDTH) {
+    if (!storageKey?.startsWith("backend:")) return resolveImageUrl(storageKey, fallback);
+    const token = useUserStore.getState().token;
+    if (!token) return Promise.resolve(fallback);
+    return resolveBackendFileUrl(storageKey, token).then((url) => (url ? withWidthParam(url, width) : fallback));
+}
+
+function withWidthParam(url: string, width: number) {
+    return url.includes("?") ? `${url}&width=${width}` : `${url}?width=${width}`;
+}
+
 export function getImageBlob(storageKey: string) {
     if (storageKey.startsWith("backend:")) {
         const token = useUserStore.getState().token;

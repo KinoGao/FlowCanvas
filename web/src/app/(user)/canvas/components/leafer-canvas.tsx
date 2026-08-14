@@ -7,7 +7,7 @@ import "@leafer-in/resize";
 import "@leafer-in/viewport";
 
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
-import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
@@ -1044,7 +1044,7 @@ export function LeaferCanvas({
             }
             const storageKey = node.metadata?.storageKey;
             const content = node.metadata?.content;
-            const cached = storageKey ? peekCachedImageUrl(storageKey) : content;
+            const cached = storageKey ? peekImageThumbnailUrl(storageKey) : content;
             if (cached) {
                 applyResolvedNodeImage(node, cached);
                 return;
@@ -1053,7 +1053,7 @@ export function LeaferCanvas({
                 markLeaferImageReady(containerRef.current, node.id, false);
                 return;
             }
-            resolveImageUrl(storageKey, content?.startsWith("blob:") ? "" : (content || ""))
+            resolveImageThumbnailUrl(storageKey, content?.startsWith("blob:") ? "" : (content || ""))
                 .then((url) => {
                     if (!cancelled && url) applyResolvedNodeImage(node, url);
                 })

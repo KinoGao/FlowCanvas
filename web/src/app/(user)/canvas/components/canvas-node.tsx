@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { peekCachedImageUrl, resolveImageUrl } from "@/services/image-storage";
+import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasNodeType, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
@@ -34,7 +34,7 @@ function isGenerationConfigNode(type: CanvasNodeType) {
 function useLazyMediaUrl(storageKey: string | undefined, content: string | undefined, type: "image" | "media"): string {
     const [url, setUrl] = useState<string>(() => {
         if (!storageKey) return content ?? "";
-        const cached = type === "image" ? peekCachedImageUrl(storageKey) : peekCachedMediaUrl(storageKey);
+        const cached = type === "image" ? peekImageThumbnailUrl(storageKey) : peekCachedMediaUrl(storageKey);
         return cached ?? "";
     });
 
@@ -43,8 +43,9 @@ function useLazyMediaUrl(storageKey: string | undefined, content: string | undef
             setUrl(content ?? "");
             return;
         }
-        const resolve = type === "image" ? resolveImageUrl : resolveMediaUrl;
-        const peek = type === "image" ? peekCachedImageUrl : peekCachedMediaUrl;
+        // 图片节点渲染用缩略图（原图仅用于预览/下载/工具参考）
+        const resolve = type === "image" ? resolveImageThumbnailUrl : resolveMediaUrl;
+        const peek = type === "image" ? peekImageThumbnailUrl : peekCachedMediaUrl;
         let cancelled = false;
         setUrl(peek(storageKey) ?? "");
         resolve(storageKey, content?.startsWith("blob:") ? "" : (content ?? ""))
