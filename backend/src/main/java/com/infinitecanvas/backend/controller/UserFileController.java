@@ -3,6 +3,7 @@ package com.infinitecanvas.backend.controller;
 import com.infinitecanvas.backend.dto.ApiResponse;
 import com.infinitecanvas.backend.entity.User;
 import com.infinitecanvas.backend.entity.UserFile;
+import com.infinitecanvas.backend.service.ImageThumbnailService;
 import com.infinitecanvas.backend.service.MediaAccessService;
 import com.infinitecanvas.backend.service.UserFileService;
 import com.infinitecanvas.backend.service.UserRequestContext;
@@ -28,10 +29,12 @@ public class UserFileController {
 
     private final UserFileService fileService;
     private final MediaAccessService mediaAccess;
+    private final ImageThumbnailService thumbnails;
 
-    public UserFileController(UserFileService fileService, MediaAccessService mediaAccess) {
+    public UserFileController(UserFileService fileService, MediaAccessService mediaAccess, ImageThumbnailService thumbnails) {
         this.fileService = fileService;
         this.mediaAccess = mediaAccess;
+        this.thumbnails = thumbnails;
     }
 
     @PostMapping
@@ -73,13 +76,29 @@ public class UserFileController {
             @PathVariable String id,
             @RequestParam("uid") String userId,
             @RequestParam("expires") long expires,
-            @RequestParam("signature") String signature
+            @RequestParam("signature") String signature,
+            @RequestParam(name = "width", required = false) Integer width
     ) {
         String storageKey = prefix + ":" + id;
         if (!mediaAccess.verify(userId, storageKey, expires, signature)) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         UserFile file = fileService.findByOwnerId(userId, storageKey);
         Resource resource = file == null ? null : fileService.loadByOwnerId(userId, storageKey);
         if (file == null || resource == null) return ResponseEntity.notFound().build();
+        // 缩略图：仅对图片生效，签名之外的白名单参数，生成失败（不可解码/已足够小）时回退原图
+        if (width != null && file.getContentType() != null && file.getContentType().startsWith("image/")) {
+            try {
+                ImageThumbnailService.Thumbnail thumbnail = thumbnails.load(userId, file, resource, width);
+                if (thumbnail != null) {
+                    return ResponseEntity.ok()
+                            .cacheControl(CacheControl.maxAge(Duration.ofHours(24)).cachePrivate())
+                            .contentType(MediaType.parseMediaType(thumbnail.contentType()))
+                            .header("X-Content-Type-Options", "nosniff")
+                            .body(thumbnail.resource());
+                }
+            } catch (Exception ignored) {
+                // 缩略图生成失败不影响原图访问
+            }
+        }
         // contentType 来自客户端上传，不可信：白名单外一律按二进制附件返回，
         // 并始终加 nosniff，防止存储型 XSS（伪造 text/html 在源站执行）。
         MediaType mediaType = safeMediaType(file.getContentType());
