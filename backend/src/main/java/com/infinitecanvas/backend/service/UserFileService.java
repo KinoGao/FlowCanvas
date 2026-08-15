@@ -48,6 +48,13 @@ public class UserFileService {
             throw new IllegalArgumentException("invalid base64 in data URL", error);
         }
         if (bytes.length == 0) throw new IllegalArgumentException("data URL has no bytes");
+        return saveBytes(user, bytes, fileName, effectiveType);
+    }
+
+    /** 直接保存字节内容（Agent Run 服务端执行器落盘生成产物使用）。 */
+    public UserFile saveBytes(User user, byte[] bytes, String fileName, String contentType) {
+        if (bytes == null || bytes.length == 0) throw new IllegalArgumentException("文件内容为空");
+        String effectiveType = (contentType == null || contentType.isBlank()) ? "application/octet-stream" : contentType;
         String id = UUID.randomUUID().toString().replace("-", "");
         String ext = extension(effectiveType, fileName);
         String storageKey = "backend:" + id;

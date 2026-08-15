@@ -128,6 +128,24 @@ description: 后端配置同步服务的 SQLite 数据库表结构说明
 | `created_at` | TIMESTAMP | 创建时间 |
 | `updated_at` | TIMESTAMP | 最后更新时间 |
 
+### agent_runs 表
+
+Agent Run 服务端批量生成任务组（画布 Agent「任务规划」模式确认后创建）。任务列表以 JSON 内嵌在 `tasks_json`（每任务含 id/nodeId/type/prompt/modelId/params/dependencies/status/attempts/error/upstreamTaskId/result），执行状态机由后端 `AgentRunExecutor` 驱动（拓扑派发、视频轮询、产物落盘到 `user_files`）。接口：`POST /api/agent-runs` 创建并启动、`GET /api/agent-runs?projectId=`、`GET /api/agent-runs/{id}`、`POST /api/agent-runs/{id}/pause|resume|cancel`、`POST /api/agent-runs/{id}/tasks/{taskId}/retry`。
+
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| `id` | VARCHAR (PK) | run ID（前端生成） |
+| `user_id` | VARCHAR (FK) | 所属用户，接口按账号隔离 |
+| `project_id` | VARCHAR | 所属画布项目 |
+| `title` | VARCHAR | 标题 |
+| `requirement` | TEXT | 原始需求文本 |
+| `plan_json` | TEXT | 创作计划 JSON（简报/视觉方向/产物清单） |
+| `tasks_json` | TEXT | 任务数组 JSON（状态机载体） |
+| `status` | VARCHAR | RUNNING / PAUSED / COMPLETED / FAILED / CANCELLED |
+| `session_token` | VARCHAR | 创建时的会话令牌（执行器自调用模型代理鉴权用） |
+| `created_at` | TIMESTAMP | 创建时间 |
+| `updated_at` | TIMESTAMP | 最后更新时间 |
+
 ### assets 表
 
 按用户保存素材库条目。素材文件本体通过 `user_files` 落盘，素材条目中的 `storageKey` 指向对应文件。
