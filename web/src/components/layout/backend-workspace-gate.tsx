@@ -23,7 +23,7 @@ export function BackendWorkspaceGate({ title = "后端工作区" }: { title?: st
 
     return (
         <main className="flex h-full min-h-[420px] items-center justify-center bg-background px-6 text-foreground">
-            <section className="w-full max-w-sm rounded-xl border border-border bg-card p-10 text-center shadow-sm">
+            <section className="w-full max-w-sm rounded-2xl border border-border bg-card p-10 text-center shadow-[0_24px_70px_rgba(0,0,0,0.08)] dark:shadow-[0_24px_70px_rgba(0,0,0,0.4)]">
                 <span className="mx-auto grid size-12 place-items-center rounded-full border border-border bg-muted/60">
                     <Icon className={"size-5 " + (!needsLogin && !failed ? "animate-spin" : "")} />
                 </span>

@@ -207,70 +207,70 @@ export default function AssetsPage() {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-            <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-6 py-8 [background-size:16px_16px] dark:bg-[radial-gradient(rgba(245,245,244,.14)_1px,transparent_1px)]">
-                <div className="pb-8">
-                    <div className="mx-auto max-w-5xl text-center">
-                        <h1 className="text-4xl font-semibold tracking-tight text-stone-950 dark:text-stone-100">我的素材</h1>
-                        <p className="mt-3 text-sm text-stone-500 dark:text-stone-400">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
-                    </div>
+            <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+                <div className="mx-auto max-w-7xl pb-8">
+                    <header className="flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <p className="text-xs text-muted-foreground">资产</p>
+                            <h1 className="mt-2 text-3xl font-semibold tracking-tight">我的素材</h1>
+                            <p className="mt-2 text-sm text-muted-foreground">收藏常用文本和图片，按类型、标题和标签快速查找。</p>
+                        </div>
+                        <div className="flex flex-wrap gap-4">
+                            <button
+                                type="button"
+                                className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                onClick={() => void exportAllAssets()}
+                            >
+                                导出素材
+                            </button>
+                            <button
+                                type="button"
+                                className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
+                                onClick={() => assetInputRef.current?.click()}
+                            >
+                                导入素材
+                            </button>
+                            <button type="button" className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300" onClick={openCreate}>
+                                新增素材
+                            </button>
+                        </div>
+                    </header>
 
-                    <div className="mx-auto mt-8 w-full max-w-2xl">
-                        <Input.Search
-                            className="w-full"
-                            size="large"
-                            allowClear
-                            prefix={<Search className="size-4 text-stone-400" />}
-                            value={keyword}
-                            placeholder="搜索标题、内容、标签或来源"
-                            onChange={(event) => {
-                                setPage(1);
-                                setKeyword(event.target.value);
-                            }}
-                            onSearch={(value) => {
-                                setPage(1);
-                                setKeyword(value);
-                            }}
-                        />
-                    </div>
-
-                    <div className="mx-auto mt-6 grid max-w-6xl gap-3 text-left">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
-                                <div className="text-xs font-medium text-stone-500 dark:text-stone-400">类型</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {kindOptions.map((option) => (
-                                        <Tag.CheckableTag
-                                            key={option.value}
-                                            checked={kindFilter === option.value}
-                                            className={cn("prompt-filter-tag", kindFilter === option.value && "is-active")}
-                                            onChange={() => {
-                                                setPage(1);
-                                                setKindFilter(option.value as AssetKind | "all");
-                                            }}
-                                        >
-                                            {option.label}
-                                        </Tag.CheckableTag>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap gap-4">
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => void exportAllAssets()}
-                                >
-                                    导出素材
-                                </button>
-                                <button
-                                    type="button"
-                                    className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300"
-                                    onClick={() => assetInputRef.current?.click()}
-                                >
-                                    导入素材
-                                </button>
-                                <button type="button" className="cursor-pointer text-sm font-medium text-stone-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline dark:text-stone-300" onClick={openCreate}>
-                                    新增素材
-                                </button>
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="w-full max-w-md">
+                            <Input.Search
+                                className="w-full"
+                                size="large"
+                                allowClear
+                                prefix={<Search className="size-4 text-stone-400" />}
+                                value={keyword}
+                                placeholder="搜索标题、内容、标签或来源"
+                                onChange={(event) => {
+                                    setPage(1);
+                                    setKeyword(event.target.value);
+                                }}
+                                onSearch={(value) => {
+                                    setPage(1);
+                                    setKeyword(value);
+                                }}
+                            />
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
+                            <div className="text-xs font-medium text-muted-foreground">类型</div>
+                            <div className="flex flex-wrap gap-2">
+                                {kindOptions.map((option) => (
+                                    <Tag.CheckableTag
+                                        key={option.value}
+                                        checked={kindFilter === option.value}
+                                        className={cn("prompt-filter-tag", kindFilter === option.value && "is-active")}
+                                        onChange={() => {
+                                            setPage(1);
+                                            setKindFilter(option.value as AssetKind | "all");
+                                        }}
+                                    >
+                                        {option.label}
+                                    </Tag.CheckableTag>
+                                ))}
                             </div>
                         </div>
                     </div>

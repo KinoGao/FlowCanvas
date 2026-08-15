@@ -1,29 +1,25 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { App, Button, Image, Tag } from "antd";
+import { ArrowRight, ArrowUpRight, FileText, ImagePlus, Images, Maximize2, Video } from "lucide-react";
+import { useEffect, useState } from "react";
+import { App, Image, Tag } from "antd";
+import { Link } from "react-router-dom";
 
 import { fetchPrompts, type Prompt } from "@/services/api/prompts";
-import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
 
-function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
-    return (
-        <span className="relative inline-block px-1">
-            {action === "highlight" ? (
-                <span className="absolute inset-x-0 bottom-0 top-1 rounded-sm opacity-45" style={{ backgroundColor: color }} />
-            ) : (
-                <span className="absolute inset-x-0 bottom-0 h-1 rounded-full opacity-80" style={{ backgroundColor: color }} />
-            )}
-            <span className="relative font-medium text-stone-800 dark:text-stone-200">{children}</span>
-        </span>
-    );
-}
+const QUICK_ENTRIES = [
+    { to: "/image", label: "AI 绘图", icon: ImagePlus },
+    { to: "/video", label: "AI 视频", icon: Video },
+    { to: "/canvas", label: "画布", icon: Maximize2 },
+    { to: "/prompts", label: "提示词", icon: FileText },
+    { to: "/assets", label: "素材", icon: Images },
+] as const;
+
+const SUGGESTIONS = ["生成一张科幻城市概念图", "制作一段产品宣传视频", "创作一个短剧分镜脚本"];
 
 export default function IndexPage() {
     const { message } = App.useApp();
-    const [primaryTool] = navigationTools;
     const [promptShowcase, setPromptShowcase] = useState<Prompt[]>([]);
     const [previewIndex, setPreviewIndex] = useState(0);
     const [previewOpen, setPreviewOpen] = useState(false);
@@ -35,44 +31,68 @@ export default function IndexPage() {
     }, [message]);
 
     return (
-        <main className="relative h-full overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
-            <section className="relative mx-auto min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden px-6">
-                <div className="pointer-events-none absolute left-[15%] top-24 size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
-                <div className="pointer-events-none absolute right-[23%] top-[48%] size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
-
-                <div className="relative flex min-h-[620px] flex-col items-center justify-center pt-10 text-center">
-                    <h1 className="ai-title-aurora max-w-5xl text-balance text-5xl font-semibold tracking-normal sm:text-7xl lg:text-8xl">无限画布</h1>
-                    <p className="mt-8 max-w-3xl text-balance text-lg leading-8 text-stone-500 dark:text-stone-400">
-                        在
-                        <Highlighter action="underline" color="#FF9800">
-                            无限画布
-                        </Highlighter>
-                        中生成、连接和重组
-                        <Highlighter action="highlight" color="#87CEFA">
-                            图片、文字与图形
-                        </Highlighter>
-                        ，让创作从单次生成变成连续推演。
+        <main className="relative h-full overflow-y-auto bg-background text-foreground">
+            <section className="relative mx-auto flex min-h-full max-w-6xl flex-col px-6 pb-20">
+                {/* Hero：居中大标题 + 中央创作入口卡（对齐 VOZEB 首页） */}
+                <div className="relative flex flex-col items-center pb-16 pt-24 text-center">
+                    <span className="rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-sm">开源 · 无限画布 + 节点式工作流</span>
+                    <h1 className="mt-8 max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-6xl lg:text-7xl">
+                        一块画布 完成所有{" "}
+                        <span className="bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 bg-clip-text text-transparent">AI 创作</span>
+                    </h1>
+                    <p className="mt-6 max-w-2xl text-balance text-base leading-7 text-muted-foreground sm:text-lg">
+                        编排节点、组合素材、批量生成，让创作从单次生成变成连续推演
                     </p>
-                    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" href={`/${primaryTool.slug}`} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            开始使用
-                        </Button>
-                        <Button size="large" href="/canvas">
-                            打开画布
-                        </Button>
+
+                    <div className="mt-12 w-full max-w-3xl rounded-3xl border border-border bg-card p-5 text-left shadow-[0_24px_70px_rgba(0,0,0,0.08)] dark:shadow-[0_24px_70px_rgba(0,0,0,0.4)]">
+                        <p className="px-1 text-sm text-muted-foreground">描述你想创作的内容，比如：</p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {SUGGESTIONS.map((text, index) => (
+                                <Link
+                                    key={text}
+                                    to={QUICK_ENTRIES[index].to}
+                                    className="rounded-full border border-border bg-background px-4 py-2 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
+                                >
+                                    {text}
+                                </Link>
+                            ))}
+                        </div>
+                        <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+                            <div className="flex flex-wrap gap-2">
+                                {QUICK_ENTRIES.map((entry) => (
+                                    <Link
+                                        key={entry.to}
+                                        to={entry.to}
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3.5 py-2 text-sm text-foreground transition hover:bg-accent"
+                                    >
+                                        <entry.icon className="size-4" />
+                                        {entry.label}
+                                    </Link>
+                                ))}
+                            </div>
+                            <Link
+                                to="/canvas"
+                                className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition hover:opacity-85"
+                                aria-label="进入画布"
+                                title="进入画布"
+                            >
+                                <ArrowUpRight className="size-5" />
+                            </Link>
+                        </div>
                     </div>
                 </div>
 
-                <section className="relative mx-auto mb-20 max-w-6xl border-t border-stone-200 pt-12 dark:border-stone-800">
-                    <div className="mb-8 grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-start">
-                        <div />
-                        <div className="max-w-2xl text-center">
-                            <h2 className="text-3xl font-semibold text-stone-950 dark:text-stone-100">沉淀每一次好结果</h2>
-                            <p className="mt-3 text-base leading-7 text-stone-500 dark:text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
+                {/* 提示词灵感 */}
+                <section className="relative border-t border-border pt-12">
+                    <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <h2 className="text-2xl font-semibold tracking-tight">沉淀每一次好结果</h2>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
                         </div>
-                        <Button type="link" href="/prompts" className="justify-self-center md:justify-self-end" icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                        <Link to="/prompts" className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground">
                             查看提示词库
-                        </Button>
+                            <ArrowRight className="size-4" />
+                        </Link>
                     </div>
                     <div className="grid auto-rows-[210px] gap-4 md:grid-cols-4">
                         {promptShowcase.map((item, index) => (
@@ -84,7 +104,7 @@ export default function IndexPage() {
                                     setPreviewOpen(true);
                                 }}
                                 className={cn(
-                                    "group relative cursor-pointer overflow-hidden border border-stone-200 bg-stone-100 text-left dark:border-stone-800 dark:bg-stone-900",
+                                    "group relative cursor-pointer overflow-hidden rounded-2xl border border-border bg-muted text-left",
                                     index === 0 && "md:col-span-2 md:row-span-2",
                                     index === 3 && "md:col-span-2",
                                 )}
@@ -92,8 +112,8 @@ export default function IndexPage() {
                                 {item.coverUrl ? (
                                     <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
                                 ) : (
-                                    <div className="flex h-full w-full items-center justify-center bg-stone-200 dark:bg-stone-800">
-                                        <span className="text-sm text-stone-400">暂无封面</span>
+                                    <div className="flex h-full w-full items-center justify-center">
+                                        <span className="text-sm text-muted-foreground">暂无封面</span>
                                     </div>
                                 )}
                                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/35 to-transparent p-4 text-white">
