@@ -1556,3 +1556,10 @@
         animation: none;
     }
 }
+
+/* 原生 <button> 上的 Tailwind 分层工具类会被 antd 未分层 reset（color: inherit）覆盖，
+   实心主按钮统一用这个未分层类（背景 --primary / 文字 --primary-foreground）。 */
+.btn-solid-primary {
+    background: var(--primary);
+    color: var(--primary-foreground);
+}

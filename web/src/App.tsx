@@ -7,6 +7,7 @@ import RegisterPage from "@/app/(auth)/register/page";
 import AssetsPage from "@/app/(user)/assets/page";
 import CanvasPage from "@/app/(user)/canvas/[id]/canvas-client-page";
 import CanvasLibraryPage from "@/app/(user)/canvas/page";
+import CreatePage from "@/app/(user)/create/page";
 import IndexPage from "@/app/(user)/page";
 import PromptsPage from "@/app/(user)/prompts/page";
 import AdminPage from "@/app/admin/page";
@@ -22,6 +23,7 @@ export default function App() {
             <Routes>
                 <Route element={<UserLayout />}>
                     <Route index element={<IndexPage />} />
+                    <Route path="create" element={<CreatePage />} />
                     <Route path="canvas" element={<CanvasLibraryPage />} />
                     <Route path="canvas/:id" element={<CanvasPage />} />
                     <Route path="assets" element={<AssetsPage />} />

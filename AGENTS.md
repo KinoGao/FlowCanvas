@@ -107,6 +107,7 @@ FlowCanvas/
 │       │   ├── (auth)/      # 登录 / 注册（VOZEB 双栏卡片，auth-split-card 共享布局）
 │       │   └── (user)/
 │       │       ├── canvas/    # 画布页面及节点实现
+│       │       ├── create/    # 统一创作 Agent 页（/create）
 │       │       ├── prompts/   # 提示词库
 │       │       └── assets/    # 素材
 │       ├── components/       # 全局组件 + 跨页面 UI（含 layout/ ui/ prompts/）

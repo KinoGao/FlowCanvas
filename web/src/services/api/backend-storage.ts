@@ -79,7 +79,7 @@ export async function pushBackendAssets(token: string, assets: Asset[]): Promise
     );
 }
 
-export type GenerationLogKind = "image" | "video";
+export type GenerationLogKind = "image" | "video" | "chat";
 
 export async function fetchBackendGenerationLogs<T>(token: string, kind: GenerationLogKind): Promise<T[]> {
     return readApi<T[]>(

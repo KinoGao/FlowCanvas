@@ -3,6 +3,16 @@ title: 待测试
 description: 当前版本已实现但仍需人工验证的变更项
 ---
 
+## 统一创作 Agent 页 /create
+
+- 新增 `/create` 统一创作 Agent 页（侧边栏恢复「创作」组，只放 Agent 入口）：左侧会话栏（新建/切换/删除，空态引导）+ 对话区 + 底部 Composer（模式胶囊：智能模式 / AI 绘图 / AI 视频 / AI 音频；参考图上传与粘贴；Enter 发送）。
+- 智能模式：复用画布在线 Agent 的流式工具调用链路（`requestToolResponse`），创作专属系统提示词 + 三个生成工具（generate_image / generate_video / generate_audio，自动执行、最多 6 步循环），生成结果作为附件追加到助手回复；直接模式（绘图/视频/音频）把输入当提示词直接调对应生成链路。
+- 生成产物统一转存账号文件（uploadImage / storeGeneratedVideo / storeGeneratedAudio），消息附件渲染时按 storageKey 重新签名；生成调用自动带幂等 jobId 机制（代理层既有能力）。
+- 会话持久化：复用 generation-logs 通道，后端 `normalizeGenerationKind` 白名单新增 `chat` 类型（一行），会话按账号保存、跨设备可恢复。
+- 修复：原生 `<button>` 上的 Tailwind 分层文字色工具类会被 antd 未分层 reset（`color: inherit`）覆盖导致主按钮白字变深色，新增未分层 `.btn-solid-primary` 类用于实心主按钮。
+- 需要确认：智能模式下文本问答流式回复正常；三种直接模式分别生成图片/视频/音频并以附件展示；参考图上传/粘贴后图生图生效；会话刷新后恢复；深浅主题显示正常。注意：实际生成会消耗模型额度，测试时留意。
+
+
 ## 移除独立生图/视频/ComfyUI 页面
 
 - 侧边栏「创作」组整组移除：生图工作台（/image）、视频创作台（/video）、ComfyUI（/comfyui）三个独立页面及其路由已删除（用户决策：这些能力由画布节点承载，不需单列页面），旧地址进入 404 页；工作台侧边栏现为 项目（画布）/ 资产（素材/提示词）+ 帮助/管理后台。

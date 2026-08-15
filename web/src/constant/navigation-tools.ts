@@ -1,4 +1,4 @@
-import { FileText, Images, Maximize2 } from "lucide-react";
+import { FileText, Images, Maximize2, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type NavigationTool = {
@@ -9,6 +9,10 @@ export type NavigationTool = {
 
 /** 工作台侧边栏分组导航（对齐 VOZEB 工作台信息架构）。生图/视频/ComfyUI 能力由画布节点承载，不单列页面。 */
 export const navigationGroups: ReadonlyArray<{ label: string; tools: ReadonlyArray<NavigationTool> }> = [
+    {
+        label: "创作",
+        tools: [{ slug: "create", label: "Agent", icon: Sparkles }],
+    },
     {
         label: "项目",
         tools: [{ slug: "canvas", label: "画布", icon: Maximize2 }],
