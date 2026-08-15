@@ -18,6 +18,12 @@ import { useUserStore } from "@/stores/use-user-store";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { AgentChatComposer, AgentChatMessage, AgentWorkingMessage, type CanvasAgentChatMessage, type CanvasAgentMode } from "./canvas-agent-chat-ui";
+import { AgentRunCard } from "../agent-run/agent-run-card";
+import { AgentRunExecutor, reconcileAgentRun } from "../agent-run/agent-run-executor";
+import { compileAgentRunOps } from "../agent-run/agent-run-ops";
+import { requestAgentRunPlan } from "../agent-run/agent-run-planner";
+import type { AgentRun } from "../agent-run/agent-run-types";
+import { fetchBackendGenerationLogs, putBackendGenerationLog } from "@/services/api/backend-storage";
 import { CanvasLocalAgentPanel } from "./canvas-local-agent-panel";
 import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasAssistantSession, type CanvasNodeData } from "../types";
@@ -333,6 +339,12 @@ export function CanvasAssistantPanel({
     const setAgentState = useCanvasAgentStore((state) => state.setAgentState);
     const [width, setWidth] = useState(() => (typeof window === "undefined" ? 560 : Math.min(960, Math.max(480, Math.round(window.innerWidth * 0.48)))));
     const [view, setView] = useState<OnlineAgentTab>("chat");
+    const [chatMode, setChatMode] = useState<"talk" | "run">("talk");
+    const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+    const agentRunsRef = useRef<AgentRun[]>([]);
+    const agentRunExecutorsRef = useRef(new Map<string, AgentRunExecutor>());
+    const agentRunsLoadedRef = useRef(false);
+    const token = useUserStore((state) => state.token);
     const [prompt, setPrompt] = useState("");
     const [isRunning, setIsRunning] = useState(false);
     const [deleteChatIds, setDeleteChatIds] = useState<string[]>([]);
@@ -454,6 +466,104 @@ export function CanvasAssistantPanel({
         setLocalSessions([session]);
         setLocalActiveSessionId(session.id);
         cleanupImages({ sessions: [session] });
+    };
+
+    const upsertAgentRun = (run: AgentRun) => {
+        setAgentRuns((current) => {
+            const next = current.some((item) => item.id === run.id) ? current.map((item) => (item.id === run.id ? run : item)) : [run, ...current];
+            agentRunsRef.current = next;
+            return next;
+        });
+        if (token) void putBackendGenerationLog(token, "agentrun", run.id, run).catch(() => {});
+    };
+
+    const getAgentRunExecutor = (run: AgentRun) => {
+        let executor = agentRunExecutorsRef.current.get(run.id);
+        if (!executor) {
+            executor = new AgentRunExecutor(run, {
+                getNodes: () => snapshotRef.current.nodes,
+                applyOps: (ops) => onApplyOps(ops),
+                onRunChange: upsertAgentRun,
+            });
+            agentRunExecutorsRef.current.set(run.id, executor);
+        }
+        return executor;
+    };
+
+    // 加载本画布的 Agent Run（跨刷新恢复；进行中的任务与节点状态对账后标为可继续）
+    useEffect(() => {
+        if (!token || agentRunsLoadedRef.current) return;
+        agentRunsLoadedRef.current = true;
+        void fetchBackendGenerationLogs<AgentRun>(token, "agentrun")
+            .then((items) => {
+                const mine = items.filter((run) => run.projectId === snapshot.projectId).map((run) => reconcileAgentRun(run, snapshot.nodes));
+                if (mine.length) {
+                    agentRunsRef.current = mine;
+                    setAgentRuns(mine);
+                }
+            })
+            .catch(() => {});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, snapshot.projectId]);
+
+    const startAgentRun = (run: AgentRun) => {
+        if (!run.plan) return;
+        const { ops, tasks } = compileAgentRunOps(run, run.plan, snapshotRef.current, {
+            textModel: effectiveConfig.textModel || effectiveConfig.model,
+            imageModel: effectiveConfig.imageModel || effectiveConfig.model,
+            videoModel: effectiveConfig.videoModel || effectiveConfig.model,
+            audioModel: effectiveConfig.audioModel || effectiveConfig.model,
+        });
+        const withTasks: AgentRun = { ...run, tasks, status: "running", updatedAt: Date.now() };
+        upsertAgentRun(withTasks);
+        void onApplyOps(ops);
+        const executor = new AgentRunExecutor(withTasks, { getNodes: () => snapshotRef.current.nodes, applyOps: (ops2) => onApplyOps(ops2), onRunChange: upsertAgentRun });
+        agentRunExecutorsRef.current.set(run.id, executor);
+        executor.start();
+    };
+
+    const handleAgentRunResume = (run: AgentRun) => {
+        // 重新执行时以最新 run 重建执行器（避免暂停/失败前的旧内部状态）
+        agentRunExecutorsRef.current.delete(run.id);
+        getAgentRunExecutor(run).resume();
+    };
+
+    const handleAgentRunRetryTask = (run: AgentRun, taskId: string) => {
+        getAgentRunExecutor(run).retryTask(taskId);
+    };
+
+    // 任务规划模式：一次规划出创作计划（简报+视觉方向+产物清单），确认后编译为画布节点并按依赖执行
+    const startAgentRunFlow = async (text: string) => {
+        const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
+        if (!isAiConfigReady(requestConfig, requestConfig.model)) {
+            openConfigDialog(true);
+            return;
+        }
+        const session = activeSession || createSession();
+        if (!activeSession) {
+            setLocalSessions([session]);
+            setLocalActiveSessionId(session.id);
+        }
+        appendMessage(session.id, { id: nanoid(), role: "user", text });
+        setPrompt("");
+        setIsRunning(true);
+        const run: AgentRun = { id: nanoid(), projectId: snapshot.projectId, title: text.slice(0, 24), requirement: text, status: "planning", tasks: [], createdAt: Date.now(), updatedAt: Date.now() };
+        try {
+            const plan = await requestAgentRunPlan(effectiveConfig, text, snapshotRef.current);
+            if (plan.intent === "conversation" || !plan.deliverables.length) {
+                appendMessage(session.id, { id: nanoid(), role: "assistant", text: plan.reply });
+                return;
+            }
+            const planned: AgentRun = { ...run, plan, status: "planned", title: plan.foundation?.brief.objective?.slice(0, 24) || run.title, updatedAt: Date.now() };
+            upsertAgentRun(planned);
+            addOnlineLog("创作计划", plan);
+            appendMessage(session.id, { id: nanoid(), role: "assistant", text: plan.reply });
+            appendMessage(session.id, { id: nanoid(), role: "tool", title: "创作计划", text: "", detail: { kind: "agentRun", runId: planned.id } });
+        } catch (error) {
+            appendMessage(session.id, { id: nanoid(), role: "error", title: "规划失败", text: error instanceof Error ? error.message : "创作计划生成失败" });
+        } finally {
+            setIsRunning(false);
+        }
     };
 
     const sendMessage = async (text: string, history: CanvasAssistantMessage[], savedReferences?: CanvasAssistantReference[]) => {
@@ -655,6 +765,10 @@ export function CanvasAssistantPanel({
     const submit = async () => {
         const text = prompt.trim();
         if (!text || isRunning) return;
+        if (chatMode === "run") {
+            await startAgentRunFlow(text);
+            return;
+        }
         await sendMessage(text, messages);
     };
 
@@ -720,7 +834,19 @@ export function CanvasAssistantPanel({
                         <>
                             {messages.map((message) => (
                                 <div key={message.id} className="space-y-2">
-                                    <AgentChatMessage item={assistantMessageToChatMessage(message)} theme={theme} user={user} onRejectTool={rejectOnlineTool} onApproveTool={approveOnlineTool} />
+                                    {objectDetail(message.detail).kind === "agentRun" && agentRuns.find((run) => run.id === objectDetail(message.detail).runId) ? (
+                                        <AgentRunCard
+                                            run={agentRuns.find((run) => run.id === objectDetail(message.detail).runId)!}
+                                            theme={theme}
+                                            onStart={startAgentRun}
+                                            onPause={(run) => getAgentRunExecutor(run).pause()}
+                                            onResume={handleAgentRunResume}
+                                            onCancel={(run) => getAgentRunExecutor(run).cancel()}
+                                            onRetryTask={handleAgentRunRetryTask}
+                                        />
+                                    ) : (
+                                        <AgentChatMessage item={assistantMessageToChatMessage(message)} theme={theme} user={user} onRejectTool={rejectOnlineTool} onApproveTool={approveOnlineTool} />
+                                    )}
                                     {message.references?.length ? <MessageReferences message={message} /> : null}
                                 </div>
                             ))}
@@ -788,6 +914,20 @@ export function CanvasAssistantPanel({
                             ))}
                         </div>
                     ) : null}
+                    <div className="flex items-center justify-end gap-2 px-3 pb-1.5">
+                        <span className="text-[11px]" style={{ color: theme.node.muted }}>
+                            {chatMode === "run" ? "任务规划：一次出完整创作计划，确认后按依赖批量执行" : "对话操作：逐步指挥 Agent 操作画布"}
+                        </span>
+                        <Segmented
+                            size="small"
+                            value={chatMode}
+                            onChange={(value) => setChatMode(value as "talk" | "run")}
+                            options={[
+                                { label: "对话操作", value: "talk" },
+                                { label: "任务规划", value: "run" },
+                            ]}
+                        />
+                    </div>
                     <AgentChatComposer
                         prompt={prompt}
                         sending={isRunning}

@@ -106,7 +106,7 @@ FlowCanvas/
 │       ├── app/          # 路由 + 页面（(user) / (auth) 分组）
 │       │   ├── (auth)/      # 登录 / 注册（VOZEB 双栏卡片，auth-split-card 共享布局）
 │       │   └── (user)/
-│       │       ├── canvas/    # 画布页面及节点实现
+│       │       ├── canvas/    # 画布页面及节点实现（含 agent-run/ Agent Run 任务规划：规划器/ops 编译器/执行器/进度卡片）
 │       │       ├── create/    # 统一创作 Agent 页（/create）
 │       │       ├── prompts/   # 提示词库
 │       │       └── assets/    # 素材

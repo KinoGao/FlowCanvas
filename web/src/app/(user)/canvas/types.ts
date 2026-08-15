@@ -203,7 +203,13 @@ export type CanvasMediaMetadata = {
     durationMs?: number;
 };
 
-export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasMediaMetadata;
+/** Agent Run 任务节点标记（agent-run 编译器写入，用于状态跟踪与恢复） */
+export type CanvasAgentRunMetadata = {
+    agentRunId?: string;
+    agentTaskId?: string;
+};
+
+export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
 
 export type CanvasNodeData = {
     id: string;

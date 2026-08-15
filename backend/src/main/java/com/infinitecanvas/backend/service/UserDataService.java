@@ -192,7 +192,7 @@ public class UserDataService {
 
     private String normalizeGenerationKind(String kind) {
         String normalized = string(kind).toLowerCase(Locale.ROOT);
-        if (!normalized.equals("image") && !normalized.equals("video") && !normalized.equals("chat")) {
+        if (!normalized.equals("image") && !normalized.equals("video") && !normalized.equals("chat") && !normalized.equals("agentrun")) {
             throw new IllegalArgumentException("不支持的生成记录类型");
         }
         return normalized;
