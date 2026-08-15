@@ -36,7 +36,7 @@ export function BackendWorkspaceGate({ title = "后端工作区" }: { title?: st
                           : "正在从账号后端恢复工作区，请稍候。"}
                 </p>
                 {needsLogin ? (
-                    <Button className="mt-7" type="primary" icon={<LogIn className="size-4" />} onClick={() => openConfigDialog(false)}>
+                    <Button className="mt-7" type="primary" icon={<LogIn className="size-4" />} href="/login">
                         登录账号
                     </Button>
                 ) : failed ? (

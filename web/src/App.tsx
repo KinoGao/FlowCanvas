@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import UserLayout from "@/app/(user)/layout";
+import LoginPage from "@/app/(auth)/login/page";
+import RegisterPage from "@/app/(auth)/register/page";
 import AssetsPage from "@/app/(user)/assets/page";
 import CanvasPage from "@/app/(user)/canvas/[id]/canvas-client-page";
 import CanvasLibraryPage from "@/app/(user)/canvas/page";
@@ -30,6 +32,8 @@ export default function App() {
                     <Route path="prompts" element={<PromptsPage />} />
                     <Route path="canvas/:id/*" element={<Navigate to=".." replace />} />
                 </Route>
+                <Route path="login" element={<LoginPage />} />
+                <Route path="register" element={<RegisterPage />} />
                 <Route path="admin" element={<AdminPage />} />
                 <Route path="*" element={<NotFound />} />
             </Routes>
