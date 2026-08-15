@@ -56,7 +56,7 @@ import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvas
 import { resolveComposerOverlayPosition } from "../utils/canvas-composer-position";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { buildGroupExecutionPlan, collectGroupMemberIds, isGroupExecutableNode } from "../utils/canvas-group-execution";
-import { buildGridBeatPrompt, buildScriptBeats } from "../utils/canvas-script-beats";
+import { buildGridBeatPrompt, buildScriptBeats, buildScriptBeatsWithActs } from "../utils/canvas-script-beats";
 import { buildScriptAiPrompt, buildScriptBeatExportText, buildScriptBeatPrompt, parseScriptAiResponse } from "../utils/canvas-script-ai";
 import { buildAssetPrompt } from "../utils/canvas-script-ai";
 import { ScriptDeskStudio, type ScriptOutputState } from "../components/script-desk-studio";
@@ -4768,7 +4768,8 @@ function LeaferCanvasPage() {
         (scriptNode: CanvasNodeData) => {
             const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || DEFAULT_SCRIPT_BODY;
             const assets = scriptNode.metadata?.scriptAssets ?? [];
-            const beats = buildScriptBeats(body).map((beat) => ({ ...beat, prompt: buildScriptBeatPrompt(beat, assets) }));
+            const { beats: parsedBeats, acts: parsedActs } = buildScriptBeatsWithActs(body);
+            const beats = parsedBeats.map((beat) => ({ ...beat, prompt: buildScriptBeatPrompt(beat, assets) }));
             const gap = 36;
             const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
             const startX = scriptNode.position.x + scriptNode.width + 96;
@@ -4795,7 +4796,7 @@ function LeaferCanvasPage() {
             nodesRef.current = [...nodesRef.current, ...beatNodes];
             connectionsRef.current = [...connectionsRef.current, ...beatNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
             setNodes((prev) => [
-                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: beats, scriptOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)),
+                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptBody: body, content: body, scriptBeats: beats, scriptActs: parsedActs.length ? parsedActs : undefined, scriptOutputIds: outputIds, status: NODE_STATUS_SUCCESS } } : node)),
                 ...beatNodes,
             ]);
             setConnections((prev) => [...prev, ...beatNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
@@ -4809,6 +4810,12 @@ function LeaferCanvasPage() {
 
     const createScriptBeatNode = useCallback(
         (scriptNode: CanvasNodeData, beat: CanvasScriptBeat, beatIndex: number, target: "video" | "comfyui" = "video") => {
+            // 同一分镜重复生成时先替换旧输出节点，避免画布上叠加
+            const oldOutputId = scriptNode.metadata?.scriptBeatOutputs?.[beat.id];
+            if (oldOutputId && nodesRef.current.some((node) => node.id === oldOutputId)) {
+                deleteNodes(new Set([oldOutputId]));
+                connectionsRef.current = connectionsRef.current.filter((conn) => conn.fromNodeId !== oldOutputId && conn.toNodeId !== oldOutputId);
+            }
             const type = target === "comfyui" ? CanvasNodeType.ComfyUI : CanvasNodeType.Video;
             const spec = NODE_DEFAULT_SIZE[type];
             const position = { x: scriptNode.position.x + scriptNode.width + 96, y: scriptNode.position.y + beatIndex * (spec.height + 36) };
@@ -4825,7 +4832,10 @@ function LeaferCanvasPage() {
             };
             nodesRef.current = [...nodesRef.current, node];
             connectionsRef.current = [...connectionsRef.current, createCanvasConnection(scriptNode.id, node.id)];
-            handleConfigNodeChange(scriptNode.id, { scriptBeatOutputs: { ...(scriptNode.metadata?.scriptBeatOutputs ?? {}), [beat.id]: node.id }, scriptOutputIds: [...(scriptNode.metadata?.scriptOutputIds ?? []), node.id] });
+            handleConfigNodeChange(scriptNode.id, {
+                scriptBeatOutputs: { ...(scriptNode.metadata?.scriptBeatOutputs ?? {}), [beat.id]: node.id },
+                scriptOutputIds: [...(scriptNode.metadata?.scriptOutputIds ?? []).filter((id) => id !== oldOutputId), node.id],
+            });
             setNodes((prev) => [...prev, node]);
             setConnections((prev) => [...prev, createCanvasConnection(scriptNode.id, node.id)]);
             setSelectedNodeIds(new Set([node.id]));
@@ -4833,7 +4843,7 @@ function LeaferCanvasPage() {
             setDialogNodeId(null);
             void handleGenerateNode(node.id, target, prompt, target === "comfyui" ? comfyui.defaultWorkflowId : undefined);
         },
-        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.videoModel, handleConfigNodeChange, handleGenerateNode],
+        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, deleteNodes, effectiveConfig.model, effectiveConfig.videoModel, handleConfigNodeChange, handleGenerateNode],
     );
 
     const createScriptGridStoryboard = useCallback(
@@ -4913,43 +4923,77 @@ function LeaferCanvasPage() {
 
     const exportScriptBeatNodes = useCallback(
         (scriptNode: CanvasNodeData, target: "video" | "comfyui") => {
-            const beats = scriptNode.metadata?.scriptBeats ?? [];
+            // 与工作台分镜表同源：未保存 scriptBeats 时按正文实时解析（含幕/场/镜结构）
+            const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || "";
+            const beats = scriptNode.metadata?.scriptBeats?.length ? scriptNode.metadata.scriptBeats : buildScriptBeats(body);
             if (!beats.length) {
                 message.warning("分镜表为空，无法导出");
                 return;
+            }
+            // 重复导出先替换上次批量导出的节点，避免同列叠加
+            const oldExportIds = new Set((scriptNode.metadata?.scriptExportIds ?? []).filter((id) => nodesRef.current.some((node) => node.id === id)));
+            if (oldExportIds.size) {
+                deleteNodes(oldExportIds);
+                connectionsRef.current = connectionsRef.current.filter((conn) => !oldExportIds.has(conn.fromNodeId) && !oldExportIds.has(conn.toNodeId));
             }
             const type = target === "video" ? CanvasNodeType.Video : CanvasNodeType.ComfyUI;
             const spec = NODE_DEFAULT_SIZE[type];
             const startX = scriptNode.position.x + scriptNode.width + 96;
             const startY = scriptNode.position.y;
-            const exportedNodes = beats.map((beat, index) => {
+            // 按幕分列：每幕一列，幕内按顺序纵向排列；无幕信息时保持单列
+            const actOrder: string[] = [];
+            beats.forEach((beat) => {
+                const key = beat.act?.trim() || "";
+                if (!actOrder.includes(key)) actOrder.push(key);
+            });
+            const columnByAct = new Map(actOrder.map((key, index) => [key, index]));
+            const rowByColumn = new Map<number, number>();
+            const exportedNodes = beats.map((beat) => {
                 const exportText = buildScriptBeatExportText(beat);
-                const position = { x: startX, y: startY + index * (spec.height + 36) };
+                const column = columnByAct.get(beat.act?.trim() || "") ?? 0;
+                const row = rowByColumn.get(column) ?? 0;
+                rowByColumn.set(column, row + 1);
+                const position = { x: startX + column * (spec.width + 96), y: startY + row * (spec.height + 36) };
                 const metadata: CanvasNodeMetadata =
                     target === "video"
                         ? { status: NODE_STATUS_IDLE, prompt: exportText, composerContent: exportText, generationMode: "video", videoGenerationMode: "text-to-video", model: effectiveConfig.videoModel || effectiveConfig.model }
                         : { status: NODE_STATUS_IDLE, composerContent: exportText, generationMode: "comfyui", comfyCapability: "text-to-video", comfyWorkflowId: comfyui.defaultWorkflowId };
                 return {
+                    beatId: beat.id,
                     ...createCanvasNode(type, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, metadata),
                     position,
                     width: spec.width,
                     height: spec.height,
-                } satisfies CanvasNodeData;
+                } satisfies CanvasNodeData & { beatId: string };
             });
             const outputIds = exportedNodes.map((node) => node.id);
-            nodesRef.current = [...nodesRef.current, ...exportedNodes];
-            connectionsRef.current = [...connectionsRef.current, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
+            const beatOutputs = Object.fromEntries(exportedNodes.map((node) => [node.beatId, node.id]));
+            const newNodes = exportedNodes.map(({ beatId: _beatId, ...node }) => node);
+            nodesRef.current = [...nodesRef.current, ...newNodes];
+            connectionsRef.current = [...connectionsRef.current, ...newNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))];
             setNodes((prev) => [
-                ...prev.map((node) => (node.id === scriptNode.id ? { ...node, metadata: { ...node.metadata, scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []), ...outputIds] } } : node)),
-                ...exportedNodes,
+                ...prev.map((node) =>
+                    node.id === scriptNode.id
+                        ? {
+                              ...node,
+                              metadata: {
+                                  ...node.metadata,
+                                  scriptOutputIds: [...(node.metadata?.scriptOutputIds ?? []).filter((id) => !oldExportIds.has(id)), ...outputIds],
+                                  scriptBeatOutputs: { ...Object.fromEntries(Object.entries(node.metadata?.scriptBeatOutputs ?? {}).filter(([, id]) => !oldExportIds.has(id))), ...beatOutputs },
+                                  scriptExportIds: outputIds,
+                              },
+                          }
+                        : node,
+                ),
+                ...newNodes,
             ]);
-            setConnections((prev) => [...prev, ...exportedNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
+            setConnections((prev) => [...prev, ...newNodes.map((node) => createCanvasConnection(scriptNode.id, node.id))]);
             setSelectedNodeIds(new Set(outputIds));
             setSelectedConnectionId(null);
-            setDialogNodeId(exportedNodes[0]?.id ?? null);
-            message.success(`已导出 ${exportedNodes.length} 个分镜为${target === "video" ? "视频" : "ComfyUI"}节点，可在 composer 中继续编辑`);
+            setDialogNodeId(newNodes[0]?.id ?? null);
+            message.success(`已导出 ${newNodes.length} 个分镜为${target === "video" ? "视频" : "ComfyUI"}节点，可在 composer 中继续编辑`);
         },
-        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, effectiveConfig.model, effectiveConfig.videoModel, message],
+        [comfyui.defaultWorkflowId, createCanvasConnection, createCanvasNode, deleteNodes, effectiveConfig.model, effectiveConfig.videoModel, message],
     );
 
     const createScriptNarrationNode = useCallback((scriptNode: CanvasNodeData) => {
@@ -5030,6 +5074,29 @@ function LeaferCanvasPage() {
             }
         },
         [effectiveConfig, isAiConfigReady, openConfigDialog, message, handleConfigNodeChange],
+    );
+
+    const handleReparseScriptBody = useCallback(
+        (scriptNode: CanvasNodeData) => {
+            const body = scriptNode.metadata?.scriptBody?.trim() || scriptNode.metadata?.content?.trim() || "";
+            if (!body) {
+                message.warning("请先输入剧本正文");
+                return;
+            }
+            const assets = scriptNode.metadata?.scriptAssets ?? [];
+            const { beats, acts } = buildScriptBeatsWithActs(body);
+            if (!beats.length) {
+                message.warning("未从正文识别到分镜编号（如 SH1 / 场 1 / 第一幕）");
+                return;
+            }
+            handleConfigNodeChange(scriptNode.id, {
+                scriptBeats: beats.map((beat) => ({ ...beat, prompt: buildScriptBeatPrompt(beat, assets) })),
+                scriptActs: acts.length ? acts : undefined,
+                status: NODE_STATUS_SUCCESS,
+            });
+            message.success(`已按正文解析 ${beats.length} 个分镜${acts.length ? `、${acts.length} 幕` : ""}`);
+        },
+        [handleConfigNodeChange, message],
     );
 
     const handleImportScriptUpstream = useCallback(
@@ -6031,6 +6098,7 @@ function LeaferCanvasPage() {
                         onClose={() => setScriptStudioNodeId(null)}
                         onChange={(patch) => handleConfigNodeChange(scriptStudioNode.id, patch)}
                         onAiAnalyze={() => void analyzeScriptNode(scriptStudioNode)}
+                        onReparse={() => handleReparseScriptBody(scriptStudioNode)}
                         onImportUpstream={() => void handleImportScriptUpstream(scriptStudioNode)}
                         hasUpstreamText={Boolean(upstreamScriptText(scriptStudioNode))}
                         onBeatChange={(beat) => handleScriptBeatChange(scriptStudioNode, beat)}

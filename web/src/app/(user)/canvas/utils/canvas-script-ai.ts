@@ -13,12 +13,13 @@ export function buildScriptAiPrompt(body: string): string {
         "先完整提取资产（顺序：人物 → 道具 → 场景）：角色（人物名称 + 外貌/服装/气质描述）、道具（关键物品 + 外观描述）、场景（地点 + 环境/氛围描述）；资产是后续分镜生成时保持一致的引用基础。",
         "再识别幕/集结构：按剧情推进把整部剧本划分为若干幕（第一幕、第二幕……），每幕给出标题（如「第一幕」）、幕名（如「解读与分裂」）、梗概（一句话）和时长（如「约 45 分钟」）；剧本明确标注了幕/集/章节时严格沿用其划分与名称，不得合并或遗漏任何一幕。",
         "然后按幕顺序逐幕拆分镜（第一幕的镜头排在最前，依次排完所有幕），每个分镜给出：所属幕（如「第一幕」，与 acts 中 title 对应）、标题（2-8 字）、画面描述（主体、动作、场景、氛围，写可拍的具体画面）、景别（大远景/远景/全景/中景/近景/特写）、时长（如 \"3s\"）、角色（引用资产名）、场景（引用资产名）、机位（如 中景跟拍、特写推近）、台词（本镜对白，无则空字符串）。",
+        "若剧本正文已包含明确的分镜表（幕/集标题、「场 N」场景行、「SH N / SC N / 镜 N」镜头编号），必须严格按原分镜表逐镜转换：不得增加、删除或合并镜头，beats 数量与原分镜表镜头数一致，幕与场的划分严格沿用原文；每个 beat 的 act 字段必须与 acts 中对应 title 逐字相同。",
         "画面优先：写\"人怎么干\"而非\"人干什么\"，避免抽象隐喻；镜头数量与剧本体量匹配（短剧本每幕 4-10 镜，长剧本每幕可适当增加），所有幕都要拆出分镜，不得遗漏任何一幕。",
         "分镜规范：同一场戏中角色位置、服装、道具与场景细节必须前后连贯，不得出现同一角色跨镜换装、场景对不上等跳戏；景别遵循 远-全-中-近-特 的节奏变化，情绪高点用近景/特写，交代环境用远景/全景；运镜描述写具体运动方式（推近/拉远/横移/跟拍/环绕/升降/固定），不写抽象形容词；动作连贯，相邻镜头衔接时画面元素保持空间一致性。",
         '只输出一个 JSON 对象，不要输出其他内容，格式：{"assets":[{"kind":"character"|"scene"|"prop","name":"...","description":"..."}],"acts":[{"title":"第一幕","name":"...","summary":"...","duration":"约 45 分钟"}],"beats":[{"act":"第一幕","title":"...","content":"...","shotType":"中景","duration":"3s","character":"","scene":"","camera":"","dialogue":""}]}',
         "",
         "剧本：",
-        body.trim().slice(0, 6000),
+        body.trim().slice(0, 12000),
     ].join("\n");
 }
 
@@ -148,7 +149,7 @@ export function buildAssetPrompt(asset: CanvasScriptAsset): string {
 
 /** 分镜导出文本：把幕/景别/时长/标题/画面描述/角色场景机位/台词排布为可直接填入视频或 ComfyUI 节点 composer 的提示词。 */
 export function buildScriptBeatExportText(beat: CanvasScriptBeat): string {
-    const header = [beat.act, beat.shotType, beat.duration].filter((item): item is string => Boolean(item)).join("    ");
+    const header = [beat.act, beat.sceneHeading, beat.shotType, beat.duration].filter((item): item is string => Boolean(item)).join("    ");
     const refs = [beat.character, beat.scene, beat.camera].filter((item): item is string => Boolean(item));
     const lines = [header, beat.title, beat.content].filter(Boolean);
     if (refs.length) lines.push("—", ...refs);

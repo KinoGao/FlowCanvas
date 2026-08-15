@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { Button, Dropdown, Select } from "antd";
-import { Clapperboard, Download, Image as ImageIcon, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
+import { Clapperboard, Download, Image as ImageIcon, ListOrdered, Plus, Sparkles, Upload, Workflow, X } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 import { buildScriptBeats } from "../utils/canvas-script-beats";
@@ -30,6 +30,7 @@ export function ScriptDeskStudio({
     onClose,
     onChange,
     onAiAnalyze,
+    onReparse,
     onImportUpstream,
     hasUpstreamText,
     onBeatChange,
@@ -49,6 +50,7 @@ export function ScriptDeskStudio({
     onClose: () => void;
     onChange: (patch: Partial<CanvasNodeMetadata>) => void;
     onAiAnalyze: () => void;
+    onReparse: () => void;
     onImportUpstream: () => void;
     hasUpstreamText: boolean;
     onBeatChange: (beat: CanvasScriptBeat) => void;
@@ -72,6 +74,8 @@ export function ScriptDeskStudio({
     const [draft, setDraft] = useState<CanvasScriptBeat | null>(null);
     const [newAsset, setNewAsset] = useState<{ kind: CanvasScriptAsset["kind"]; name: string }>({ kind: "character", name: "" });
     const updateBody = (scriptBody: string) => onChange({ scriptBody, content: scriptBody, status: scriptBody.trim() ? "success" : "idle" });
+    // 正文含明确镜行编号（SH/SC/镜 N）时可本地重拆，不消耗模型
+    const canReparse = /(^|\n)\s*(SH|SC|镜)\s*\d+/i.test(body);
 
     const startEdit = (beat: CanvasScriptBeat, index: number) => {
         setEditingIndex(index);
@@ -84,9 +88,21 @@ export function ScriptDeskStudio({
     };
 
     // 按幕分组：有幕信息时先显示幕标题行，再渲染该幕的分镜；无幕信息时全部归入「未分幕」。
+    // 幕匹配先做精确匹配，失败再做归一化/前缀容错（如 beat 写「第一幕」而 acts 标题是「第一幕《探测」」）。
     const actGroups = useMemo(() => {
         const groups: Array<{ actTitle: string; act?: (typeof acts)[number]; beats: Array<{ beat: CanvasScriptBeat; index: number }> }> = [];
         const actByTitle = new Map(acts.map((act) => [act.title, act]));
+        const normalize = (value: string) => value.replace(/[\s「」《》]/g, "");
+        const findAct = (actTitle: string) => {
+            const direct = actByTitle.get(actTitle);
+            if (direct) return direct;
+            const target = normalize(actTitle);
+            if (!target) return undefined;
+            return acts.find((act) => {
+                const current = normalize(act.title);
+                return current === target || current.startsWith(target) || target.startsWith(current);
+            });
+        };
         const order: string[] = [];
         const buckets = new Map<string, Array<{ beat: CanvasScriptBeat; index: number }>>();
         beats.forEach((beat, index) => {
@@ -100,7 +116,7 @@ export function ScriptDeskStudio({
         order.forEach((actTitle) => {
             groups.push({
                 actTitle: actTitle || "未分幕",
-                act: actByTitle.get(actTitle),
+                act: findAct(actTitle),
                 beats: buckets.get(actTitle) || [],
             });
         });
@@ -119,6 +135,9 @@ export function ScriptDeskStudio({
                 <div className="flex items-center gap-2">
                     <Button type="primary" icon={<Sparkles className="size-4" />} onClick={onAiAnalyze} disabled={!body.trim()}>
                         AI 拆解
+                    </Button>
+                    <Button icon={<ListOrdered className="size-4" />} onClick={onReparse} disabled={!canReparse} title="按正文里的幕/场/镜编号本地重建分镜表，不消耗模型">
+                        按正文重拆
                     </Button>
                     {hasUpstreamText ? (
                         <Button icon={<Upload className="size-4" />} onClick={onImportUpstream}>
@@ -242,10 +261,18 @@ export function ScriptDeskStudio({
                                                 {group.act?.summary ? <div className="mt-0.5 text-[11px] leading-4 opacity-45">{group.act.summary}</div> : null}
                                             </td>
                                         </tr>
-                                        {group.beats.map(({ beat, index }) => {
+                                        {group.beats.map(({ beat, index }, groupIndex) => {
                                             const state = outputStates[beat.id] || "idle";
+                                            const showSceneHeading = Boolean(beat.sceneHeading) && beat.sceneHeading !== group.beats[groupIndex - 1]?.beat.sceneHeading;
                                             return (
                                                 <Fragment key={beat.id}>
+                                                    {showSceneHeading ? (
+                                                        <tr style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
+                                                            <td colSpan={7} className="px-3 py-1 text-[11px] opacity-50">
+                                                                {beat.sceneHeading}
+                                                            </td>
+                                                        </tr>
+                                                    ) : null}
                                                     <tr className="align-top" style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
                                                         <td className="px-3 py-2 opacity-55">{index + 1}</td>
                                                         <td className="px-2 py-2">{beat.shotType || "—"}</td>

@@ -92,6 +92,8 @@ export type CanvasScriptBeat = {
     dialogue?: string;
     /** 所属幕/集（如「第一幕」「第二幕」），未分幕为空 */
     act?: string;
+    /** 所属场标题（如「场 1 · A 控制室 · 深夜」），由正文分镜表的场行解析 */
+    sceneHeading?: string;
 };
 
 /** 脚本拆解出的可复用资产（角色/场景/道具），生成提示词时引用其描述 */
@@ -123,6 +125,8 @@ export type CanvasScriptMetadata = {
     /** 幕/集结构（分镜按幕分组，一幕一幕制作） */
     scriptActs?: CanvasScriptAct[];
     scriptOutputIds?: string[];
+    /** 分镜表「导出」批量创建的节点 id（重复导出时先替换旧节点，避免叠加） */
+    scriptExportIds?: string[];
     /** 分镜 id → 输出节点 id（脚本工作台生成状态回显） */
     scriptBeatOutputs?: Record<string, string>;
     /** 资产 id → 输出节点 id（资产生成状态回显） */
