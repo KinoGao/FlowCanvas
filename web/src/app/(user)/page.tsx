@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ArrowUpRight, FileText, ImagePlus, Images, Maximize2, Video } from "lucide-react";
+import { ArrowRight, ArrowUpRight, FileText, Images, Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { App, Image, Tag } from "antd";
 import { Link } from "react-router-dom";
@@ -9,8 +9,6 @@ import { fetchPrompts, type Prompt } from "@/services/api/prompts";
 import { cn } from "@/lib/utils";
 
 const QUICK_ENTRIES = [
-    { to: "/image", label: "AI 绘图", icon: ImagePlus },
-    { to: "/video", label: "AI 视频", icon: Video },
     { to: "/canvas", label: "画布", icon: Maximize2 },
     { to: "/prompts", label: "提示词", icon: FileText },
     { to: "/assets", label: "素材", icon: Images },
@@ -47,10 +45,10 @@ export default function IndexPage() {
                     <div className="mt-12 w-full max-w-3xl rounded-3xl border border-border bg-card p-5 text-left shadow-[0_24px_70px_rgba(0,0,0,0.08)] dark:shadow-[0_24px_70px_rgba(0,0,0,0.4)]">
                         <p className="px-1 text-sm text-muted-foreground">描述你想创作的内容，比如：</p>
                         <div className="mt-4 flex flex-wrap gap-2">
-                            {SUGGESTIONS.map((text, index) => (
+                            {SUGGESTIONS.map((text) => (
                                 <Link
                                     key={text}
-                                    to={QUICK_ENTRIES[index].to}
+                                    to="/canvas"
                                     className="rounded-full border border-border bg-background px-4 py-2 text-sm text-muted-foreground transition hover:border-foreground/30 hover:text-foreground"
                                 >
                                     {text}

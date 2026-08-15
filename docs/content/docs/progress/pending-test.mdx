@@ -3,6 +3,15 @@ title: 待测试
 description: 当前版本已实现但仍需人工验证的变更项
 ---
 
+## 移除独立生图/视频/ComfyUI 页面
+
+- 侧边栏「创作」组整组移除：生图工作台（/image）、视频创作台（/video）、ComfyUI（/comfyui）三个独立页面及其路由已删除（用户决策：这些能力由画布节点承载，不需单列页面），旧地址进入 404 页；工作台侧边栏现为 项目（画布）/ 资产（素材/提示词）+ 帮助/管理后台。
+- 首页创作入口卡同步更新：快捷入口只留 画布/提示词/素材，建议胶囊全部跳画布。
+- 共享组件（image/video/audio-settings-panel、model-picker、prompt-select-dialog 等）仍被画布 Composer 复用，未删除。
+- 需要确认：侧边栏只剩 项目/资产 两组且各入口跳转正确；首页入口卡无失效链接；画布内生图/视频/ComfyUI 节点功能不受影响；/image、/video、/comfyui 显示 404。
+
+
+
 ## 独立登录/注册页与顶栏账号菜单
 
 - 新增 `/login`、`/register` 独立页面（VOZEB 双栏卡片：左侧品牌 + 卖点列表，右侧表单 + 深色主按钮），走现有后端 `/api/auth/login`、`/api/auth/register`（注册仍需注册鉴权码）；已登录访问这两个页面自动跳回首页。

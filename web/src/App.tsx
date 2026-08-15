@@ -7,10 +7,8 @@ import RegisterPage from "@/app/(auth)/register/page";
 import AssetsPage from "@/app/(user)/assets/page";
 import CanvasPage from "@/app/(user)/canvas/[id]/canvas-client-page";
 import CanvasLibraryPage from "@/app/(user)/canvas/page";
-import ImagePage from "@/app/(user)/image/page";
 import IndexPage from "@/app/(user)/page";
 import PromptsPage from "@/app/(user)/prompts/page";
-import VideoPage from "@/app/(user)/video/page";
 import AdminPage from "@/app/admin/page";
 import NotFound from "@/app/not-found";
 
@@ -26,8 +24,6 @@ export default function App() {
                     <Route index element={<IndexPage />} />
                     <Route path="canvas" element={<CanvasLibraryPage />} />
                     <Route path="canvas/:id" element={<CanvasPage />} />
-                    <Route path="image" element={<ImagePage />} />
-                    <Route path="video" element={<VideoPage />} />
                     <Route path="assets" element={<AssetsPage />} />
                     <Route path="prompts" element={<PromptsPage />} />
                     <Route path="canvas/:id/*" element={<Navigate to=".." replace />} />
