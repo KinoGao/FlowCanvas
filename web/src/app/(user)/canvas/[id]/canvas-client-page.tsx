@@ -5971,7 +5971,6 @@ function LeaferCanvasPage() {
                                 isRelated={relatedHighlight.nodeIds.has(node.id)}
                                 isFocusRelated={activeNodeId === node.id}
                                 isConnectionTarget={connectionTargetNodeId === node.id}
-                                isConnecting={Boolean(connectingParams)}
                                 connectionTargetSide={connectionTargetNodeId === node.id ? (connectingParams?.handleType === "source" ? "target" : "source") : null}
                                 editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                                 showPanel={false}

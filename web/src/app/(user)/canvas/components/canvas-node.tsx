@@ -72,7 +72,6 @@ export type CanvasNodeProps = {
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
-    isConnecting: boolean;
     connectionTargetSide?: "source" | "target" | null;
     editRequestNonce?: number;
     showPanel: boolean;
@@ -150,7 +149,6 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.isRelated !== next.isRelated) return false;
     if (prev.isFocusRelated !== next.isFocusRelated) return false;
     if (prev.isConnectionTarget !== next.isConnectionTarget) return false;
-    if (prev.isConnecting !== next.isConnecting) return false;
     if (prev.connectionTargetSide !== next.connectionTargetSide) return false;
     if (prev.showPanel !== next.showPanel) return false;
     if (prev.showImageInfo !== next.showImageInfo) return false;
@@ -177,7 +175,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     isRelated,
     isFocusRelated,
     isConnectionTarget,
-    isConnecting,
     connectionTargetSide = null,
     editRequestNonce = 0,
     showPanel,
@@ -608,8 +605,10 @@ export const CanvasNode = React.memo(function CanvasNode({
                 />
             ) : null}
 
-            {!isGroup ? <ConnectionHandleDot side="left" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected || isConnecting} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
+            {/* 拉线时只显示当前吸附目标的圆球（active），不再把所有节点的端口全部点亮；
+                未参与连线的节点保持 hover 磁吸区才显示。 */}
+            {!isGroup ? <ConnectionHandleDot side="left" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
+            {!isGroup && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
 
             {showPanel && renderPanel ? (
                 <div
@@ -1797,6 +1796,7 @@ function NodePinIndicator({ node, theme }: { node: CanvasNodeData; theme: (typeo
 
 function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "left" | "right"; visible: boolean; active: boolean; onClickCreate?: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const scaleRef = useCanvasScaleRef();
     const isSource = side === "right";
     const downRef = useRef<{ x: number; y: number } | null>(null);
     const finishRef = useRef<((event: PointerEvent) => void) | null>(null);
@@ -1828,8 +1828,13 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
         }
         const travel = Math.min(distance, 24);
         const ratio = distance ? travel / distance : 0;
+        // 只向外磁吸：磁吸区中心在节点边缘外侧 24*k（屏幕像素），圆球半径 12px，
+        // 向内最多移动到贴住节点边缘，不允许被吸进节点内部。
+        const maxInward = Math.max(24 * scaleRef.current - 12, 0);
+        const rawTx = dx * ratio;
+        const tx = side === "left" ? Math.min(rawTx, maxInward) : Math.max(rawTx, -maxInward);
         magnet.style.transition = "transform 70ms linear";
-        magnet.style.transform = `translate3d(${dx * ratio}px, ${dy * ratio}px, 0)`;
+        magnet.style.transform = `translate3d(${tx}px, ${dy * ratio}px, 0)`;
     };
 
     // TapNow 右侧 +：单击（按下-抬起位移 ≤5px）触发创建下游节点。
