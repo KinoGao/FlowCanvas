@@ -246,6 +246,46 @@ public class PlatformConfigService {
         return document;
     }
 
+    /**
+     * 获取所有已配置厂商的 baseUrl 列表（用于 AI 代理白名单校验）。
+     * 只返回有实际 API Key 的厂商地址。
+     */
+    public List<String> getAllowedProxyTargets() {
+        return getAdminConfig().getProviders().stream()
+                .filter(PlatformConfigDocument.Provider::isEnabled)
+                .filter(item -> !blank(item.getBaseUrl()) && !blank(item.getApiKey()))
+                .map(PlatformConfigDocument.Provider::getBaseUrl)
+                .filter(url -> !blank(url))
+                .toList();
+    }
+
+    /**
+     * 检查给定的 baseUrl 是否属于已配置的模型厂商。
+     * 用于 AI 代理的 SSRF 白名单防护。
+     */
+    public boolean isAllowedProxyTarget(String baseUrl) {
+        if (blank(baseUrl)) return false;
+        String normalized = baseUrl.trim().replaceAll("/+$", "");
+        return getAllowedProxyTargets().stream()
+                .anyMatch(allowed -> {
+                    String normalizedAllowed = allowed.trim().replaceAll("/+$", "");
+                    return normalized.equals(normalizedAllowed) || normalized.startsWith(normalizedAllowed + "/");
+                });
+    }
+
+    /**
+     * 检查给定的 baseUrl 是否属于 ComfyUI 配置地址。
+     * 用于 ComfyUI 代理的 SSRF 防护。
+     */
+    public boolean isComfyTarget(String baseUrl) {
+        if (blank(baseUrl)) return false;
+        String normalized = baseUrl.trim().replaceAll("/+$", "");
+        String configured = comfyBaseUrl();
+        if (blank(configured)) return false;
+        String normalizedConfigured = configured.trim().replaceAll("/+$", "");
+        return normalized.equals(normalizedConfigured) || normalized.startsWith(normalizedConfigured + "/");
+    }
+
     public String comfyBaseUrl() {
         PlatformConfigDocument.ComfyUi comfy = getAdminConfig().getComfyui();
         if (comfy.isEnabled() && !blank(comfy.getBaseUrl())) return comfy.getBaseUrl().trim();

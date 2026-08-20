@@ -171,6 +171,13 @@ public class ComfyUiProxyController {
             throw new IllegalArgumentException("ComfyUI address only supports http/https");
         }
         if (base.getUserInfo() != null) throw new IllegalArgumentException("ComfyUI address must not contain credentials");
+
+        // SSRF 防护：baseUrl 必须是 ComfyUI 配置地址，不允许客户端传入任意内网地址。
+        // 未登录时（publicMediaRead）强制使用配置的地址；已登录时也要校验 baseUrl 在白名单内。
+        if (!baseUrl.isBlank() && !platformConfigService.isComfyTarget(baseUrl)) {
+            throw new IllegalArgumentException("ComfyUI address must be the configured ComfyUI address");
+        }
+
         if (path == null || !path.startsWith("/") || path.contains("://")) throw new IllegalArgumentException("Invalid ComfyUI path");
         String pathname = requestPath(path);
         boolean allowed = ALLOWED_PATHS.stream().anyMatch(item -> pathname.equals(item) || (item.endsWith("/") && pathname.startsWith(item)));

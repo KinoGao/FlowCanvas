@@ -1,6 +1,6 @@
 package com.infinitecanvas.backend.controller;
 
-import com.infinitecanvas.backend.security.ProxyTargetGuard;
+import com.infinitecanvas.backend.service.PlatformConfigService;
 import com.infinitecanvas.backend.service.UserRequestContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
@@ -24,6 +24,11 @@ public class AiProxyController {
     private static final Duration PROXY_TIMEOUT = Duration.ofMinutes(10);
     private static final Set<String> HOP_BY_HOP_HEADERS = Set.of("connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length");
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+    private final PlatformConfigService platformConfigService;
+
+    public AiProxyController(PlatformConfigService platformConfigService) {
+        this.platformConfigService = platformConfigService;
+    }
 
     @RequestMapping
     public ResponseEntity<?> proxy(@RequestParam(name = "target", required = false) String target, HttpServletRequest request) throws IOException, InterruptedException {
@@ -38,14 +43,10 @@ public class AiProxyController {
             return ResponseEntity.badRequest().body("Unsupported target protocol");
         }
 
-        // SSRF 防护：未登录请求（浏览器媒体加载）拒绝解析到内网 / 环回 /
-        // 链路本地 / 组播等地址的目标；已登录用户允许内网目标（本地模型服务等）。
-        if (request.getAttribute(UserRequestContext.USER_ATTR) == null) {
-            try {
-                ProxyTargetGuard.assertPublicTarget(uri);
-            } catch (IllegalArgumentException e) {
-                return ResponseEntity.badRequest().body(e.getMessage());
-            }
+        // SSRF 防护：所有请求（无论登录与否）都必须经过白名单校验。
+        // AI 代理只能访问后台配置的模型厂商地址，不允许访问任意内网地址。
+        if (!platformConfigService.isAllowedProxyTarget(target)) {
+            return ResponseEntity.badRequest().body("代理目标不在允许列表中（必须使用后台配置的模型厂商地址）");
         }
 
         String method = request.getMethod().toUpperCase();

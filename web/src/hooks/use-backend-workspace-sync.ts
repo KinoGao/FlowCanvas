@@ -465,9 +465,3 @@ async function fetchReferencedBlob(source: Record<string, unknown>) {
 function isAuthError(error: unknown) {
     return error instanceof ApiError && (error.status === 401 || error.status === 403);
 }
-
-function timeOf(value: unknown) {
-    if (typeof value === "number") return value;
-    if (typeof value === "string") return Date.parse(value) || 0;
-    return 0;
-}

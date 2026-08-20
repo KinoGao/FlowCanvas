@@ -269,6 +269,8 @@ function normalizeBackendFileUrl(url: string) {
     }
 }
 
+const SIGNED_URL_EXPIRY_MS = 55 * 60 * 1000; // 55 分钟
+
 function signedUrlExpiry(url: string) {
     try {
         const expires = Number(new URL(url, "http://localhost").searchParams.get("expires") || "0");
@@ -279,5 +281,5 @@ function signedUrlExpiry(url: string) {
     } catch {
         // ignore parse errors
     }
-    return Date.now() + 55 * 60_000;
+    return Date.now() + SIGNED_URL_EXPIRY_MS;
 }

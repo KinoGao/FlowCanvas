@@ -1,7 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { encryptToken, decryptToken } from "@/lib/token-encryption";
 
 // WebDAV 保存通道已移除，saveMode 仅保留后端账号一值（字段保留供
 // 既有 `saveMode !== "backend"` 判断与 restoreKey 迁移兼容）。
@@ -32,6 +33,35 @@ type UserStore = {
     markBackendImported: (userId: string) => void;
 };
 
+// 自定义加密存储适配器
+const encryptedStorage = {
+    getItem: async (name: string): Promise<string | null> => {
+        try {
+            const encrypted = localStorage.getItem(name + ":encrypted");
+            if (encrypted) {
+                const decrypted = await decryptToken(encrypted);
+                if (decrypted) return decrypted;
+            }
+        } catch {
+            // 解密失败，忽略
+        }
+        return null;
+    },
+    
+    setItem: async (name: string, value: string): Promise<void> => {
+        try {
+            const encrypted = await encryptToken(value);
+            localStorage.setItem(name + ":encrypted", encrypted);
+        } catch {
+            // 加密失败时静默降级（隐私模式等）
+        }
+    },
+    
+    removeItem: async (name: string): Promise<void> => {
+        localStorage.removeItem(name + ":encrypted");
+    },
+};
+
 export const useUserStore = create<UserStore>()(
     persist(
         (set) => ({
@@ -57,6 +87,7 @@ export const useUserStore = create<UserStore>()(
         }),
         {
             name: "infinite-canvas:user_store",
+            storage: createJSONStorage(() => encryptedStorage),
             partialize: (state) => ({
                 user: state.user,
                 token: state.token,
@@ -74,7 +105,12 @@ export const useUserStore = create<UserStore>()(
                     workspaceError: "",
                 };
             },
-            onRehydrateStorage: (state) => () => state.finishHydration(),
+            onRehydrateStorage: () => (state) => {
+                // 加密存储是异步的，需要等待 hydration 完成
+                if (state) {
+                    state.finishHydration();
+                }
+            },
         },
     ),
 );
