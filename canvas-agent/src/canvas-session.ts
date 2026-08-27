@@ -216,6 +216,7 @@ function generationFlowOps(input: Record<string, unknown>, state: CanvasSnapshot
                 model: input.model,
                 size: input.size,
                 quality: input.quality,
+                resolution: input.resolution,
                 count: input.count,
                 seconds: input.seconds,
                 vquality: input.vquality,

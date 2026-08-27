@@ -3,7 +3,7 @@ import { z } from "zod";
 const recordSchema = z.record(z.unknown());
 const positionSchema = z.object({ x: z.number(), y: z.number() });
 const viewportSchema = z.object({ x: z.number(), y: z.number(), k: z.number() });
-const nodeTypeSchema = z.enum(["image", "text", "comfyui", "video", "audio"]);
+const nodeTypeSchema = z.enum(["image", "text", "script", "comfyui", "video", "audio"]);
 const generationModeSchema = z.enum(["text", "image", "video", "audio"]);
 
 export const toolNames = [
@@ -72,6 +72,7 @@ const generationOptionsSchema = z.object({
     model: z.string().optional(),
     size: z.string().optional(),
     quality: z.string().optional(),
+    resolution: z.string().optional(),
     count: z.number().optional(),
     seconds: z.string().optional(),
     vquality: z.string().optional(),
@@ -137,14 +138,14 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_get_selection: "读取当前网页画布选中的节点。",
     canvas_export_snapshot: "导出当前画布快照，用于理解布局。",
     canvas_apply_ops: "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
-    canvas_create_node: "创建任意类型节点：text、image、comfyui、video、audio。适合创建占位图、媒体占位、ComfyUI 工作流或自定义 metadata 节点。创建脚本节点：nodeType=text、metadata.canvasTool=\"script\"、metadata.scriptBody=剧本正文。",
+    canvas_create_node: "创建任意类型节点：text、image、comfyui、video、audio、script。适合创建占位图、媒体占位、ComfyUI 工作流或自定义 metadata 节点。创建脚本节点：nodeType=\"script\"，并把剧本正文写入 metadata.scriptBody。",
     canvas_create_text_node: "在当前画布创建单个文本节点。",
     canvas_create_text_nodes: "批量创建普通文本节点，适合生成标题、段落、说明等内容块；剧本/脚本请用 canvas_create_node 创建脚本节点。",
     canvas_create_image_prompt_flow: "创建提示词文本节点和图片目标节点，并自动连线，可选择立即触发生图。",
     canvas_create_generation_flow: "创建通用生成流程：提示词文本节点、对应类型的生成目标节点和参考节点连线，可用于文案、生图、视频或音频。",
     canvas_generate_text: "创建通用文本生成流程并立即触发生成。",
-    canvas_generate_image: "创建通用图片生成流程并立即触发生成。",
-    canvas_generate_video: "创建通用视频生成流程并立即触发生成。",
+    canvas_generate_image: "创建通用图片生成流程并立即触发生成。可选 model 指定模型、resolution（1k/2k/4k）指定分辨率档。",
+    canvas_generate_video: "创建通用视频生成流程并立即触发生成。可选 model 指定模型、vquality（480p/720p/1080p）指定分辨率。",
     canvas_generate_audio: "创建通用音频生成流程并立即触发生成。",
     canvas_update_node: "更新节点基础字段或 metadata。",
     canvas_update_node_text: "更新文本节点内容和标题。",
