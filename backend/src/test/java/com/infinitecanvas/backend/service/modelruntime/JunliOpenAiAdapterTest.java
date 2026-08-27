@@ -16,6 +16,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.mock.web.MockMultipartHttpServletRequest;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+
+import java.io.ByteArrayOutputStream;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -168,7 +171,7 @@ class JunliOpenAiAdapterTest {
 
         assertEquals(HttpStatus.OK, contentResponse.getStatusCode());
         assertEquals("video/mp4", contentResponse.getHeaders().getContentType().toString());
-        assertArrayEquals(new byte[]{9, 8, 7, 6}, (byte[]) contentResponse.getBody());
+        assertArrayEquals(new byte[]{9, 8, 7, 6}, streamBody(contentResponse));
     }
 
     @Test
@@ -195,7 +198,7 @@ class JunliOpenAiAdapterTest {
         ResponseEntity<?> contentResponse = adapter().handle(new MockHttpServletRequest("GET", "/videos/task-1/content"), "/videos/task-1/content", runtime());
         assertEquals(HttpStatus.OK, contentResponse.getStatusCode());
         assertEquals("video/mp4", contentResponse.getHeaders().getContentType().toString());
-        assertArrayEquals(new byte[]{1, 2, 3, 4}, (byte[]) contentResponse.getBody());
+        assertArrayEquals(new byte[]{1, 2, 3, 4}, streamBody(contentResponse));
     }
 
     @Test
@@ -313,6 +316,13 @@ class JunliOpenAiAdapterTest {
 
     private JsonNode responseJson(ResponseEntity<?> response) throws IOException {
         return objectMapper.readTree((byte[]) response.getBody());
+    }
+
+    /** 实现已改为流式透传（StreamingResponseBody），测试中将其写出为字节再断言。 */
+    private static byte[] streamBody(ResponseEntity<?> response) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ((StreamingResponseBody) response.getBody()).writeTo(output);
+        return output.toByteArray();
     }
 
     private static void respond(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
