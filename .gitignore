@@ -21,6 +21,7 @@ task_plan.md
 .qoder/
 .rivet/
 .codex-logs/
+.codex-runtime/
 _commit-msg.txt
 .gstack/
 nul

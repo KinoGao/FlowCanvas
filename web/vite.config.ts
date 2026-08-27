@@ -19,6 +19,10 @@ export default defineConfig({
         // 改动代码后手动刷新页面，避免用户生成时被 dev server 自动刷新。
         hmr: false,
         watch: {
+            // 项目位于 Windows 挂载盘（DrvFs），inotify 事件无法触达 WSL，
+            // 必须轮询才能让 dev server 感知文件变更。
+            usePolling: true,
+            interval: 1000,
             ignored: ["**/dist/**", "../data/**", "../backend/data/**", "../backend/target/**"],
         },
         proxy: {
