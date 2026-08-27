@@ -73,6 +73,8 @@
 
 数据库文件位置：`${DB_PATH:./data/app.db}`；端口：`${PORT:9801}`；鉴权码：`${AUTH_CODE}`。
 
+> **WSL 开发注意**：SQLite WAL 模式依赖共享内存映射，`/mnt/*`（DrvFs/9P）上不可靠且易被 Windows 进程锁死，开发环境务必将 `DB_PATH` 指向 WSL 原生路径（如 `/home/gn/flowcanvas-data/app.db`），`scripts/dev.sh` 已内置该默认值。同时系统 `java` 仅为 JRE，后端编译/运行需完整 JDK（`JAVA_HOME=/home/gn/jdk21-full`，脚本已内置）。
+
 ### 2.3 本地代理（`canvas-agent/`，独立 npm 包 `@basketikun/canvas-agent`）
 
 | 类别 | 选型 | 版本 |
@@ -96,6 +98,15 @@
 | 编排 | `docker-compose.yml`（远程镜像） / `docker-compose.local.yml`（本地构建） |
 | 部署平台 | Render（`render.yaml` 已配）/ Vercel 兼容 |
 | 端口约定 | 前端 9800 / 后端 9801 / Canvas Agent 17371 |
+
+### 2.5 WSL 本地开发启动
+
+```bash
+./scripts/dev.sh        # 一键启动后端(9801)+前端(9800)，等待健康检查通过
+./scripts/dev-stop.sh   # 停止开发服务
+```
+
+`dev.sh` 内置默认值（均可通过环境变量覆盖）：`JAVA_HOME=/home/gn/jdk21-full`、`DB_PATH=/home/gn/flowcanvas-data/app.db`、`WEB_PORT=9800`、`PORT=9801`。日志输出到 `.codex-runtime/backend.log` / `.codex-runtime/web.log`。前端 dev server 已开启文件轮询（`usePolling`），适配 `/mnt/*` 挂载盘；HMR 默认关闭，代码改动后需手动刷新页面。
 
 ## 3. 目录结构与职责
 
