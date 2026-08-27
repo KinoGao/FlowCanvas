@@ -69,5 +69,5 @@ function pushConnection(index: Map<string, CanvasConnection[]>, nodeId: string, 
 }
 
 function isGenerationConfigNode(node: CanvasNodeData) {
-    return node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI;
+    return node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Clip;
 }

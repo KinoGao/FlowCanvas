@@ -1709,8 +1709,8 @@ function editorBounds(node: CanvasNodeData) {
     return {
         minWidth: node.type === CanvasNodeType.Image ? 120 : node.type === CanvasNodeType.Video ? 160 : isGroup ? 180 : 220,
         minHeight: node.type === CanvasNodeType.Image ? 96 : node.type === CanvasNodeType.Video ? 96 : isGroup ? 120 : 160,
-        maxWidth: isGroup ? 4000 : isMediaNode ? 640 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 720 : 520,
-        maxHeight: isGroup ? 3000 : node.type === CanvasNodeType.Image ? 640 : node.type === CanvasNodeType.Video ? 480 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 640 : 480,
+        maxWidth: isGroup ? 100000 : isMediaNode ? 640 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 720 : 520,
+        maxHeight: isGroup ? 100000 : node.type === CanvasNodeType.Image ? 640 : node.type === CanvasNodeType.Video ? 480 : node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Config ? 640 : 480,
         lockRatio: (node.type === CanvasNodeType.Image && !node.metadata?.freeResize) || node.type === CanvasNodeType.Video,
     };
 }

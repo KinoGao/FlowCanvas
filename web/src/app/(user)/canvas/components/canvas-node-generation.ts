@@ -3,7 +3,7 @@ import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { normalizeSeedanceRatio, seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "../types";
+import { CanvasNodeType, isCanvasScriptNode, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "../types";
 import { getGenerationResourceNodes, type CanvasResourceGraph } from "../utils/canvas-resource-references";
 
 export type NodeGenerationContext = {
@@ -78,7 +78,7 @@ export function buildNodeGenerationContext(
 }
 
 function isGenerationConfigNode(type: CanvasNodeType | undefined) {
-    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
+    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI || type === CanvasNodeType.Clip;
 }
 
 function buildMentionLabelGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext | null {
@@ -257,8 +257,8 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 }
 
 function readNodeTextInput(node: CanvasNodeData) {
-    // 脚本节点（canvasTool="script"）不参与上游文本输入：即使链接下游也不被引用。
-    if (node.metadata?.canvasTool === "script") return "";
+    // 脚本节点不参与上游文本输入：正文是剧本工作台内容，即使链接下游也不被引用。
+    if (isCanvasScriptNode(node)) return "";
     if (node.type === CanvasNodeType.Text) return node.metadata?.content || node.metadata?.prompt || "";
     return node.metadata?.prompt || "";
 }

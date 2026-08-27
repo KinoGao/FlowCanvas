@@ -14,7 +14,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeType, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
+import { CanvasNodeType, isCanvasScriptNode, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { getPinColor, getPinColorLabel, getPinColorValue } from "../utils/canvas-pin-utils";
 import { useCanvasScaleRef } from "./canvas-scale-context";
@@ -24,7 +24,7 @@ type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 type ResizeStartEvent = React.PointerEvent;
 
 function isGenerationConfigNode(type: CanvasNodeType) {
-    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI;
+    return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI || type === CanvasNodeType.Clip;
 }
 
 /** Lazy-resolve media URL from storageKey on mount.
@@ -308,8 +308,8 @@ export const CanvasNode = React.memo(function CanvasNode({
             const isGroup = data.type === CanvasNodeType.Group;
             const minWidth = data.type === CanvasNodeType.Image ? 120 : data.type === CanvasNodeType.Video ? 160 : isGroup ? 180 : 220;
             const minHeight = data.type === CanvasNodeType.Image ? 96 : data.type === CanvasNodeType.Video ? 96 : isGroup ? 120 : 160;
-            const maxWidth = isGroup ? 4000 : isMediaNode ? 640 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 720 : 520;
-            const maxHeight = isGroup ? 3000 : data.type === CanvasNodeType.Image ? 640 : data.type === CanvasNodeType.Video ? 480 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 640 : 480;
+            const maxWidth = isGroup ? 100000 : isMediaNode ? 640 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 720 : 520;
+            const maxHeight = isGroup ? 100000 : data.type === CanvasNodeType.Image ? 640 : data.type === CanvasNodeType.Video ? 480 : data.type === CanvasNodeType.ComfyUI || data.type === CanvasNodeType.Config ? 640 : 480;
             const startRight = resizeRef.current.startLeft + resizeRef.current.startWidth;
             const startBottom = resizeRef.current.startTop + resizeRef.current.startHeight;
             const fromLeft = resizeRef.current.corner.includes("left");
@@ -442,6 +442,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         && !isSelected
         && (
             (data.type === CanvasNodeType.Text && Boolean(data.metadata?.content?.trim()))
+            || data.type === CanvasNodeType.Clip
             || data.type === CanvasNodeType.Config
             || data.type === CanvasNodeType.ComfyUI
         )
@@ -450,7 +451,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const panelWidthClass =
         data.metadata?.canvasTool === "director"
             ? "w-[920px] max-w-[calc(100vw-48px)]"
-            : data.metadata?.canvasTool === "script"
+            : isCanvasScriptNode(data)
               ? "w-[720px] max-w-[calc(100vw-48px)]"
               : "w-[500px] max-w-[calc(100vw-32px)]";
 
@@ -521,7 +522,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onToggleBatch?.(data.id);
                         return;
                     }
-                    if (data.metadata?.canvasTool === "script") {
+                    if (isCanvasScriptNode(data)) {
                         event.stopPropagation();
                         onOpenComposer?.(data);
                         return;
@@ -635,7 +636,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.type === CanvasNodeType.Group) return <GroupContent {...props} />;
     if (props.node.metadata?.canvasTool === "videoComposition") return <VideoCompositionContent {...props} />;
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
-    if (props.node.metadata?.canvasTool === "script") return <ScriptNodeContent {...props} />;
+    if (isCanvasScriptNode(props.node)) return <ScriptNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
@@ -647,6 +648,8 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
 
 const nodeContentRenderers = {
     [CanvasNodeType.Text]: TextContent,
+    [CanvasNodeType.Script]: TextContent,
+    [CanvasNodeType.Clip]: VideoCompositionContent,
     [CanvasNodeType.Image]: ImageNodeContent,
     [CanvasNodeType.Config]: EmptyImageContent,
     [CanvasNodeType.ComfyUI]: ComfyUiContent,
@@ -999,7 +1002,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

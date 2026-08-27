@@ -20,6 +20,8 @@ export type CanvasAlignmentGuides = {
 export enum CanvasNodeType {
     Image = "image",
     Text = "text",
+    Script = "script",
+    Clip = "clip",
     Config = "config",
     ComfyUI = "comfyui",
     Video = "video",
@@ -28,6 +30,18 @@ export enum CanvasNodeType {
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
+
+/**
+ * LibTV/StartFlows 把脚本列为与文本/图片/视频/音频平级的基础节点。
+ * 本仓库历史上把脚本节点实现成 `CanvasNodeType.Text + metadata.canvasTool === "script"`，
+ * 旧项目数据继续保留以保证刷新后正常打开。新创建走 `CanvasNodeType.Script`，
+ * 两类节点统一通过该判定函数收敛。
+ */
+export function isCanvasScriptNode(node: { type: CanvasNodeType; metadata?: { canvasTool?: string } } | null | undefined): boolean {
+    if (!node) return false;
+    if (node.type === CanvasNodeType.Script) return true;
+    return node.type === CanvasNodeType.Text && node.metadata?.canvasTool === "script";
+}
 export type CanvasGenerationMode = "text" | "image" | "video" | "audio" | "comfyui";
 export type CanvasImageGenerationType = "generation" | "edit";
 export type CanvasGenerationRunStatus = "running" | "succeeded" | "failed" | "cancelled";
@@ -90,10 +104,22 @@ export type CanvasScriptBeat = {
     camera?: string;
     /** 本镜台词/对白，无则空 */
     dialogue?: string;
+    /** 音效/配乐（如「风声、鼓点」），无则空 */
+    soundEffect?: string;
+    /** 光影氛围（如「黄昏暖光、冷色霓虹」），无则空 */
+    atmosphere?: string;
+    /** 行颜色标记（分镜表轻管理），无则不标记 */
+    colorMark?: "red" | "yellow" | "green" | "blue" | "gray";
     /** 所属幕/集（如「第一幕」「第二幕」），未分幕为空 */
     act?: string;
     /** 所属场标题（如「场 1 · A 控制室 · 深夜」），由正文分镜表的场行解析 */
     sceneHeading?: string;
+    /** 本镜参考图（画布图片节点 id）。未设置时生成自动带入角色/场景资产设定图；显式空数组表示不用垫图 */
+    referenceNodeIds?: string[];
+    /** 分镜图提示词覆盖：留空时按画面描述 + 角色/场景资产描述自动合成 */
+    imagePrompt?: string;
+    /** 视频运动提示词覆盖：留空时回退整段导出文本（免费拼接路径） */
+    videoPrompt?: string;
 };
 
 /** 脚本拆解出的可复用资产（角色/场景/道具），生成提示词时引用其描述 */
@@ -129,6 +155,8 @@ export type CanvasScriptMetadata = {
     scriptExportIds?: string[];
     /** 分镜 id → 输出节点 id（脚本工作台生成状态回显） */
     scriptBeatOutputs?: Record<string, string>;
+    /** 分镜 id → 分镜图节点 id（两段式：先出分镜帧图，再图生视频） */
+    scriptBeatFrames?: Record<string, string>;
     /** 资产 id → 输出节点 id（资产生成状态回显） */
     scriptAssetOutputs?: Record<string, string>;
 };

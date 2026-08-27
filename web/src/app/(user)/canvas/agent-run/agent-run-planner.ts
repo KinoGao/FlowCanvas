@@ -49,8 +49,8 @@ const CREATE_AGENT_PLAN_TOOL: ResponseFunctionTool = {
                         properties: {
                             id: { type: "string", description: "产物 id，如 d1、d2" },
                             title: { type: "string", description: "产物标题（2-8 字）" },
-                            type: { type: "string", enum: ["text", "image", "video", "audio"] },
-                            prompt: { type: "string", description: "完整可执行的生成提示词（主体、动作、场景、氛围）" },
+                            type: { type: "string", enum: ["text", "image", "video", "audio", "compose"], description: "compose 为成片合成：dependencies 填要拼接的视频/音频产物 id（必填），无需 prompt" },
+                            prompt: { type: "string", description: "完整可执行的生成提示词（主体、动作、场景、氛围）；compose 类型留空" },
                             count: { type: "number", description: "图片产物数量，默认 1" },
                             targetNodeId: { type: "string", description: "仅当用户要求修改已有画布节点时填写快照中真实存在的节点 id" },
                             dependencies: { type: "array", items: { type: "string" }, description: "依赖的其他产物 id，上游完成后才执行" },
@@ -70,6 +70,7 @@ function buildPlannerSystemPrompt(): string {
         "intent 判定：用户只是提问、讨论、要建议时为 conversation（deliverables 为空数组，reply 直接回答）；用户明确要求创作、生成、修改画布内容时为 generation。",
         "generation 必须先形成 foundation：brief 说明目标、受众、核心信息和约束；direction 给出明确的风格、构图/镜头、色彩、光线、视觉关键词和避免事项。每个 deliverable 的 prompt 必须执行同一 foundation，保持主体、信息、色彩和视觉语言一致。",
         "deliverables 规划：按叙事或生产顺序排列；有先后依赖（如先剧本后分镜、先角色图后场景视频）时用 dependencies 声明；图片可用 count 一次多张；提示词写可拍的具体画面（人怎么干而非人干什么），景别/运镜用规范术语。",
+        "完整成片：用户要成片/短片/视频作品时，视频类产物规划为按镜头顺序的多个片段（每片段一条独立 prompt，镜间连贯），并在最后追加一个 type=compose 的产物，dependencies 按播放顺序填齐全部视频片段（有配音则含音频），系统会在片段完成后自动合成导出成片。",
         "修改已有节点：用户要求修改画布上已有产物时，deliverable 必须填该节点真实存在的 targetNodeId（从画布快照的节点 id 中选，不得编造）；用户选中了节点时优先且只能从选中节点中选择。",
         "影视制作规范：分镜类内容按「资产（角色/道具/场景）→ 连续分镜」组织；景别用 大远景/远景/全景/中景/近景/特写；运镜写具体运动方式；同一场戏角色位置、服装、道具前后连贯不跳戏。",
         "只通过 create_agent_plan 工具输出计划；渠道不支持工具调用时，只输出一个符合工具参数结构的 JSON 对象，不要输出其他内容。不要暴露思维链。回复使用中文。",
@@ -136,7 +137,7 @@ function textList(value: unknown, max = 12): string[] {
     return Array.isArray(value) ? value.map((item) => text(item, 80)).filter(Boolean).slice(0, max) : [];
 }
 
-const DELIVERABLE_TYPES: AgentRunDeliverableType[] = ["text", "image", "video", "audio"];
+const DELIVERABLE_TYPES: AgentRunDeliverableType[] = ["text", "image", "video", "audio", "compose"];
 
 /** 校验并归一化计划：deliverable id 唯一、依赖存在且无环、targetNodeId 必须真实存在；非法计划抛错。 */
 export function normalizeAgentRunPlan(raw: unknown, snapshot: CanvasAgentSnapshot): AgentRunPlan {
@@ -175,7 +176,10 @@ export function normalizeAgentRunPlan(raw: unknown, snapshot: CanvasAgentSnapsho
         const type = DELIVERABLE_TYPES.includes(raw2.type as AgentRunDeliverableType) ? (raw2.type as AgentRunDeliverableType) : "text";
         const prompt = text(raw2.prompt, 2000);
         const title = text(raw2.title, 24) || `产物 ${index + 1}`;
-        if (!prompt && type !== "text") return;
+        if (!prompt && type !== "text" && type !== "compose") return;
+        // compose 成片产物必须声明要拼接的片段依赖
+        const dependencies = textList(raw2.dependencies, 8);
+        if (type === "compose" && !dependencies.length) return;
         const targetNodeId = text(raw2.targetNodeId, 80);
         deliverables.push({
             id: text(raw2.id, 40) || `d${index + 1}`,
@@ -184,7 +188,7 @@ export function normalizeAgentRunPlan(raw: unknown, snapshot: CanvasAgentSnapsho
             prompt,
             count: type === "image" ? Math.min(9, Math.max(1, Number(raw2.count) || 1)) : 1,
             targetNodeId: targetNodeId && existingNodeIds.has(targetNodeId) ? targetNodeId : undefined,
-            dependencies: textList(raw2.dependencies, 8),
+            dependencies,
         });
     });
     // 依赖必须引用存在的 deliverable 且无环

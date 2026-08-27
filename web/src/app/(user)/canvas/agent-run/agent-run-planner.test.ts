@@ -65,3 +65,24 @@ test("normalizeAgentRunPlan drops unknown targetNodeId and breaks dependency cyc
 test("normalizeAgentRunPlan throws for generation plan without deliverables", () => {
     assert.throws(() => normalizeAgentRunPlan({ intent: "generation", reply: "x", deliverables: [] }, EMPTY_SNAPSHOT));
 });
+
+test("normalizeAgentRunPlan keeps compose with dependencies and drops compose without them", () => {
+    const plan = normalizeAgentRunPlan(
+        {
+            intent: "generation",
+            reply: "已规划",
+            deliverables: [
+                { id: "d1", title: "片段一", type: "video", prompt: "镜头一" },
+                { id: "d2", title: "片段二", type: "video", prompt: "镜头二" },
+                { id: "d3", title: "成片", type: "compose", dependencies: ["d1", "d2"] },
+                { id: "d4", title: "坏成片", type: "compose" },
+            ],
+        },
+        EMPTY_SNAPSHOT,
+    );
+
+    assert.equal(plan.deliverables.length, 3);
+    const compose = plan.deliverables.find((item) => item.type === "compose");
+    assert.ok(compose);
+    assert.deepEqual(compose.dependencies, ["d1", "d2"]);
+});

@@ -88,6 +88,8 @@ export function compileAgentRunOps(run: AgentRun, plan: AgentRunPlan, snapshot: 
         const finalPrompt = buildAgentRunPrompt(deliverable, plan.foundation);
         const nodeType = AGENT_RUN_NODE_TYPE_MAP[deliverable.type];
         const spec = getNodeSpec(nodeType);
+        // compose 成片产物不调用生成模型：建智能剪辑节点，片段经依赖连线收集后由前端触发合成导出
+        const isCompose = deliverable.type === "compose";
         const model = deliverable.type === "image" ? models.imageModel : deliverable.type === "video" ? models.videoModel : deliverable.type === "audio" ? models.audioModel : models.textModel;
         const isInplaceEdit = Boolean(deliverable.targetNodeId);
         const nodeId = nodeIdByDeliverableId.get(deliverable.id)!;
@@ -98,24 +100,26 @@ export function compileAgentRunOps(run: AgentRun, plan: AgentRunPlan, snapshot: 
             ops.push({ type: "update_node", id: nodeId, metadata: { prompt: finalPrompt, composerContent: finalPrompt, agentRunId: run.id, agentTaskId: deliverable.id } });
         } else {
             const metadata =
-                deliverable.type === "image"
-                    ? { generationMode: "image" as const, generationType: "generation" as const, prompt: finalPrompt, composerContent: finalPrompt, model, count: deliverable.count || 1 }
-                    : deliverable.type === "video"
-                      ? { generationMode: "video" as const, videoGenerationMode: "text-to-video" as const, prompt: finalPrompt, composerContent: finalPrompt, model }
-                      : deliverable.type === "audio"
-                        ? { generationMode: "audio" as const, prompt: finalPrompt, composerContent: finalPrompt, model }
-                        : { content: "", prompt: finalPrompt, composerContent: finalPrompt, model };
+                isCompose
+                    ? { canvasTool: "videoComposition" as const, generationMode: "video" as const, status: "idle" as const, count: 1 }
+                    : deliverable.type === "image"
+                      ? { generationMode: "image" as const, generationType: "generation" as const, prompt: finalPrompt, composerContent: finalPrompt, model, count: deliverable.count || 1 }
+                      : deliverable.type === "video"
+                        ? { generationMode: "video" as const, videoGenerationMode: "text-to-video" as const, prompt: finalPrompt, composerContent: finalPrompt, model }
+                        : deliverable.type === "audio"
+                          ? { generationMode: "audio" as const, prompt: finalPrompt, composerContent: finalPrompt, model }
+                          : { content: "", prompt: finalPrompt, composerContent: finalPrompt, model };
             ops.push({
                 type: "add_node",
                 id: nodeId,
                 nodeType,
                 title: deliverable.title,
-                position: { x: taskColumnX, y: anchorY + index * (spec.height + 36) },
+                position: { x: taskColumnX + (isCompose ? (getNodeSpec(AGENT_RUN_NODE_TYPE_MAP.video).width + 96) : 0), y: anchorY + index * (spec.height + 36) },
                 metadata: { ...metadata, agentRunId: run.id, agentTaskId: deliverable.id },
             });
         }
-        if (briefNodeId) ops.push({ type: "connect_nodes", fromNodeId: briefNodeId, toNodeId: nodeId });
-        if (directionNodeId) ops.push({ type: "connect_nodes", fromNodeId: directionNodeId, toNodeId: nodeId });
+        if (!isCompose && briefNodeId) ops.push({ type: "connect_nodes", fromNodeId: briefNodeId, toNodeId: nodeId });
+        if (!isCompose && directionNodeId) ops.push({ type: "connect_nodes", fromNodeId: directionNodeId, toNodeId: nodeId });
         deliverable.dependencies.forEach((dep) => {
             const upstreamNodeId = nodeIdByDeliverableId.get(dep);
             if (upstreamNodeId && upstreamNodeId !== nodeId) ops.push({ type: "connect_nodes", fromNodeId: upstreamNodeId, toNodeId: nodeId });

@@ -664,7 +664,7 @@ function AgentConnectView({
 }) {
     const { message } = App.useApp();
     const statusText = connectError ? "连接失败" : connected ? activity : enabled ? "连接中" : "未连接";
-    const statusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
+    const statusColor = connectError ? "#52525b" : connected ? "#18181b" : enabled ? "#71717a" : theme.node.muted;
     const copyCommand = (command: string) => {
         copyToClipboard(command);
         message.success("命令已复制");
@@ -738,7 +738,7 @@ function AgentConnectView({
                             <Input.Password size="large" prefix={<KeyRound className="mr-1 size-4" style={{ color: theme.node.faint }} />} value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder="终端输出的 Connect token" />
                         </label>
                         {connectError ? (
-                            <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: "rgba(220,38,38,.35)", color: "#dc2626" }}>
+                            <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: "rgba(82,82,91,.35)", color: "#52525b" }}>
                                 {connectError}
                             </div>
                         ) : null}

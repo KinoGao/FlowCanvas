@@ -2,7 +2,7 @@ import { CanvasNodeType } from "../types";
 
 /** Agent Run：一次规划 → 计划编译为画布 ops → 按依赖拓扑执行 → 节点状态回填（对齐 VOZEB Agent Run 模型）。 */
 
-export type AgentRunDeliverableType = "text" | "image" | "video" | "audio";
+export type AgentRunDeliverableType = "text" | "image" | "video" | "audio" | "compose";
 
 export type AgentRunDeliverable = {
     id: string;
@@ -62,4 +62,6 @@ export const AGENT_RUN_NODE_TYPE_MAP: Record<AgentRunDeliverableType, CanvasNode
     image: CanvasNodeType.Image,
     video: CanvasNodeType.Video,
     audio: CanvasNodeType.Audio,
+    // 成片合成产物：创建智能剪辑（视频合成）节点，依赖的视频/音频片段自动连线进来
+    compose: CanvasNodeType.Clip,
 };

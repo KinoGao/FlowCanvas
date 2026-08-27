@@ -35,6 +35,8 @@ export type TimelineLayout = {
     totalDuration: number;
 };
 
+export type TimelineFrameRect = { x: number; y: number; width: number; height: number };
+
 export type TimelineShortcutAction =
     | { type: "toggle-play" }
     | { type: "delete-selected" }
@@ -68,6 +70,17 @@ export function layoutTimeline(clips: TimelineClip[]): TimelineLayout {
         return { clip, start, end };
     });
     return { items, totalDuration: cursor };
+}
+
+/** 在固定输出画布内等比完整展示不同画幅的视频，避免直接拉伸。 */
+export function calculateTimelineFrameRect(sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number): TimelineFrameRect {
+    if (![sourceWidth, sourceHeight, targetWidth, targetHeight].every((value) => Number.isFinite(value) && value > 0)) {
+        return { x: 0, y: 0, width: Math.max(0, targetWidth), height: Math.max(0, targetHeight) };
+    }
+    const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+    const width = sourceWidth * scale;
+    const height = sourceHeight * scale;
+    return { x: (targetWidth - width) / 2, y: (targetHeight - height) / 2, width, height };
 }
 
 /** 校验并更新片段入点/出点，区间无效时返回原片段。 */
@@ -164,6 +177,13 @@ export async function composeVideoTimeline(videoClips: TimelineClip[], audioClip
     if (!mimeType) throw new Error("当前浏览器不支持视频合成导出，请换用 Chrome / Edge");
 
     const videos = await Promise.all(layout.items.map((item) => loadVideoElement(item.clip.src)));
+    // 视频原声要经 createMediaElementSource 接入 WebAudio：media element 的 muted 会在源头静音，
+    // 必须显式关闭，否则导出视频无声（loadVideoElement 默认 muted=true，只对 captureStream 采集无影响）。
+    videos.forEach((video) => {
+        video.muted = false;
+    });
+    // 每个片段使用独立 video 元素并在录制前完成定位，切镜时无需边录边 seek，避免黑帧和错帧。
+    await Promise.all(videos.map((video, index) => seekVideo(video, layout.items[index].clip.inPoint)));
     const audioLayout = layoutTimeline(audioClips.filter((clip) => clipEffectiveDuration(clip) > 0));
     const audios = audioLayout.items.map((item) => {
         const element = new Audio();
@@ -182,8 +202,10 @@ export async function composeVideoTimeline(videoClips: TimelineClip[], audioClip
     const canvas = document.createElement("canvas");
     canvas.width = videos[0].videoWidth;
     canvas.height = videos[0].videoHeight;
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d", { alpha: false });
     if (!context || !canvas.width || !canvas.height) throw new Error("无法创建合成画布");
+    // MediaRecorder 启动前先写入首帧，避免导出文件以透明/黑帧开场。
+    drawTimelineVideoFrame(context, canvas, videos[0]);
     const canvasStream = canvas.captureStream(30);
     const stream = new MediaStream([...canvasStream.getVideoTracks(), ...destination.stream.getAudioTracks()]);
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
@@ -229,12 +251,12 @@ export async function composeVideoTimeline(videoClips: TimelineClip[], audioClip
                         return;
                     }
                     const next = layout.items[index];
-                    videos[index].currentTime = next.clip.inPoint;
+                    drawTimelineVideoFrame(context, canvas, videos[index]);
                     videos[index].play().catch(() => reject(new Error("视频播放失败，无法合成导出")));
                     syncAudioTracks(audioLayout.items, audios, next.start);
                     onProgress?.(next.start, layout.totalDuration);
                 } else {
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    drawTimelineVideoFrame(context, canvas, video);
                     const globalTime = Math.min(layout.totalDuration, item.start + Math.max(0, video.currentTime - item.clip.inPoint));
                     syncAudioTracks(audioLayout.items, audios, globalTime);
                     onProgress?.(globalTime, layout.totalDuration);
@@ -260,6 +282,13 @@ export async function composeVideoTimeline(videoClips: TimelineClip[], audioClip
             audio.load();
         });
     }
+}
+
+function drawTimelineVideoFrame(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, video: HTMLVideoElement) {
+    const rect = calculateTimelineFrameRect(video.videoWidth, video.videoHeight, canvas.width, canvas.height);
+    context.fillStyle = "#000";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(video, rect.x, rect.y, rect.width, rect.height);
 }
 
 /** 预览 / 导出共用的音频轨同步：按全局时间对齐未静音音频片段的播放位置。 */

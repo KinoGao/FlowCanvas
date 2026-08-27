@@ -38,7 +38,7 @@ export function AgentChatMessage({
 }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
-    const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
+    const color = item.role === "error" ? "#52525b" : item.role === "tool" ? "#71717a" : theme.node.text;
     if (isSystem) {
         return (
             <div className="flex justify-center text-xs">
@@ -80,13 +80,13 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                 <details>
                     <summary className="cursor-pointer list-none">
                         <div className="flex items-start gap-3">
-                            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: "rgba(217,119,6,.24)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
+                            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: "rgba(113,113,122,.24)", color: "#71717a", background: "rgba(113,113,122,.05)" }}>
                                 <CircleAlert className="size-4" />
                             </span>
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2 text-sm font-semibold leading-5">
                                     <span>确认工具调用</span>
-                                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: "rgba(217,119,6,.22)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
+                                    <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: "rgba(113,113,122,.22)", color: "#71717a", background: "rgba(113,113,122,.05)" }}>
                                         等待确认
                                     </span>
                                     {detail ? (
@@ -115,7 +115,7 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                         <Button danger className="!h-9" icon={<XCircle className="size-4" />} onClick={() => onReject?.()}>
                             拒绝执行
                         </Button>
-                        <Button className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: "rgba(22,163,74,.42)", color: "#16a34a", background: "transparent" }} onClick={() => onApprove?.()}>
+                        <Button className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: "rgba(24,24,27,.42)", color: "#18181b", background: "transparent" }} onClick={() => onApprove?.()}>
                             批准执行
                         </Button>
                     </div>
@@ -407,12 +407,12 @@ function toolCardState(title: string, text: string, detail?: unknown) {
     const lower = raw.toLowerCase();
     const tool = String(objectField(detail, "name") || objectField(detail, "tool") || "");
     if (objectField(detail, "status") === "noop" || /未生效|无需|没有找到|没有.*可|已存在/.test(raw))
-        return { label: "未生效", color: "#d97706", softBorder: "rgba(217,119,6,.22)", softBg: "rgba(217,119,6,.04)", icon: <CircleAlert className="size-4" />, isError: false };
-    if (/拒绝|取消/.test(raw) || lower.includes("rejected")) return { label: "拒绝执行", color: "#dc2626", softBorder: "rgba(220,38,38,.20)", softBg: "rgba(220,38,38,.04)", icon: <XCircle className="size-4" />, isError: true };
-    if (/失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: "执行失败", color: "#dc2626", softBorder: "rgba(220,38,38,.20)", softBg: "rgba(220,38,38,.04)", icon: <XCircle className="size-4" />, isError: true };
+        return { label: "未生效", color: "#71717a", softBorder: "rgba(113,113,122,.22)", softBg: "rgba(113,113,122,.05)", icon: <CircleAlert className="size-4" />, isError: false };
+    if (/拒绝|取消/.test(raw) || lower.includes("rejected")) return { label: "拒绝执行", color: "#52525b", softBorder: "rgba(82,82,91,.22)", softBg: "rgba(82,82,91,.05)", icon: <XCircle className="size-4" />, isError: true };
+    if (/失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: "执行失败", color: "#52525b", softBorder: "rgba(82,82,91,.22)", softBg: "rgba(82,82,91,.05)", icon: <XCircle className="size-4" />, isError: true };
     if (/完成|成功/.test(raw) || lower.includes("completed") || lower.includes("succeeded"))
-        return { label: tool === "canvas_apply_ops" || /画布操作/.test(title) ? "已批准执行" : "执行完成", color: "#16a34a", softBorder: "rgba(22,163,74,.20)", softBg: "rgba(22,163,74,.04)", icon: <CheckCircle2 className="size-4" />, isError: false };
-    return { label: "工具调用", color: "#2563eb", softBorder: "rgba(37,99,235,.20)", softBg: "rgba(37,99,235,.04)", icon: <Wrench className="size-4" />, isError: false };
+        return { label: tool === "canvas_apply_ops" || /画布操作/.test(title) ? "已批准执行" : "执行完成", color: "#18181b", softBorder: "rgba(24,24,27,.22)", softBg: "rgba(24,24,27,.05)", icon: <CheckCircle2 className="size-4" />, isError: false };
+    return { label: "工具调用", color: "#71717a", softBorder: "rgba(113,113,122,.22)", softBg: "rgba(113,113,122,.05)", icon: <Wrench className="size-4" />, isError: false };
 }
 
 function normalizeText(value: unknown) {

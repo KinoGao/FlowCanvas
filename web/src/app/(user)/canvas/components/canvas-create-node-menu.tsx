@@ -99,7 +99,7 @@ export function CanvasCreateNodeMenu({
     return (
         <div
             ref={menuRef}
-            className="canvas-create-menu-enter creative-os-panel thin-scrollbar fixed z-[80] max-h-[calc(100vh-16px)] overflow-y-auto rounded-[8px] border p-2"
+            className="canvas-create-menu-enter creative-os-panel thin-scrollbar pointer-events-auto fixed z-[80] max-h-[calc(100vh-16px)] overflow-y-auto rounded-[8px] border p-2"
             style={{
                 left: menuPosition.x,
                 top: menuPosition.y,

@@ -6,6 +6,8 @@ const NODE_TYPES = new Set<CanvasNodeData["type"]>(Object.values(CanvasNodeType)
 
 const TITLE_STEM_BY_TYPE: Record<CanvasNodeData["type"], string> = {
     text: "文本",
+    script: "脚本",
+    clip: "智能剪辑",
     image: "图片",
     video: "视频",
     audio: "音频",
@@ -16,6 +18,8 @@ const TITLE_STEM_BY_TYPE: Record<CanvasNodeData["type"], string> = {
 
 const LEGACY_DEFAULT_TITLES: Partial<Record<CanvasNodeData["type"], string[]>> = {
     text: ["Note", "Text", "文本", "Generated Text", "Assistant Text", "Prompt"],
+    script: ["脚本节点", "Script", "脚本"],
+    clip: ["智能剪辑", "Clip"],
     image: ["New Generation", "Image", "图片", "Generated Image", "ComfyUI Image"],
     video: ["Video", "视频", "Generated Video", "ComfyUI Video"],
     audio: ["Audio", "音频", "Generated Audio", "ComfyUI Audio"],

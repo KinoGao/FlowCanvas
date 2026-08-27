@@ -1,6 +1,6 @@
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../types";
+import { CanvasNodeType, isCanvasScriptNode, type CanvasConnection, type CanvasNodeData } from "../types";
 import { sortConnectionsByReferenceOrder } from "./canvas-node-identity";
 
 export type CanvasResourceKind = "image" | "video" | "audio" | "text";
@@ -101,7 +101,7 @@ function labelResourceNodes(nodes: CanvasNodeData[], active: boolean) {
                 title: node.title || label,
                 previewUrl: node.metadata?.content,
                 storageKey: node.metadata?.storageKey,
-                text: node.type === CanvasNodeType.Text && node.metadata?.canvasTool !== "script" ? node.metadata?.content || node.metadata?.prompt : undefined,
+                text: !isCanvasScriptNode(node) ? node.metadata?.content || node.metadata?.prompt : undefined,
                 active,
             },
         ];
@@ -129,11 +129,11 @@ function resourceKind(node: CanvasNodeData): CanvasResourceKind | null {
     if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) return "image";
     if (node.type === CanvasNodeType.Video && (node.metadata?.content || node.metadata?.storageKey)) return "video";
     if (node.type === CanvasNodeType.Audio && (node.metadata?.content || node.metadata?.storageKey)) return "audio";
-    // 脚本节点（canvasTool="script"）不参与上游文本引用：正文是剧本工作台内容，不作为下游提示词输入。
-    if (node.type === CanvasNodeType.Text && node.metadata?.canvasTool !== "script" && (node.metadata?.content || node.metadata?.prompt)) return "text";
+    // 脚本节点不参与上游文本引用：正文是剧本工作台内容，不作为下游提示词输入。
+    if (!isCanvasScriptNode(node) && node.type === CanvasNodeType.Text && (node.metadata?.content || node.metadata?.prompt)) return "text";
     return null;
 }
 
 function isGenerationConfigNode(node: CanvasNodeData | undefined) {
-    return node?.type === CanvasNodeType.Config || node?.type === CanvasNodeType.ComfyUI;
+    return node?.type === CanvasNodeType.Config || node?.type === CanvasNodeType.ComfyUI || node?.type === CanvasNodeType.Clip;
 }

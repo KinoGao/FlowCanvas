@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import copyToClipboard from "copy-to-clipboard";
-import { Bot, ChevronDown, Clapperboard, Copy, Cpu, History, PanelRightClose, Settings2, ShieldCheck, Sparkles, Trash2, Undo2, Video, WandSparkles, X } from "lucide-react";
-import { Button, Modal, Segmented, Select, Tooltip } from "antd";
+import { Bot, ChevronDown, Clapperboard, Copy, Cpu, History, ListOrdered, PanelRightClose, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Undo2, Video, WandSparkles, X } from "lucide-react";
+import { Button, Modal, Popover, Segmented, Select, Tooltip } from "antd";
 import { motion, useReducedMotion } from "motion/react";
 
 import { modelOptionName, normalizeModelOptionValue, resolveModelChannel, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
@@ -41,8 +42,9 @@ const ONLINE_AGENT_PROMPT = [
     "你是 Infinite Canvas 网页内置在线画布助手，可以直接操作当前画布。当前画布 JSON 会随用户消息提供（含每个节点的生成参数）。",
     "首轮必须调用工具：只读问题用 canvas_get_state / canvas_get_selection；改动画布时调用对应工具。",
     "能力域：",
-    "- 创建：canvas_create_node / canvas_create_text_node(s) / canvas_create_image_prompt_flow / canvas_create_generation_flow；生成剧本/脚本/分镜时用 canvas_create_node 创建 canvasTool=\"script\" 的脚本节点（metadata.scriptBody 填剧本正文，支持分镜表与 AI 拆解），不要用普通文本节点代替；",
+    "- 创建：canvas_create_node / canvas_create_text_node(s) / canvas_create_image_prompt_flow / canvas_create_generation_flow；生成剧本/脚本/分镜时用 canvas_create_node 创建 nodeType=\"script\" 的脚本节点（metadata.scriptBody 填剧本正文，支持分镜表与 AI 拆解），不要用普通文本节点代替；",
     "- 生成与重跑：canvas_generate_text/image/video/audio（新建流程并立即生成）、canvas_run_generation（按给定提示词跑已有节点）、canvas_retry_node（沿用上次参数重跑）、canvas_execute_group（整组拓扑重跑）；",
+    "- 生成参数：generate/create 流程工具可选传 model、size、resolution（1k/2k/4k 图片分辨率档）、vquality（480p/720p/1080p 视频分辨率）、count 等覆盖默认值；用户指定了模型或分辨率时必须写入对应参数，模型 ID 以画布 JSON 里已有节点的 metadata.model 或用户原话为准，不要编造；",
     "- 修改：canvas_update_node（含 model/size/count/quality/seconds 等 metadata 参数）、canvas_update_node_text、canvas_move_nodes、canvas_resize_node、canvas_delete_nodes、canvas_connect_nodes、canvas_select_nodes、canvas_set_viewport、canvas_apply_ops（精确批量）；",
     "- 图像工具：canvas_image_edit（多角度/扩图/打光/抠图/720 全景）、canvas_image_quick_command（镜头聚焦/焦点编辑/电影级光影/角色三视图/画面推演）、canvas_image_process（本地裁剪/宫格切分/高清放大，不耗模型）；",
     "- 视频工具：canvas_video_analyze（拆分镜表）、canvas_video_trim（剪辑出入点）、canvas_video_compose（拼接合成）；",
@@ -55,8 +57,15 @@ const ONLINE_AGENT_PROMPT = [
 ].join("\n");
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 
-/** Agent 对话空态建议卡片：点击把文案填入输入 Composer（对齐 TapNow 建议卡片交互）。 */
+/** Agent 对话空态建议卡片：点击把文案填入输入 Composer（对齐 TapNow 建议卡片交互）；带 mode 的卡片会切换对话模式。 */
 const SUGGESTION_CARDS = [
+    {
+        icon: Clapperboard,
+        title: "创意成片",
+        description: "一句话创意自动跑完整流水线：剧本分镜 → 逐镜生成 → 合成导出成片",
+        prompt: "我想做一部短片，创意是：（在这里补充你的一句话创意，如「深夜便利店的温暖瞬间」，我会自动规划剧本、分镜并生成全部片段，最后合成出片）",
+        mode: "run" as const,
+    },
     {
         icon: Sparkles,
         title: "头脑风暴",
@@ -64,7 +73,7 @@ const SUGGESTION_CARDS = [
         prompt: "帮我头脑风暴一个适合做成短视频的故事方向，给出 3 个具体点子",
     },
     {
-        icon: Clapperboard,
+        icon: ListOrdered,
         title: "分镜推演",
         description: "把想法拆成镜头脚本，规划画面与节奏",
         prompt: "帮我写一个 30 秒短视频的镜头脚本，包含分镜与画面描述",
@@ -77,12 +86,13 @@ const SUGGESTION_CARDS = [
     },
 ];const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
-const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "comfyui", "video", "audio"] };
+const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "script", "comfyui", "video", "audio"] };
 const GENERATION_MODE_SCHEMA = { type: "string", enum: ["text", "image", "video", "audio"] };
 const GENERATION_OPTION_PROPERTIES = {
     model: { type: "string" },
     size: { type: "string" },
     quality: { type: "string" },
+    resolution: { type: "string", description: "图片生成分辨率档位：1k / 2k / 4k" },
     count: { type: "number" },
     seconds: { type: "string" },
     vquality: { type: "string" },
@@ -171,7 +181,7 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     ),
     toolDefinition(
         "canvas_create_node",
-        "创建任意类型节点：text、image、video、audio、comfyui。适合创建占位内容、媒体占位、ComfyUI 工作流节点或自定义 metadata 节点。创建脚本节点：nodeType=text、metadata.canvasTool=\"script\"、metadata.scriptBody=剧本正文。",
+        "创建任意类型节点：text、image、video、audio、script、comfyui。适合创建占位内容、媒体占位、脚本节点、ComfyUI 工作流节点或自定义 metadata 节点。创建脚本节点：nodeType=\"script\"，并把剧本正文写入 metadata.scriptBody。",
         { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA },
         ["nodeType"],
     ),
@@ -527,13 +537,16 @@ export function CanvasAssistantPanel({
         const optionValueFor = (type: string) =>
             type === "image" ? effectiveConfig.imageModel || effectiveConfig.model : type === "video" ? effectiveConfig.videoModel || effectiveConfig.model : type === "audio" ? effectiveConfig.audioModel || effectiveConfig.model : effectiveConfig.textModel || effectiveConfig.model;
         try {
+            // compose（成片合成）不进服务端执行器：它是浏览器端 MediaRecorder 能力，由下方 effect 在片段完成后自动触发
             const created = await createAgentRun(token, {
                 id: run.id,
                 projectId: run.projectId,
                 title: run.title,
                 requirement: run.requirement,
                 plan: run.plan,
-                tasks: tasks.map((task) => {
+                tasks: tasks
+                    .filter((task) => task.type !== "compose")
+                    .map((task) => {
                     const deliverable = run.plan!.deliverables.find((item) => item.id === task.id);
                     const optionValue = optionValueFor(task.type);
                     return {
@@ -564,9 +577,32 @@ export function CanvasAssistantPanel({
         }
     };
 
+    // 成片自动合成：run 中 type=compose 的产物在其全部片段依赖完成后，向画布下发 video_compose 操作触发合成导出
+    const autoComposedRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        agentRuns.forEach((run) => {
+            if (!run.plan || ["completed", "failed", "cancelled"].includes(run.status)) return;
+            const statusById = new Map(run.tasks.map((task) => [task.id, task.status]));
+            for (const deliverable of run.plan.deliverables) {
+                if (deliverable.type !== "compose") continue;
+                const key = `${run.id}:${deliverable.id}`;
+                if (autoComposedRef.current.has(key)) continue;
+                const statuses = deliverable.dependencies.map((dep) => statusById.get(dep));
+                if (!statuses.length || statuses.some((status) => status === "failed" || status === "cancelled")) {
+                    autoComposedRef.current.add(key);
+                    continue;
+                }
+                if (statuses.every((status) => status === "completed")) {
+                    autoComposedRef.current.add(key);
+                    void onApplyOps([{ type: "video_compose", id: `agentrun-${run.id}-${deliverable.id}` }]);
+                    addOnlineLog("片段已全部生成，开始自动合成成片", { runId: run.id });
+                }
+            }
+        });
+    }, [agentRuns, onApplyOps, addOnlineLog]);
+
     // 任务规划模式：一次规划出创作计划（简报+视觉方向+产物清单），确认后编译为画布节点并按依赖执行
-    const startAgentRunFlow = async (text: string) => {
-        const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
+    const startAgentRunFlow = async (text: string) => {        const requestConfig = { ...effectiveConfig, model: effectiveConfig.textModel || effectiveConfig.model };
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
             openConfigDialog(true);
             return;
@@ -904,7 +940,7 @@ export function CanvasAssistantPanel({
                                 className="mt-5 grid w-full grid-cols-2 gap-2"
                                 variants={{ hidden: {}, show: { transition: { delayChildren: 0.25, staggerChildren: 0.1 } } }}
                             >
-                                {SUGGESTION_CARDS.slice(0, 2).map((card) => (
+                                {SUGGESTION_CARDS.slice(0, 4).map((card) => (
                                     <motion.button
                                         key={card.title}
                                         type="button"
@@ -914,7 +950,10 @@ export function CanvasAssistantPanel({
                                         }}
                                         className="canvas-agent-suggestion-card min-h-[120px] rounded-xl border px-4 py-3.5 text-left transition hover:-translate-y-0.5 hover:opacity-90"
                                         style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}
-                                        onClick={() => setPrompt(card.prompt)}
+                                        onClick={() => {
+                                            if ("mode" in card && card.mode) setChatMode(card.mode);
+                                            setPrompt(card.prompt);
+                                        }}
                                     >
                                         <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: theme.ui.accent }}>
                                             <card.icon className="size-3.5" />
@@ -979,7 +1018,8 @@ export function CanvasAssistantPanel({
                                     </Tooltip>
                                 ) : null}
                                 <CanvasPromptLibrary onSelect={setPrompt} />
-                                <AgentTextModelPicker config={effectiveConfig} value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
+                                <AgentModelPicker config={effectiveConfig} capability="text" value={effectiveConfig.textModel} onChange={(model) => updateConfig("textModel", model)} />
+                                <AgentGenerationSettings config={effectiveConfig} />
                                 <AgentSkillPicker kind="art" value={artSkill} onChange={setArtSkill} />
                                 <AgentSkillPicker kind="story" value={storySkill} onChange={setStorySkill} />
                                 <AgentSkillPicker kind="director" value={directorSkill} onChange={setDirectorSkill} />
@@ -1091,8 +1131,13 @@ function AgentSkillPicker({ kind, value, onChange }: { kind: "art" | "story" | "
     );
 }
 
-function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; value: string; onChange: (model: string) => void }) {
-    const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, "text")].filter((model): model is string => Boolean(model)))), [config, value]);
+const AGENT_MODEL_CAPABILITY_LABEL = { text: "文本", image: "图片", video: "视频", audio: "音频" } as const;
+type AgentModelCapability = keyof typeof AGENT_MODEL_CAPABILITY_LABEL;
+const VIDEO_RESOLUTION_FALLBACK = ["480p", "720p", "1080p"];
+
+function AgentModelPicker({ config, capability, value, onChange }: { config: AiConfig; capability: AgentModelCapability; value: string; onChange: (model: string) => void }) {
+    const label = AGENT_MODEL_CAPABILITY_LABEL[capability];
+    const options = useMemo(() => Array.from(new Set([value, ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [config, capability, value]);
     const current = value || "";
     const selectValue = current && options.includes(current) ? current : "";
     const selectOptions: Array<{ value: string; label: ReactNode; title?: string; disabled?: boolean }> = options.length
@@ -1107,7 +1152,7 @@ function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; v
               ),
               title: `${modelOptionName(model)} ${resolveModelChannel(config, model).name}`,
           }))
-        : [{ value: "__empty_text_model__", label: "暂无文本模型", disabled: true }];
+        : [{ value: "__empty_model__", label: `暂无${label}模型`, disabled: true }];
     return (
         <Select
             value={selectValue || undefined}
@@ -1118,7 +1163,7 @@ function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; v
             placeholder={
                 <span className="inline-flex min-w-0 items-center gap-1.5">
                     <AgentModelIcon model="" />
-                    <span className="truncate">选择文本模型</span>
+                    <span className="truncate">选择{label}模型</span>
                 </span>
             }
             popupRender={(menu) => (
@@ -1131,9 +1176,9 @@ function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; v
                     {menu}
                 </div>
             )}
-            title={current ? `${modelOptionName(current)} · ${resolveModelChannel(config, current).name}` : "选择文本模型"}
+            title={current ? `${modelOptionName(current)} · ${resolveModelChannel(config, current).name}` : `选择${label}模型`}
             onChange={(next) => {
-                if (next && next !== "__empty_text_model__") onChange(next);
+                if (next && next !== "__empty_model__") onChange(next);
             }}
             onMouseDown={(event: ReactMouseEvent) => event.stopPropagation()}
         />
@@ -1143,6 +1188,61 @@ function AgentTextModelPicker({ config, value, onChange }: { config: AiConfig; v
 function AgentModelIcon({ model }: { model: string }) {
     const icon = resolveModelIcon(modelOptionName(model));
     return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
+}
+
+/** Agent 生成默认设置：图片/视频模型与分辨率档位（写入全局配置，generate/create 流程工具未显式传参时生效）。 */
+function AgentGenerationSettings({ config }: { config: AiConfig }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const videoCapability = useVideoModelCapability(config.videoModel).capability;
+    const videoResolutions = Array.from(new Set([config.vquality, ...(videoCapability?.resolutions?.length ? videoCapability.resolutions : VIDEO_RESOLUTION_FALLBACK)])).filter(Boolean);
+    const imageResolutionOptions = [
+        { value: "1k", label: "1K" },
+        { value: "2k", label: "2K" },
+        { value: "4k", label: "4K" },
+    ];
+    const selectStyle = { background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text };
+    const row = (labelText: string, node: ReactNode) => (
+        <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-xs" style={{ color: theme.node.muted }}>
+                {labelText}
+            </span>
+            <div className="min-w-0 flex-1">{node}</div>
+        </div>
+    );
+    return (
+        <Popover
+            trigger="click"
+            placement="bottomLeft"
+            content={
+                <div data-canvas-no-zoom className="canvas-no-zoom-popup w-[280px] space-y-2.5 p-3" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+                    <div className="text-xs font-medium" style={{ color: theme.node.text }}>
+                        生成默认设置
+                    </div>
+                    {row(
+                        "图片模型",
+                        <AgentModelPicker config={config} capability="image" value={config.imageModel} onChange={(model) => updateConfig("imageModel", model)} />,
+                    )}
+                    {row("图片分辨率", <Select size="small" style={{ width: "100%", ...selectStyle }} value={config.resolution} options={imageResolutionOptions} onChange={(value) => updateConfig("resolution", value)} />)}
+                    {row(
+                        "视频模型",
+                        <AgentModelPicker config={config} capability="video" value={config.videoModel} onChange={(model) => updateConfig("videoModel", model)} />,
+                    )}
+                    {row(
+                        "视频分辨率",
+                        <Select size="small" style={{ width: "100%", ...selectStyle }} value={config.vquality} options={videoResolutions.map((value) => ({ value, label: value.toUpperCase() }))} onChange={(value) => updateConfig("vquality", value)} />,
+                    )}
+                    <div className="text-[11px] leading-4" style={{ color: theme.node.faint }}>
+                        仅作为 Agent 新建生成节点的默认值；对话里明确指定模型 / 分辨率时以对话为准。
+                    </div>
+                </div>
+            }
+        >
+            <Tooltip title="图片 / 视频模型与分辨率默认设置">
+                <Button type="text" shape="circle" className="!h-9 !w-9 !min-w-9" style={{ color: theme.node.muted }} icon={<SlidersHorizontal className="size-4" />} aria-label="Agent 生成默认设置" />
+            </Tooltip>
+        </Popover>
+    );
 }
 
 function resolveModelIcon(model: string) {
@@ -1513,6 +1613,7 @@ function generationTargetNodeOp(id: string, input: Record<string, unknown>, mode
             model: resolveGenerationModel(config, mode, stringOptional(input.model)),
             size: stringOptional(input.size) || config.size,
             quality: stringOptional(input.quality) || config.quality,
+            resolution: stringOptional(input.resolution) || config.resolution,
             count: numberOptional(input.count) ?? generationCount(mode === "image" ? config.canvasImageCount || config.count : config.count),
             seconds: stringOptional(input.seconds) || config.videoSeconds,
             vquality: stringOptional(input.vquality) || config.vquality,
@@ -1687,8 +1788,8 @@ function requireNumber(value: unknown, field: string) {
 }
 
 function requireNodeType(value: unknown): CanvasNodeType {
-    if (value === CanvasNodeType.Text || value === CanvasNodeType.Image || value === CanvasNodeType.ComfyUI || value === CanvasNodeType.Video || value === CanvasNodeType.Audio) return value;
-    throw new Error("节点类型必须是 text、image、comfyui、video 或 audio");
+    if (value === CanvasNodeType.Text || value === CanvasNodeType.Image || value === CanvasNodeType.Script || value === CanvasNodeType.ComfyUI || value === CanvasNodeType.Video || value === CanvasNodeType.Audio) return value;
+    throw new Error("节点类型必须是 text、image、script、comfyui、video 或 audio");
 }
 
 function requireViewport(value: unknown) {

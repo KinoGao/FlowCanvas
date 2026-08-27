@@ -12,6 +12,8 @@ type CanvasNodeSpec = {
 export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Image]: { width: 384, height: 216, title: "New Generation" },
     [CanvasNodeType.Text]: { width: 384, height: 216, title: "Note" },
+    [CanvasNodeType.Script]: { width: 384, height: 216, title: "脚本节点" },
+    [CanvasNodeType.Clip]: { width: 220, height: 132, title: "智能剪辑" },
     [CanvasNodeType.Config]: { width: 420, height: 240, title: "生成配置" },
     [CanvasNodeType.ComfyUI]: { width: 384, height: 216, title: "ComfyUI" },
     [CanvasNodeType.Video]: { width: 384, height: 216, title: "Video" },
@@ -32,6 +34,14 @@ export const NODE_SPECS = {
     [CanvasNodeType.Text]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Text],
         metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Text),
+    },
+    [CanvasNodeType.Script]: {
+        ...NODE_DEFAULT_SIZE[CanvasNodeType.Script],
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Script),
+    },
+    [CanvasNodeType.Clip]: {
+        ...NODE_DEFAULT_SIZE[CanvasNodeType.Clip],
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Clip),
     },
     [CanvasNodeType.Config]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Config],

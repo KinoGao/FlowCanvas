@@ -478,8 +478,33 @@
     }
 
     .creative-os-canvas {
-        background: inherit;
+        background:
+            radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 60%),
+            inherit;
         overscroll-behavior: none;
+    }
+
+    .dark .creative-os-canvas {
+        background:
+            radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 55%),
+            inherit;
+    }
+
+    /* 液态玻璃高光描边：玻璃面板顶部一道 1px 内高光，黑白灰阶 */
+    .creative-os-panel,
+    .creative-os-dock,
+    .creative-os-composer {
+        box-shadow:
+            var(--creative-shadow),
+            inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .dark .creative-os-panel,
+    .dark .creative-os-dock,
+    .dark .creative-os-composer {
+        box-shadow:
+            var(--creative-shadow),
+            inset 0 1px 0 rgba(255, 255, 255, 0.10);
     }
 
     .creative-os-topbar {

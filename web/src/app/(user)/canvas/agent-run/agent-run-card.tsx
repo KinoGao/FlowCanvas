@@ -1,12 +1,12 @@
-import { AudioLines, CheckCircle2, CircleSlash, Clapperboard, FileText, Image as ImageIcon, LoaderCircle, Pause, Play, RotateCw, XCircle } from "lucide-react";
+import { AudioLines, CheckCircle2, CircleSlash, Clapperboard, FileText, FileVideo2, Image as ImageIcon, LoaderCircle, Pause, Play, RotateCw, XCircle } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 import type { AgentRun, AgentRunTask } from "./agent-run-types";
 
 type Theme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
-const TYPE_ICON = { text: FileText, image: ImageIcon, video: Clapperboard, audio: AudioLines } as const;
-const TYPE_LABEL = { text: "文本", image: "图片", video: "视频", audio: "音频" } as const;
+const TYPE_ICON = { text: FileText, image: ImageIcon, video: Clapperboard, audio: AudioLines, compose: FileVideo2 } as const;
+const TYPE_LABEL = { text: "文本", image: "图片", video: "视频", audio: "音频", compose: "成片" } as const;
 
 function TaskStatusIcon({ task, theme }: { task: AgentRunTask; theme: Theme }) {
     if (task.status === "running") return <LoaderCircle className="size-3.5 animate-spin" style={{ color: theme.ui.accent }} />;

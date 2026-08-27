@@ -4,6 +4,7 @@ import { test } from "vitest";
 import { VIDEO_TRIM_MIN_SECONDS } from "./canvas-video-tools";
 import {
     adjustClipOutPoint,
+    calculateTimelineFrameRect,
     clipEffectiveDuration,
     createTimelineClip,
     isTimelineEditableTarget,
@@ -49,6 +50,13 @@ test("layoutTimeline 顺序排列片段并计算总时长", () => {
     assert.equal(layout.items[1].end, 7);
     assert.equal(layout.totalDuration, 7);
     assert.equal(layoutTimeline([]).totalDuration, 0);
+});
+
+test("calculateTimelineFrameRect 等比容纳不同视频画幅", () => {
+    assert.deepEqual(calculateTimelineFrameRect(1920, 1080, 1280, 720), { x: 0, y: 0, width: 1280, height: 720 });
+    assert.deepEqual(calculateTimelineFrameRect(1080, 1920, 1280, 720), { x: 437.5, y: 0, width: 405, height: 720 });
+    assert.deepEqual(calculateTimelineFrameRect(1920, 1080, 720, 1280), { x: 0, y: 437.5, width: 720, height: 405 });
+    assert.deepEqual(calculateTimelineFrameRect(0, 0, 1280, 720), { x: 0, y: 0, width: 1280, height: 720 });
 });
 
 test("updateClipRange 校验区间，无效时返回原片段", () => {
