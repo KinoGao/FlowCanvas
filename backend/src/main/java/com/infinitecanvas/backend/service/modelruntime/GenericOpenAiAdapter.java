@@ -53,6 +53,8 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient = HttpClient.newBuilder()
+            // 强制 HTTP/1.1：默认 HTTP/2 会对纯 HTTP 自建服务发 h2c Upgrade，uvicorn 类服务器拒绝升级并丢失请求体
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(30))
             // 不跟随重定向：上游 3xx 可能指向内网任意地址（重定向型 SSRF）。
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -467,6 +469,8 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
 
     private void validateString(ObjectNode json, List<String> keys, List<String> allowed, String label) {
         if (allowed == null || allowed.isEmpty()) return;
+        // "*" 为通配约定：平台配置声明任意取值均可（如本地 TTS 的自定义音色）
+        if (allowed.contains("*")) return;
         JsonNode value = first(json, keys);
         if (value != null && value.isTextual() && !allowed.contains(value.asText())) throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asText());
     }

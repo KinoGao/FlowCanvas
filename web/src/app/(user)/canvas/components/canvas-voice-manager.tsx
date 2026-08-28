@@ -36,7 +36,7 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
 
     const refresh = useCallback(async () => {
         try {
-            const resp = await fetch(`${TTS_MAIN}/audio/voices`);
+            const resp = await fetch(`${TTS_MAIN}/audio/voices/custom`);
             if (resp.ok) {
                 const data = await resp.json();
                 setVoices(Array.isArray(data.custom) ? data.custom : []);

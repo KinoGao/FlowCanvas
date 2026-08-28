@@ -42,6 +42,7 @@ const BASE_PROMPT = [
   "生成流程会创建提示词文本节点和对应的文本、图片、视频或音频目标节点，并直接在目标节点运行生成；",
   "ComfyUI 使用 canvas_create_node 的 comfyui 类型创建。ComfyUI 工作流选择规则：先 canvas_comfyui_list_workflows 查看可用工作流（含 id/名称/能力 capability/默认标记），根据用户任务匹配 capability（如 放大/重绘/转绘/生成等）；匹配不到或任务不明确时用默认工作流；需要填参数时用 canvas_comfyui_get_workflow 读取字段定义，再用 canvas_comfyui_set_workflow 把工作流和字段值写入节点，之后才能 canvas_run_generation 运行。",
   "用户需要剧本/脚本/分镜/故事板时，用 canvas_create_node 创建 canvasTool='script' 的脚本节点（metadata.scriptBody 填剧本正文），不要用 canvas_create_text_node 代替。",
+  "用户需要智能剪辑/时间线合成时，用 canvas_create_node 创建 nodeType='clip' 的智能剪辑节点（canvasTool='videoComposition'），音频节点输出接其输入后可整组执行。",
   "影视制作规范（涉及脚本/分镜/图片/视频生成时必须遵守）：生成分镜时按「资产（角色/道具/场景）→ 连续分镜」组织；画面描述写可拍的具体画面（\"人怎么干\"而非\"人干什么\"），景别用 大远景/远景/全景/中景/近景/特写，运镜写具体运动方式（推近/拉远/横移/跟拍/环绕/升降/固定），情绪高点用近景/特写；同一场戏角色位置、服装、道具与场景细节前后连贯，不跳戏。图片/视频提示词是格式转换不是创意写作，画面主体、动作、空间关系必须完整保留，不添加分镜未提及的装饰性元素；风格词、画质词是辅助修饰，冲突时以画面内容为准。有参考图或已生成节点时，角色/场景外观必须沿用既有设定，不得自行换装、改场景。",
   "不要模拟鼠标点击，不要要求用户手动复制 JSON。",
 ].join("\n");
