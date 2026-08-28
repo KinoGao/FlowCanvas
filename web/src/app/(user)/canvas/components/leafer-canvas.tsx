@@ -63,7 +63,7 @@ const EMPTY_CONNECTIONS: CanvasConnection[] = [];
 const EMPTY_ID_SET = new Set<string>();
 const CONNECTION_SNAP_RADIUS = 48;
 const CONNECTION_SNAP_RELEASE_RADIUS = 64;
-const CANVAS_NODE_RADIUS = 8;
+const CANVAS_NODE_RADIUS = 14;
 const CANVAS_READY_FALLBACK_MS = 4_000;
 
 type LeaferConnectionVisual = {
@@ -382,12 +382,15 @@ export function LeaferCanvas({
         const hovered = hoveredNodeIdRef.current === nodeId;
         const dragging = draggingNodeIdsRef.current.has(nodeId);
         const currentTheme = themeRef.current;
+        const nodeForSignature = nodesRef.current.find((item) => item.id === nodeId);
+        const hasMediaContent = Boolean(nodeForSignature && (nodeForSignature.type === CanvasNodeType.Image || nodeForSignature.type === CanvasNodeType.Video) && (nodeForSignature.metadata?.content || nodeForSignature.metadata?.storageKey));
         const signature = [
             selected,
             related,
             connectionTarget,
             hovered,
             dragging,
+            hasMediaContent,
             currentTheme.canvas.background,
             currentTheme.ui.accent,
             currentTheme.ui.hairline,
@@ -400,6 +403,7 @@ export function LeaferCanvas({
             connectionTarget,
             hovered,
             dragging,
+            hasMediaContent,
         });
         const element = getNodeElement(nodeId);
         if (element) {
@@ -643,7 +647,10 @@ export function LeaferCanvas({
                 hover: true,
                 select: "press",
                 moveable: true,
-                resizeable: true,
+                // 缩放统一由节点右下角自定义角标（DOM）处理，编辑器不再提供缩放控制点。
+                resizeable: false,
+                // 关闭编辑器默认选中框（直角，与圆角节点产生空缺）；选中态由节点自身圆角描边呈现。
+                editBox: false,
                 rotateable: false,
                 skewable: false,
                 flipable: false,
@@ -653,9 +660,10 @@ export function LeaferCanvas({
                 pointFill: themeRef.current.node.panel,
                 pointSize: 9,
                 pointRadius: 14,
-                // 仅保留四角缩放点；四边透明 resizeLine 继续支持单边拉伸。
                 hideRotatePoints: true,
-                hideResizeLines: false,
+                hideResizeLines: true,
+                point: { visible: false, hitSelf: false },
+                middlePoint: { visible: false, hitSelf: false },
                 keyEvent: true,
                 multipleSelectKey: (event) => Boolean(event.shiftKey || event.ctrlKey || event.metaKey),
                 beforeMove: ({ x, y }) => {
@@ -1724,6 +1732,7 @@ function applyNodeInteractionVisual(
         connectionTarget: boolean;
         hovered: boolean;
         dragging: boolean;
+        hasMediaContent: boolean;
     },
 ) {
     const active = state.selected || state.connectionTarget;
@@ -1732,8 +1741,10 @@ function applyNodeInteractionVisual(
     const accentShadow = withAlpha(theme.ui.accent, 0.28);
     rect.set({
         cornerRadius: CANVAS_NODE_RADIUS,
-        stroke: active || state.related || state.hovered ? theme.ui.accent : theme.ui.hairline,
+        stroke: active || state.related || state.hovered ? theme.ui.accent : theme.node.stroke,
         strokeWidth: state.connectionTarget ? 2.4 : state.selected ? 1.8 : state.hovered ? 1.5 : state.related ? 1.25 : 1,
+        // 常态虚线描边（对齐目标视觉：虚线卡片 + 点阵背景），媒体内容/激活/悬停时回实线
+        dashPattern: active || state.related || state.hovered || state.hasMediaContent ? undefined : [6, 5],
         shadow: state.dragging
             ? [
                 { x: 0, y: 14, blur: 34, spread: 1, color: ambientShadow },

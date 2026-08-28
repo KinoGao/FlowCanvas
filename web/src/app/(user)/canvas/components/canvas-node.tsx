@@ -348,14 +348,11 @@ export const CanvasNode = React.memo(function CanvasNode({
             if (resizeFrameRef.current) return;
             resizeFrameRef.current = requestAnimationFrame(() => {
                 resizeFrameRef.current = null;
-                const element = nodeRef.current;
-                if (!element) return;
-                element.style.width = `${resizeRef.current.currentWidth}px`;
-                element.style.height = `${resizeRef.current.currentHeight}px`;
-                if (positioned) element.style.transform = `translate(${resizeRef.current.currentPosition.x}px, ${resizeRef.current.currentPosition.y}px)`;
+                // 实时提交：画布（Leafer 边框）与节点内容同步跟手，松手后无需二次同步。
+                onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
             });
         },
-        [data.metadata?.freeResize, data.type, positioned, scaleRef],
+        [data.metadata?.freeResize, data.type, data.id, onResize, scaleRef],
     );
     handleResizeMoveRef.current = handleResizeMove;
 
@@ -395,7 +392,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             currentWidth: data.width,
             currentHeight: data.height,
             currentPosition: data.position,
-            keepRatio: (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video,
+            keepRatio: event.shiftKey,
             ratio: (data.metadata?.naturalWidth || data.width) / (data.metadata?.naturalHeight || data.height || 1),
         };
         document.body.style.cursor = corner.includes("left") === corner.includes("top") ? "nwse-resize" : "nesw-resize";
@@ -512,7 +509,11 @@ export const CanvasNode = React.memo(function CanvasNode({
                               ? theme.ui.accent
                               : isRelated
                                 ? theme.ui.accent
-                                : theme.ui.hairline,
+                                : hasVideoContent
+                                  ? theme.ui.hairline
+                                  : theme.node.stroke,
+                    // 非媒体卡片在常态下用虚线描边（对齐目标视觉：虚线卡片 + 点阵背景）
+                    borderStyle: !editorManaged && !isGroup && !hasImageContent && !hasVideoContent && !isActive && !isRelated ? "dashed" : "solid",
                     boxShadow: editorManaged ? undefined : isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
                 onDoubleClick={(event) => {
@@ -587,13 +588,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />
                 ) : null}
 
-                {!shouldUseOverview && !editorManaged ? (
-                    <>
-                        <ResizeHandle corner="top-left" visible={isSelected} onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="top-right" visible={isSelected} onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="bottom-left" visible={isSelected} onMouseDown={handleResizeMouseDown} />
-                        <ResizeHandle corner="bottom-right" visible={isSelected} onMouseDown={handleResizeMouseDown} />
-                    </>
+                {/* 所有节点（含打组）统一用右下角角标缩放 */}
+                {!shouldUseOverview ? (
+                    <ResizeBadge visible={isSelected} onPointerDown={(event) => handleResizeMouseDown(event, "bottom-right")} />
                 ) : null}
             </Card>
 
@@ -1762,24 +1759,17 @@ function BatchFrame({ batchCount, batchExpanded, batchOpening, batchRecovering, 
         </div>
     );
 }
-function ResizeHandle({ corner, visible, onMouseDown }: { corner: ResizeCorner; visible: boolean; onMouseDown: (event: ResizeStartEvent, corner: ResizeCorner) => void }) {
-    const positionClass = {
-        "top-left": "-left-[14px] -top-[14px] cursor-nwse-resize",
-        "top-right": "-right-[14px] -top-[14px] cursor-nesw-resize",
-        "bottom-left": "-bottom-[14px] -left-[14px] cursor-nesw-resize",
-        "bottom-right": "-bottom-[14px] -right-[14px] cursor-nwse-resize",
-    }[corner];
-
+function ResizeBadge({ visible, onPointerDown }: { visible: boolean; onPointerDown: (event: React.PointerEvent) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
     return (
         <div
-            className={`nodrag nopan group/resize absolute z-50 size-7 pointer-events-auto ${positionClass}`}
-            onPointerDown={(event) => onMouseDown(event, corner)}
-            onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-            }}
+            data-canvas-no-zoom
+            title="拖拽调整大小（按住 Shift 锁定比例）"
+            className={`nodrag nopan absolute -bottom-3 -right-3 z-50 grid size-6 cursor-nwse-resize place-items-center rounded-full border shadow-md transition ${visible ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"}`}
+            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, backdropFilter: "blur(8px)" }}
+            onPointerDown={onPointerDown}
         >
-            <span className={`canvas-node-resize-dot absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border transition ${visible ? "scale-100 opacity-100" : "scale-75 opacity-0 group-hover/resize:scale-100 group-hover/resize:opacity-100"}`} />
+            <span className="block size-2 rounded-[1px] border-b-2 border-r-2" style={{ borderColor: theme.node.text }} />
         </div>
     );
 }

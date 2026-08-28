@@ -895,7 +895,7 @@
     }
 
     .node-element {
-        --canvas-node-radius: 8px;
+        --canvas-node-radius: 14px;
     }
 
     .creative-os-node {
