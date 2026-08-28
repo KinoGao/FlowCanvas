@@ -24,7 +24,9 @@ export const audioFormatOptions = [
 ];
 
 export function normalizeAudioVoiceValue(value: string) {
-    return audioVoiceOptions.some((item) => item.value === value) ? value : "alloy";
+    // 自定义音色（本地 TTS 设计/克隆的音色名）不再强制重置为内置音色
+    if (value.trim()) return value.trim();
+    return "alloy";
 }
 
 export function normalizeAudioFormatValue(value: string) {

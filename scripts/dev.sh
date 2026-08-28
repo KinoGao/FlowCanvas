@@ -40,7 +40,7 @@ else
     (cd "$ROOT/web" && nohup npx vite --host 0.0.0.0 --port "$WEB_PORT" > "$LOG_DIR/web.log" 2>&1 & disown)
 fi
 
-# 本地 TTS（Qwen3-TTS 音色克隆，供画布配音/数字人口播）
+# 本地 TTS（Qwen3-TTS 音色克隆 + 语音设计，供画布配音/数字人口播）
 TTS_DIR="${TTS_DIR:-/home/gn/services/qwen3-tts}"
 if already "http://127.0.0.1:8880/health"; then
     echo "[dev] 本地 TTS 已运行 (:8880)"
@@ -48,10 +48,21 @@ elif [ -d "$TTS_DIR" ]; then
     echo "[dev] 启动本地 TTS (:8880) ..."
     (cd "$TTS_DIR" \
         && export PATH="$HOME/.local/bin:$PATH" HF_ENDPOINT=https://hf-mirror.com \
-        && TTS_BACKEND=official TTS_MODEL_NAME=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
+        && .venv/bin/python sync_voices.py \
+        && TTS_BACKEND=official TTS_MODEL_NAME=Qwen/Qwen3-TTS-12Hz-1.7B-Base ENABLE_VOICE_STUDIO=true \
         nohup .venv/bin/python -m api.main > "$LOG_DIR/tts.log" 2>&1 & disown)
 else
     echo "[dev] 未找到本地 TTS（$TTS_DIR），跳过"
+fi
+# 语音设计服务（文字描述 → 全新音色）
+if already "http://127.0.0.1:8881/health"; then
+    echo "[dev] 语音设计服务已运行 (:8881)"
+elif [ -d "$TTS_DIR" ]; then
+    echo "[dev] 启动语音设计服务 (:8881) ..."
+    (cd "$TTS_DIR" \
+        && export PATH="$HOME/.local/bin:$PATH" HF_ENDPOINT=https://hf-mirror.com \
+        && TTS_MODEL_NAME=Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign \
+        nohup .venv/bin/python design_server.py > "$LOG_DIR/tts-design.log" 2>&1 & disown)
 fi
 
 # 等待就绪

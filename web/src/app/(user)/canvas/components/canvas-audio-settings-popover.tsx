@@ -11,6 +11,7 @@ import { audioFormatLabel, audioSpeedLabel, audioVoiceLabel } from "@/lib/audio-
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
+import { VoiceManagerSection } from "./canvas-voice-manager";
 
 export type CanvasAudioSettingKey = "audioVoice" | "audioFormat" | "audioSpeed" | "audioInstructions";
 
@@ -114,6 +115,8 @@ function AudioSettingsPortal({
     return createPortal(
         <div ref={panelRef} className="canvas-image-settings-popover" style={style} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             <AudioSettingsPanel config={config} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} capability={capability} className="space-y-4" />
+            {/* 本地 TTS 音色管理：设计新音色 / 克隆录音 / 删除 */}
+            <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => onConfigChange("audioVoice", value)} />
         </div>,
         document.body,
     );

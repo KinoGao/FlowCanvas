@@ -69,7 +69,8 @@ function assertAudioCapability(capability: Awaited<ReturnType<typeof resolveAudi
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = Number(normalizeAudioSpeedValue(config.audioSpeed));
-    if (capability.voices.length && !capability.voices.includes(voice)) throw new Error(`当前模型不支持音色 ${voice}`);
+    // voices 含 "*" 表示任意自定义音色均可（本地 TTS 注册的音色）
+    if (capability.voices.length && !capability.voices.includes(voice) && !capability.voices.includes("*")) throw new Error(`当前模型不支持音色 ${voice}`);
     if (capability.formats.length && !capability.formats.includes(format)) throw new Error(`当前模型不支持输出格式 ${format}`);
     if (capability.speeds.length && !capability.speeds.some((value) => Math.abs(value - speed) < 0.0001)) throw new Error(`当前模型不支持语速 ${speed}`);
     if (config.audioInstructions.trim() && !capability.instructions) throw new Error("当前模型不支持语音指令");

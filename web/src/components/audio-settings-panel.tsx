@@ -25,7 +25,7 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = normalizeAudioSpeedValue(config.audioSpeed);
-    const voices = capabilityOptions(capability?.voices, audioVoiceOptions);
+    const voices = capabilityOptions(capability?.voices, audioVoiceOptions).filter((item) => item.value !== "*");
     const formats = capabilityOptions(capability?.formats, audioFormatOptions);
     const speeds = capability?.speeds.length ? capability.speeds.map(String) : speedOptions;
 
