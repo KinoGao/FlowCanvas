@@ -1213,6 +1213,41 @@ export function LeaferCanvas({
         if (!sameViewport(viewport, next)) callbacksRef.current.onViewportChange(next);
     }, [applyViewportPresentation, viewport]);
 
+    // Ctrl/Cmd + 滚轮落在 DOM 覆盖层（节点本体、连接手柄磁吸区等）时，事件到不了 leafer 画布，
+    // 缩放会失效（时灵时不灵，像页面乱跳）。在容器捕获层转发为以指针为锚点的视口缩放。
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const forwardWheelZoom = (event: WheelEvent) => {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest(".leafer-app-view")) return; // 画布表面：leafer 自行处理
+            if (target.closest("[data-canvas-composer], .canvas-no-zoom-popup, [data-canvas-no-zoom]")) return; // 面板内滚动不缩放
+            const rect = container.getBoundingClientRect();
+            const px = event.clientX - rect.left;
+            const py = event.clientY - rect.top;
+            const current = viewportRef.current;
+            const nextK = stepCanvasZoom(current.k, event.deltaY < 0 ? "in" : "out");
+            event.preventDefault();
+            if (!Number.isFinite(nextK) || nextK === current.k) return;
+            const next = clampViewport(
+                {
+                    x: px - ((px - current.x) / current.k) * nextK,
+                    y: py - ((py - current.y) / current.k) * nextK,
+                    k: nextK,
+                },
+                rect.width,
+                rect.height,
+            );
+            applyViewportPresentation(next);
+            callbacksRef.current.onViewportChange(next);
+            event.stopPropagation();
+        };
+        container.addEventListener("wheel", forwardWheelZoom, { capture: true, passive: false });
+        return () => container.removeEventListener("wheel", forwardWheelZoom, { capture: true });
+    }, [applyViewportPresentation]);
+
     useEffect(() => () => {
         if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);
     }, []);
