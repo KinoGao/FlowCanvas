@@ -40,6 +40,20 @@ else
     (cd "$ROOT/web" && nohup npx vite --host 0.0.0.0 --port "$WEB_PORT" > "$LOG_DIR/web.log" 2>&1 & disown)
 fi
 
+# 本地 TTS（Qwen3-TTS 音色克隆，供画布配音/数字人口播）
+TTS_DIR="${TTS_DIR:-/home/gn/services/qwen3-tts}"
+if already "http://127.0.0.1:8880/health"; then
+    echo "[dev] 本地 TTS 已运行 (:8880)"
+elif [ -d "$TTS_DIR" ]; then
+    echo "[dev] 启动本地 TTS (:8880) ..."
+    (cd "$TTS_DIR" \
+        && export PATH="$HOME/.local/bin:$PATH" HF_ENDPOINT=https://hf-mirror.com \
+        && TTS_BACKEND=official TTS_MODEL_NAME=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
+        nohup .venv/bin/python -m api.main > "$LOG_DIR/tts.log" 2>&1 & disown)
+else
+    echo "[dev] 未找到本地 TTS（$TTS_DIR），跳过"
+fi
+
 # 等待就绪
 echo "[dev] 等待服务就绪 ..."
 for _ in $(seq 1 60); do
@@ -47,6 +61,7 @@ for _ in $(seq 1 60); do
     front=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://127.0.0.1:${WEB_PORT}/" || true)
     if [ "$back" != "000" ] && [ "$front" != "000" ]; then
         echo "[dev] OK  前端 http://localhost:${WEB_PORT}  后端 http://localhost:${BACKEND_PORT} (health $back)"
+        [ -d "$TTS_DIR" ] && echo "[dev]     本地 TTS http://localhost:8880 (模型懒加载，首次合成较慢)"
         exit 0
     fi
     sleep 3

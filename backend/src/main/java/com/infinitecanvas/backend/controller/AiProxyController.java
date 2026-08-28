@@ -23,7 +23,9 @@ import java.util.Set;
 public class AiProxyController {
     private static final Duration PROXY_TIMEOUT = Duration.ofMinutes(10);
     private static final Set<String> HOP_BY_HOP_HEADERS = Set.of("connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length");
-    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+    // 强制 HTTP/1.1：Java HttpClient 默认对纯 HTTP 地址发 h2c Upgrade，uvicorn 等服务器会拒绝
+    // 升级并丢失请求体（本地自建模型服务如 Qwen3-TTS 会收到空 body）。HTTPS 厂商走 ALPN 不受影响。
+    private final HttpClient httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(30)).build();
     private final PlatformConfigService platformConfigService;
 
     public AiProxyController(PlatformConfigService platformConfigService) {
