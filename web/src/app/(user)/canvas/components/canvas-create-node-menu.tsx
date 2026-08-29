@@ -128,7 +128,7 @@ export function CanvasCreateNodeMenu({
             <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" description="生成沉浸式全景素材" tag="NEW" onClick={() => onAction("panorama360")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="3D 世界" description="空间创作能力即将开放" tag="Beta" disabled />
             <div className="px-2 pb-1 pt-2 text-xs font-medium opacity-60">添加资源</div>
-            <CreateMenuOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" description="复用账号素材与风格" tag="NEW" onClick={() => onAction("materialLibrary")} />
+            <CreateMenuOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" description="素材、数字人与音色资产" tag="NEW" onClick={() => onAction("materialLibrary")} />
             <CreateMenuOption theme={theme} icon={<Upload className="size-4" />} label="上传" description="图片、视频、音频与文件" onClick={() => onAction("upload")} />
             <CreateMenuOption theme={theme} icon={<Clock3 className="size-4" />} label="从生成历史选择" description="回到已有生成结果" onClick={() => onAction("generationHistory")} />
         </div>

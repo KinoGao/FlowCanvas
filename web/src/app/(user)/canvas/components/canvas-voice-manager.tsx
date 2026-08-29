@@ -10,6 +10,18 @@ import { useThemeStore } from "@/stores/use-theme-store";
 const TTS_MAIN = "http://127.0.0.1:8880/v1";
 const TTS_DESIGN = "http://127.0.0.1:8881";
 
+/** 拉取本地 TTS 已注册的自定义音色名列表；服务未启动时返回空数组 */
+export async function listCustomVoices(): Promise<string[]> {
+    try {
+        const resp = await fetch(`${TTS_MAIN}/audio/voices/custom`);
+        if (!resp.ok) return [];
+        const data = (await resp.json()) as { custom?: string[] };
+        return Array.isArray(data.custom) ? data.custom : [];
+    } catch {
+        return [];
+    }
+}
+
 export type VoiceManagerSectionProps = {
     /** 当前选中的音色 */
     voice: string;
@@ -35,15 +47,7 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
     const [clone, setClone] = useState<CloneState>({ name: "", file: null, transcript: "" });
 
     const refresh = useCallback(async () => {
-        try {
-            const resp = await fetch(`${TTS_MAIN}/audio/voices/custom`);
-            if (resp.ok) {
-                const data = await resp.json();
-                setVoices(Array.isArray(data.custom) ? data.custom : []);
-            }
-        } catch {
-            /* 服务未启动时静默 */
-        }
+        setVoices(await listCustomVoices());
     }, []);
 
     useEffect(() => {

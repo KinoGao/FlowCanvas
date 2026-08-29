@@ -14,7 +14,7 @@ import { pushBackendProjects } from "@/services/api/backend-storage";
 import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "@/services/api/canvas-templates";
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
-import { defaultConfig, type AiConfig, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, type AiConfig, type CanvasDigitalHuman, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { imageToDataUrl, peekCachedImageUrl, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -31,6 +31,8 @@ import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "../components/canvas-create-node-menu";
+import { DigitalHumanPanel } from "../components/canvas-digital-human-library";
+import { VoiceManagerSection } from "../components/canvas-voice-manager";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
 import type { CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
@@ -766,7 +768,7 @@ function LeaferCanvasPage() {
     const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets">("canvas");
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
-    const [materialLibraryTab, setMaterialLibraryTab] = useState<"styles" | "effects" | "assets">("styles");
+    const [materialLibraryTab, setMaterialLibraryTab] = useState<MaterialLibraryTab>("styles");
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [scriptStudioNodeId, setScriptStudioNodeId] = useState<string | null>(null);
     const [scriptStudioInitialExportTarget, setScriptStudioInitialExportTarget] = useState<"image" | "video" | null>(null);
@@ -4601,10 +4603,38 @@ function LeaferCanvasPage() {
         [assetPickerTargetNodeId, createCanvasNode, insertAssistantImage, insertAssistantText, screenToCanvas, size.height, size.width],
     );
 
-    const openMaterialLibrary = useCallback((tab: "styles" | "effects" | "assets" = "styles") => {
+    const openMaterialLibrary = useCallback((tab: MaterialLibraryTab = "styles") => {
         setMaterialLibraryTab(tab);
         setMaterialLibraryOpen(true);
     }, []);
+
+    /** 从数字人资产库插入分身形象照为图片节点（供「数字人分身口播」工作流引用）。 */
+    const insertDigitalHuman = useCallback(
+        (persona: CanvasDigitalHuman) => {
+            const center = getCanvasCenter();
+            const size = fitNodeSize(persona.naturalWidth || 480, persona.naturalHeight || 640);
+            const newNode: CanvasNodeData = {
+                ...createCanvasNode(CanvasNodeType.Image, center, {
+                    content: persona.imageUrl,
+                    storageKey: persona.storageKey,
+                    status: NODE_STATUS_SUCCESS,
+                    naturalWidth: persona.naturalWidth,
+                    naturalHeight: persona.naturalHeight,
+                    freeResize: true,
+                    prompt: persona.name,
+                }),
+                position: { x: center.x - size.width / 2, y: center.y - size.height / 2 },
+                width: size.width,
+                height: size.height,
+            };
+            setNodes((prev) => [...prev, newNode]);
+            setSelectedNodeIds(new Set([newNode.id]));
+            setSelectedConnectionId(null);
+            setMaterialLibraryOpen(false);
+            message.success(`已插入数字人「${persona.name}」，可作为「数字人分身口播」工作流的分身底图`);
+        },
+        [createCanvasNode, getCanvasCenter, message],
+    );
 
     /** 统一创建菜单（dock +、双击空白、右键空白共用）的动作分发。 */
     const handleCreateMenuAction = useCallback(
@@ -6575,6 +6605,7 @@ function LeaferCanvasPage() {
                     initialTab={materialLibraryTab}
                     onClose={() => setMaterialLibraryOpen(false)}
                     onUsePreset={insertMaterialPreset}
+                    onInsertDigitalHuman={insertDigitalHuman}
                     onOpenAssetPicker={() => {
                         setMaterialLibraryOpen(false);
                         openAssetPicker();
@@ -6646,6 +6677,8 @@ function materialPresetBackground(index: number, tab: "styles" | "effects" | "as
     return (tab === "effects" ? effects : styles)[index % 3];
 }
 
+type MaterialLibraryTab = "styles" | "effects" | "assets" | "digitalHumans" | "voices";
+
 function CanvasMaterialLibraryModal({
     open,
     initialTab,
@@ -6653,17 +6686,21 @@ function CanvasMaterialLibraryModal({
     onUsePreset,
     onOpenAssetPicker,
     onUpload,
+    onInsertDigitalHuman,
 }: {
     open: boolean;
-    initialTab: "styles" | "effects" | "assets";
+    initialTab: MaterialLibraryTab;
     onClose: () => void;
     onUsePreset: (preset: { title: string; prompt: string }) => void;
     onOpenAssetPicker: () => void;
     onUpload: () => void;
+    onInsertDigitalHuman: (persona: CanvasDigitalHuman) => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
-    const [tab, setTab] = useState<"styles" | "effects" | "assets">("styles");
+    const config = useConfigStore((state) => state.config);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const [tab, setTab] = useState<MaterialLibraryTab>("styles");
 
     useEffect(() => {
         if (open) setTab(initialTab);
@@ -6673,23 +6710,31 @@ function CanvasMaterialLibraryModal({
     return (
         <Modal title="素材库" open={open} centered width={720} footer={null} onCancel={onClose} destroyOnHidden styles={{ body: { background: theme.node.panel, color: theme.node.text } }}>
             <div className="mb-4 flex gap-1 rounded-lg p-1" style={{ background: theme.toolbar.itemHover }}>
-                {[
+                {([
                     ["styles", "风格库"],
                     ["effects", "效果库"],
                     ["assets", "我的素材"],
-                ].map(([value, label]) => (
+                    ["digitalHumans", "数字人"],
+                    ["voices", "音色"],
+                ] as [MaterialLibraryTab, string][]).map(([value, label]) => (
                     <button
                         key={value}
                         type="button"
                         className="h-8 rounded-md px-3 text-sm transition"
                         style={{ background: tab === value ? theme.toolbar.activeBg : "transparent", color: tab === value ? theme.toolbar.activeText : theme.node.text }}
-                        onClick={() => setTab(value as "styles" | "effects" | "assets")}
+                        onClick={() => setTab(value)}
                     >
                         {label}
                     </button>
                 ))}
             </div>
-            {tab === "assets" ? (
+            {tab === "digitalHumans" ? (
+                <DigitalHumanPanel theme={theme} onInsert={onInsertDigitalHuman} />
+            ) : tab === "voices" ? (
+                <div className="max-h-[420px] overflow-y-auto pr-1">
+                    <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} />
+                </div>
+            ) : tab === "assets" ? (
                 <div className="grid min-h-[260px] place-items-center rounded-xl border p-8 text-center" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                     <div>
                         <FolderOpen className="mx-auto mb-3 size-8 opacity-55" />

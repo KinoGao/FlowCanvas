@@ -40,6 +40,21 @@ export type CanvasVideoSubject = {
     createdAt: string;
 };
 
+/** 账号级数字人分身（素材库「数字人」页签），随用户配置同步到后端 */
+export type CanvasDigitalHuman = {
+    id: string;
+    name: string;
+    /** 分身形象照：当前可展示的图片 URL（后端签名 URL 可能过期，展示时需经 resolveImageUrl 重签） */
+    imageUrl: string;
+    /** 后端存储 key，用于过期后重新签名取回图片 */
+    storageKey?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    /** 关联的本地 TTS 音色名（custom_voices 下的目录名），可选 */
+    voice?: string;
+    createdAt: string;
+};
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
@@ -75,6 +90,7 @@ export type AiConfig = {
     canvasImageCount: string;
     customImageStyles?: CustomImageStyle[];
     videoSubjects?: CanvasVideoSubject[];
+    digitalHumans?: CanvasDigitalHuman[];
 };
 
 export type ProxyMode = "direct" | "backend";
