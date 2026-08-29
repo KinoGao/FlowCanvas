@@ -13,11 +13,9 @@ type CanvasZoomControlsProps = {
     isMiniMapOpen: boolean;
     onToggleMiniMap: () => void;
     onOpenMyAssets: () => void;
-    /** 侧栏打开时右移，避免被遮 */
-    shifted?: boolean;
 };
 
-export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap, onOpenMyAssets, shifted = false }: CanvasZoomControlsProps) {
+export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpen, onToggleMiniMap, onOpenMyAssets }: CanvasZoomControlsProps) {
     const [zoomOpen, setZoomOpen] = useState(false);
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -31,7 +29,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
     };
 
     return (
-        <div className={`absolute bottom-5 z-50 flex items-end gap-2 transition-all duration-300 ${shifted ? "left-[296px]" : "left-5"}`} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <div className="absolute bottom-5 left-5 z-50 flex items-end gap-2" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             {zoomOpen ? (
                 <div className="creative-os-panel absolute bottom-14 left-0 w-[212px] rounded-2xl border p-2" style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                     <div className="mb-2 flex h-8 items-center rounded-md border px-2 text-sm" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>

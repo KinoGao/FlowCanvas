@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -15,6 +16,7 @@ import { listCanvasTemplates, saveCanvasTemplate, deleteCanvasTemplate } from "@
 import { runComfyWorkflow, uploadComfyFile } from "@/services/api/comfyui";
 import { applyComfyWorkflowFields, getComfyWorkflow, listComfyWorkflows, type ComfyWorkflow, type ComfyWorkflowField } from "@/services/comfyui-workflows";
 import { defaultConfig, type AiConfig, type CanvasDigitalHuman, type ComfyUiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { useCanvasSidePanelStore, CANVAS_SIDE_PANEL_MOTION_MS, CANVAS_SIDE_PANEL_MAX_WIDTH, CANVAS_SIDE_PANEL_MIN_WIDTH } from "@/stores/use-canvas-side-panel-store";
 import { imageToDataUrl, peekCachedImageUrl, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -764,9 +766,11 @@ function LeaferCanvasPage() {
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerTargetNodeId, setAssetPickerTargetNodeId] = useState<string | null>(null);
-    const [canvasAssetPanelOpen, setCanvasAssetPanelOpen] = useState(false);
     const [workflowToolboxOpen, setWorkflowToolboxOpen] = useState(false);
-    const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets">("canvas");
+    const [canvasAssetPanelInitialTab, setCanvasAssetPanelInitialTab] = useState<"canvas" | "assets" | "prompts">("canvas");
+    const assetPanelOpen = useCanvasSidePanelStore((state) => state.panelOpen);
+    const openAssetPanel = useCanvasSidePanelStore((state) => state.openPanel);
+    const toggleAssetPanel = useCanvasSidePanelStore((state) => state.togglePanel);
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
     const [materialLibraryTab, setMaterialLibraryTab] = useState<MaterialLibraryTab>("styles");
@@ -6082,6 +6086,21 @@ function LeaferCanvasPage() {
             }
         >
             <CanvasRestoreCover ready={projectLoaded && canvasVisualReady} />
+            {projectLoaded ? (
+                <CanvasAssetManagerPanel
+                    open={assetPanelOpen}
+                    initialTab={canvasAssetPanelInitialTab}
+                    nodes={nodes}
+                    selectedNodeIds={selectedNodeIds}
+                    onClose={toggleAssetPanel}
+                    onSelectNode={selectSingleNode}
+                    onLocateNode={locateNode}
+                    onPreviewNode={openAssetPreview}
+                    onInsertDigitalHuman={insertDigitalHuman}
+                    onOpenAssetPicker={() => openAssetPicker()}
+                    onUpload={() => handleUploadRequest()}
+                />
+            ) : null}
             <section ref={canvasShellRef} className="creative-os-canvas relative min-w-0 flex-1 overflow-hidden">
                 {projectLoaded ? (
                     <>
@@ -6093,8 +6112,8 @@ function LeaferCanvasPage() {
                     onStartTitleEditing={startTitleEditing}
                     onFinishTitleEditing={finishTitleEditing}
                     onCancelTitleEditing={() => setTitleEditing(false)}
-                    assetPanelOpen={canvasAssetPanelOpen}
-                    onToggleAssetPanel={() => setCanvasAssetPanelOpen((value) => !value)}
+                    assetPanelOpen={assetPanelOpen}
+                    onToggleAssetPanel={toggleAssetPanel}
                     onHome={() => navigate("/")}
                     onProjects={() => navigate("/canvas")}
                     onCreateProject={createAndOpenProject}
@@ -6361,20 +6380,6 @@ function LeaferCanvasPage() {
                     />
                 ) : null}
 
-                <CanvasAssetManagerPanel
-                    open={canvasAssetPanelOpen}
-                    initialTab={canvasAssetPanelInitialTab}
-                    nodes={nodes}
-                    selectedNodeIds={selectedNodeIds}
-                    onClose={() => setCanvasAssetPanelOpen(false)}
-                    onSelectNode={selectSingleNode}
-                    onLocateNode={locateNode}
-                    onPreviewNode={openAssetPreview}
-                    onInsertDigitalHuman={insertDigitalHuman}
-                    onOpenAssetPicker={() => openAssetPicker()}
-                    onUpload={() => handleUploadRequest()}
-                />
-
                 {assetPreviewNode ? <AssetPreviewModal node={assetPreviewNode} theme={theme} onClose={() => setAssetPreviewNode(null)} /> : null}
 
                 {pendingConnectionCreate && pendingConnectionCreatePosition ? (
@@ -6443,10 +6448,10 @@ function LeaferCanvasPage() {
                     onAlignmentGuidesEnabledChange={handleAlignmentGuidesEnabledChange}
                     onShowImageInfoChange={setShowImageInfo}
                     onShowConnectionsChange={setShowConnections}
-                    assetPanelOpen={canvasAssetPanelOpen}
+                    assetPanelOpen={assetPanelOpen}
                     onOpenMyAssets={() => {
                         setCanvasAssetPanelInitialTab("assets");
-                        setCanvasAssetPanelOpen(true);
+                        openAssetPanel();
                     }}
                     onOpenMaterialLibrary={openMaterialLibrary}
                     onOpenWorkflowToolbox={() => setWorkflowToolboxOpen(true)}
@@ -6458,10 +6463,9 @@ function LeaferCanvasPage() {
                     onReset={resetViewport}
                     isMiniMapOpen={isMiniMapOpen}
                     onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)}
-                    shifted={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
                         setCanvasAssetPanelInitialTab("canvas");
-                        setCanvasAssetPanelOpen(true);
+                        openAssetPanel();
                         setDialogNodeId(null);
                     }}
                 />
@@ -6496,8 +6500,7 @@ function LeaferCanvasPage() {
                         selectedNodeIds={selectedNodeIds}
                         viewport={viewport}
                         containerSize={size}
-                        shifted={canvasAssetPanelOpen}
-                        onNavigate={(next) => {
+                            onNavigate={(next) => {
                             viewportRef.current = next;
                             setViewport(next);
                         }}
@@ -6981,43 +6984,90 @@ function CanvasAssetManagerPanel({
     const assets = useAssetStore((state) => state.assets);
     const config = useConfigStore((state) => state.config);
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const panelWidth = useCanvasSidePanelStore((state) => state.width);
+    const panelMounted = useCanvasSidePanelStore((state) => state.panelMounted);
+    const panelClosing = useCanvasSidePanelStore((state) => state.panelClosing);
+    const setPanelWidth = useCanvasSidePanelStore((state) => state.setWidth);
     const [tab, setTab] = useState<"canvas" | "assets" | "prompts">("canvas");
     const [query, setQuery] = useState("");
+    const [resizing, setResizing] = useState(false);
     const filteredAssets = assets.filter((asset) => `${asset.title} ${(asset.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
 
     useEffect(() => {
         if (open) setTab(initialTab);
     }, [initialTab, open]);
 
+    // 宽度拖拽：右缘热区，clamp 到 MIN/MAX，结束写入 store（store 持久化到 localStorage）
+    const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = panelWidth;
+        let nextWidth = startWidth;
+        const onMove = (moveEvent: PointerEvent) => {
+            const raw = startWidth + moveEvent.clientX - startX;
+            nextWidth = Math.min(CANVAS_SIDE_PANEL_MAX_WIDTH, Math.max(CANVAS_SIDE_PANEL_MIN_WIDTH, raw));
+            setPanelWidth(nextWidth);
+        };
+        const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            setResizing(false);
+        };
+        setResizing(true);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+    };
+
+    if (!panelMounted) return null;
+
+    const panelMotionSeconds = CANVAS_SIDE_PANEL_MOTION_MS / 1000;
+
     return (
-        <aside
-            className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl transition-transform duration-300 ease-out"
-            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, transform: open ? "translateX(0)" : "translateX(-100%)", pointerEvents: open ? "auto" : "none" }}
+        <motion.div
+            className="relative z-[60] flex h-full shrink-0"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: open ? panelWidth + 1 : 0, opacity: open ? 1 : 0 }}
+            transition={{ duration: resizing ? 0 : panelMotionSeconds, ease: [0.22, 1, 0.36, 1] }}
+            style={{ overflow: "clip", pointerEvents: panelClosing ? "none" : undefined }}
             data-canvas-composer
-            onWheelCapture={(event) => event.stopPropagation()}
         >
-            {/* 顶部页签：画布 | 资产 | 提示词库（对齐 TapNow） */}
-            <div className="flex shrink-0 items-center gap-1 border-b px-3 pt-2" style={{ borderColor: theme.toolbar.border }}>
-                {([
-                    ["canvas", "画布"],
-                    ["assets", "资产"],
-                    ["prompts", "提示词库"],
-                ] as const).map(([value, label]) => (
-                    <button
-                        key={value}
-                        type="button"
-                        className="relative px-2.5 pb-2.5 pt-1.5 text-sm transition"
-                        style={{ color: tab === value ? theme.node.text : theme.node.faint, fontWeight: tab === value ? 600 : 400 }}
-                        onClick={() => setTab(value)}
-                    >
-                        {label}
-                        {tab === value ? <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full" style={{ background: theme.node.text }} /> : null}
+            <motion.aside
+                className="relative flex h-full shrink-0 flex-col overflow-hidden border-r backdrop-blur-xl"
+                initial={{ x: -48 }}
+                animate={{ x: panelClosing ? -28 : 0 }}
+                transition={{ duration: resizing ? 0 : panelMotionSeconds, ease: [0.22, 1, 0.36, 1] }}
+                style={{ width: panelWidth, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                onWheelCapture={(event) => event.stopPropagation()}
+            >
+                {/* 顶部页签：画布 | 资产 | 提示词库（指示条弹性滑动，对齐上游） */}
+                <div className="flex shrink-0 items-center gap-5 border-b px-4 pt-3" style={{ borderColor: theme.toolbar.border }}>
+                    {([
+                        ["canvas", "画布"],
+                        ["assets", "资产"],
+                        ["prompts", "提示词库"],
+                    ] as const).map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            className="relative pb-1.5 text-sm font-semibold transition-opacity"
+                            style={{ color: theme.node.text, opacity: tab === value ? 1 : 0.45 }}
+                            onClick={() => setTab(value)}
+                        >
+                            {label}
+                            {tab === value ? (
+                                <motion.span
+                                    layoutId="side-panel-tab-indicator"
+                                    className="absolute inset-x-0 -bottom-px h-0.5 rounded-full"
+                                    style={{ background: theme.toolbar.activeText }}
+                                    transition={{ type: "spring", stiffness: 500, damping: 34 }}
+                                />
+                            ) : null}
+                        </button>
+                    ))}
+                    <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭资产管理">
+                        <X className="size-4" />
                     </button>
-                ))}
-                <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭资产管理">
-                    <X className="size-4" />
-                </button>
-            </div>
+                </div>
 
             <div className="flex min-h-0 flex-1 flex-col p-3">
                 {tab === "canvas" ? (
@@ -7067,7 +7117,10 @@ function CanvasAssetManagerPanel({
                     </div>
                 )}
             </div>
-        </aside>
+            {/* 宽度拖拽热区 */}
+            <button type="button" className="absolute inset-y-0 right-0 z-40 w-4 translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label="调整侧栏宽度" />
+            </motion.aside>
+        </motion.div>
     );
 }
 
