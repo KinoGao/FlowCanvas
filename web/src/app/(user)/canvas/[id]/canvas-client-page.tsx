@@ -32,7 +32,7 @@ import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "../components/canvas-create-node-menu";
 import { DigitalHumanPanel } from "../components/canvas-digital-human-library";
-import { CanvasAssetPanel } from "../components/canvas-asset-panel";
+import { CanvasNodesTab, PromptListTab } from "../components/canvas-asset-panel";
 import { VoiceManagerSection } from "../components/canvas-voice-manager";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
@@ -770,7 +770,7 @@ function LeaferCanvasPage() {
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
     const [materialLibraryTab, setMaterialLibraryTab] = useState<MaterialLibraryTab>("styles");
-    const [assetPanelOpen, setAssetPanelOpen] = useState(false);
+    const [assetPreviewNode, setAssetPreviewNode] = useState<CanvasNodeData | null>(null);
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [scriptStudioNodeId, setScriptStudioNodeId] = useState<string | null>(null);
     const [scriptStudioInitialExportTarget, setScriptStudioInitialExportTarget] = useState<"image" | "video" | null>(null);
@@ -1417,7 +1417,7 @@ function LeaferCanvasPage() {
     const batchVisibilityIndex = useMemo(() => buildBatchVisibilityIndex(nodes, nodeById, collapsingBatchIds), [collapsingBatchIds, nodeById, nodes]);
     const connectionAdjacency = useMemo(() => buildConnectionAdjacency(connections), [connections]);
     const mountedNodeItems = useMemo(
-        () => nodes.filter((node) => !node.metadata?.hidden && !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
+        () => nodes.filter((node) => !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
         [batchVisibilityIndex, nodes],
     );
     const canvasGraph = useMemo(() => createCanvasResourceGraph(nodes, connections, nodeById), [connections, nodeById, nodes]);
@@ -4671,7 +4671,7 @@ function LeaferCanvasPage() {
                     createPanorama360Node();
                     break;
                 case "materialLibrary":
-                    setAssetPanelOpen((open) => !open);
+                    openMaterialLibrary("styles");
                     break;
                 case "upload":
                     handleUploadRequest();
@@ -5492,16 +5492,12 @@ function LeaferCanvasPage() {
         [selectOnlyNode],
     );
 
-    /** 切换节点显隐（左侧资产面板「画布」页签的眼睛）。 */
-    const toggleNodeHidden = useCallback((nodeId: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, hidden: !node.metadata?.hidden } } : node)));
-        setSelectedNodeIds((prev) => {
-            if (!prev.has(nodeId)) return prev;
-            const next = new Set(prev);
-            next.delete(nodeId);
-            return next;
-        });
-    }, []);
+    /** 放大预览节点内容（资产面板「画布」页签的眼睛）。 */
+    const openAssetPreview = useCallback((nodeId: string) => {
+        const node = nodeById.get(nodeId);
+        if (!node) return;
+        setAssetPreviewNode(node);
+    }, [nodeById]);
 
     /** 定位节点：选中 + 视口居中 + 短暂高亮（TapNow：搜索/分组定位后自动定位+高亮）。 */
     const locateNode = useCallback(
@@ -5912,19 +5908,12 @@ function LeaferCanvasPage() {
         },
         [createConnectedGenerationNode, createScriptNarrationNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
     );
-    const hiddenNodeIds = useMemo(() => new Set(nodes.filter((node) => node.metadata?.hidden).map((node) => node.id)), [nodes]);
     const visibleConnections = useMemo(
         () =>
             showConnections
-                ? connections.filter(
-                      (connection) =>
-                          !hiddenNodeIds.has(connection.fromNodeId)
-                          && !hiddenNodeIds.has(connection.toNodeId)
-                          && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId)
-                          && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId),
-                  )
+                ? connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId))
                 : [],
-        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, hiddenNodeIds, showConnections],
+        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, showConnections],
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const scriptStudioNode = useMemo(() => (scriptStudioNodeId ? nodes.find((node) => node.id === scriptStudioNodeId && isCanvasScriptNode(node)) || null : null), [scriptStudioNodeId, nodes]);
@@ -6135,19 +6124,6 @@ function LeaferCanvasPage() {
 
                 <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
                 <CanvasSearchPanel open={searchOpen} nodes={nodes} onClose={() => setSearchOpen(false)} onLocateNode={locateNode} />
-
-                {assetPanelOpen ? (
-                    <CanvasAssetPanel
-                        theme={theme}
-                        nodes={nodes}
-                        selectedNodeIds={selectedNodeIds}
-                        onLocateNode={locateNode}
-                        onToggleNodeHidden={toggleNodeHidden}
-                        onInsertDigitalHuman={insertDigitalHuman}
-                        onOpenMaterialLibrary={openMaterialLibrary}
-                        onClose={() => setAssetPanelOpen(false)}
-                    />
-                ) : null}
 
                 <LeaferCanvas
                     containerRef={containerRef}
@@ -6390,9 +6366,14 @@ function LeaferCanvasPage() {
                     selectedNodeIds={selectedNodeIds}
                     onClose={() => setCanvasAssetPanelOpen(false)}
                     onSelectNode={selectSingleNode}
+                    onLocateNode={locateNode}
+                    onPreviewNode={openAssetPreview}
+                    onInsertDigitalHuman={insertDigitalHuman}
                     onOpenAssetPicker={() => openAssetPicker()}
                     onUpload={() => handleUploadRequest()}
                 />
+
+                {assetPreviewNode ? <AssetPreviewModal node={assetPreviewNode} theme={theme} onClose={() => setAssetPreviewNode(null)} /> : null}
 
                 {pendingConnectionCreate && pendingConnectionCreatePosition ? (
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
@@ -6919,6 +6900,53 @@ function HistoryVideoThumb({ node }: { node: CanvasNodeData }) {
     return url ? <video src={url} className="size-full object-cover" muted playsInline preload="metadata" /> : <Video className="size-6 opacity-65" />;
 }
 
+function AssetPreviewModal({ node, theme, onClose }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onClose: () => void }) {
+    const [mediaUrl, setMediaUrl] = useState("");
+    const { storageKey, content } = node.metadata ?? {};
+
+    useEffect(() => {
+        let cancelled = false;
+        if (node.type === CanvasNodeType.Image) {
+            void resolveImageUrl(storageKey, content ?? "").then((url) => {
+                if (!cancelled) setMediaUrl(url);
+            });
+        } else if (node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) {
+            void resolveMediaUrl(storageKey, content ?? "").then((url) => {
+                if (!cancelled) setMediaUrl(url);
+            });
+        } else {
+            setMediaUrl(content ?? "");
+        }
+        return () => {
+            cancelled = true;
+        };
+    }, [content, node.type, storageKey]);
+
+    const body = node.type === CanvasNodeType.Image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={mediaUrl} alt={node.title} className="max-h-[68vh] w-full object-contain" />
+    ) : node.type === CanvasNodeType.Video ? (
+        <video src={mediaUrl} controls autoPlay className="max-h-[68vh] w-full rounded-xl" />
+    ) : node.type === CanvasNodeType.Audio ? (
+        <div className="flex min-h-[160px] flex-col items-center justify-center gap-4">
+            <Music2 className="size-12 opacity-50" />
+            <audio src={mediaUrl} controls autoPlay className="w-full" />
+        </div>
+    ) : (
+        <pre className="thin-scrollbar max-h-[68vh] overflow-y-auto whitespace-pre-wrap rounded-xl border p-4 text-sm leading-6" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
+            {node.metadata?.scriptBody || node.metadata?.content || node.metadata?.prompt || node.title}
+        </pre>
+    );
+
+    return (
+        <Modal title={node.title || node.type} open onCancel={onClose} footer={null} centered width={node.type === CanvasNodeType.Audio ? 440 : 880} styles={{ body: { background: theme.node.panel, color: theme.node.text } }} data-canvas-no-zoom>
+            <div className="flex min-h-[120px] items-center justify-center" style={{ color: theme.node.faint }}>
+                {body}
+            </div>
+        </Modal>
+    );
+}
+
 function CanvasAssetManagerPanel({
     open,
     initialTab,
@@ -6926,24 +6954,31 @@ function CanvasAssetManagerPanel({
     selectedNodeIds,
     onClose,
     onSelectNode,
+    onLocateNode,
+    onPreviewNode,
+    onInsertDigitalHuman,
     onOpenAssetPicker,
     onUpload,
 }: {
     open: boolean;
-    initialTab: "canvas" | "assets";
+    initialTab: "canvas" | "assets" | "prompts";
     nodes: CanvasNodeData[];
     selectedNodeIds: Set<string>;
     onClose: () => void;
     onSelectNode: (nodeId: string) => void;
+    onLocateNode: (nodeId: string) => void;
+    onPreviewNode: (nodeId: string) => void;
+    onInsertDigitalHuman: (persona: CanvasDigitalHuman) => void;
     onOpenAssetPicker: () => void;
     onUpload: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
     const assets = useAssetStore((state) => state.assets);
-    const [tab, setTab] = useState<"canvas" | "assets">("canvas");
+    const config = useConfigStore((state) => state.config);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const [tab, setTab] = useState<"canvas" | "assets" | "prompts">("canvas");
     const [query, setQuery] = useState("");
-    const filteredNodes = nodes.filter((node) => `${node.title} ${node.type}`.toLowerCase().includes(query.trim().toLowerCase()));
     const filteredAssets = assets.filter((asset) => `${asset.title} ${(asset.tags || []).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
 
     useEffect(() => {
@@ -6953,91 +6988,78 @@ function CanvasAssetManagerPanel({
     if (!open) return null;
 
     return (
-        <aside className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
-            <div className="flex h-[92px] shrink-0 flex-col justify-end border-b px-4 pb-3" style={{ borderColor: theme.toolbar.border }}>
-                <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">资产管理</div>
-                        <div className="mt-1 truncate text-xs opacity-55">当前画布资源与项目素材</div>
-                    </div>
-                    <button type="button" className="grid size-8 place-items-center rounded-lg transition hover:bg-white/10" onClick={onClose} aria-label="关闭资产管理">
-                        <X className="size-4" />
+        <aside className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-composer onWheelCapture={(event) => event.stopPropagation()}>
+            {/* 顶部页签：画布 | 资产 | 提示词库（对齐 TapNow） */}
+            <div className="flex shrink-0 items-center gap-1 border-b px-3 pt-2" style={{ borderColor: theme.toolbar.border }}>
+                {([
+                    ["canvas", "画布"],
+                    ["assets", "资产"],
+                    ["prompts", "提示词库"],
+                ] as const).map(([value, label]) => (
+                    <button
+                        key={value}
+                        type="button"
+                        className="relative px-2.5 pb-2.5 pt-1.5 text-sm transition"
+                        style={{ color: tab === value ? theme.node.text : theme.node.faint, fontWeight: tab === value ? 600 : 400 }}
+                        onClick={() => setTab(value)}
+                    >
+                        {label}
+                        {tab === value ? <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full" style={{ background: theme.node.text }} /> : null}
                     </button>
-                </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1 border-b p-2" style={{ borderColor: theme.toolbar.border }}>
-                <button
-                    type="button"
-                    className="h-8 rounded-lg px-3 text-sm font-medium transition"
-                    style={{ background: tab === "canvas" ? theme.toolbar.activeBg : "transparent", color: tab === "canvas" ? theme.toolbar.activeText : theme.node.text }}
-                    onClick={() => setTab("canvas")}
-                >
-                    画布
-                </button>
-                <button
-                    type="button"
-                    className="h-8 rounded-lg px-3 text-sm font-medium transition"
-                    style={{ background: tab === "assets" ? theme.toolbar.activeBg : "transparent", color: tab === "assets" ? theme.toolbar.activeText : theme.node.text }}
-                    onClick={() => setTab("assets")}
-                >
-                    资产
+                ))}
+                <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭资产管理">
+                    <X className="size-4" />
                 </button>
             </div>
-            <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2" style={{ borderColor: theme.toolbar.border }}>
-                <Search className="size-4 opacity-45" />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "canvas" ? "搜索画布元素" : "搜索素材"} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:opacity-45" />
+
+            <div className="flex min-h-0 flex-1 flex-col p-3">
+                {tab === "canvas" ? (
+                    <CanvasNodesTab theme={theme} nodes={nodes} selectedNodeIds={selectedNodeIds} onLocateNode={onLocateNode} onPreviewNode={onPreviewNode} />
+                ) : tab === "prompts" ? (
+                    <PromptListTab theme={theme} />
+                ) : (
+                    <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto pr-1" data-canvas-no-zoom>
+                        <section>
+                            <div className="mb-2 text-xs font-semibold" style={{ color: theme.node.faint }}>
+                                数字人分身
+                            </div>
+                            <DigitalHumanPanel theme={theme} compact onInsert={onInsertDigitalHuman} />
+                        </section>
+                        <section className="mt-4 border-t pt-3" style={{ borderColor: theme.toolbar.border }}>
+                            <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} />
+                        </section>
+                        <section className="mt-4 border-t pt-3" style={{ borderColor: theme.toolbar.border }}>
+                            <div className="mb-3 grid grid-cols-2 gap-2">
+                                <Button className="!h-9" icon={<FolderOpen className="size-4" />} onClick={onOpenAssetPicker}>
+                                    从素材插入
+                                </Button>
+                                <Button className="!h-9" icon={<Upload className="size-4" />} onClick={onUpload}>
+                                    上传
+                                </Button>
+                            </div>
+                            <div className="mb-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5" style={{ background: theme.node.fill, border: `1px solid ${theme.toolbar.border}` }}>
+                                <Search className="size-3.5 shrink-0" style={{ color: theme.node.faint }} />
+                                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索素材" className="w-full bg-transparent text-xs outline-none" style={{ color: theme.node.text }} />
+                            </div>
+                            <div className="mb-2 flex items-center justify-between text-xs opacity-55">
+                                <span>我的素材</span>
+                                <span>共 {assets.length} 项</span>
+                            </div>
+                            <div className="space-y-1.5">
+                                {filteredAssets.slice(0, 40).map((asset) => (
+                                    <button key={asset.id} type="button" className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:bg-white/10" onClick={onOpenAssetPicker}>
+                                        <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
+                                            {asset.kind === "text" ? <FileText className="size-4" /> : <ImageIcon className="size-4" />}
+                                        </span>
+                                        <span className="min-w-0 flex-1 truncate">{asset.title}</span>
+                                    </button>
+                                ))}
+                                {!filteredAssets.length ? <div className="rounded-lg px-2 py-8 text-center text-sm opacity-50">还没有素材，先上传或保存节点到素材库</div> : null}
+                            </div>
+                        </section>
+                    </div>
+                )}
             </div>
-            {tab === "canvas" ? (
-                <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-                    <div className="mb-2 flex items-center justify-between text-xs opacity-55">
-                        <span>画布元素</span>
-                        <span>共 {nodes.length} 节点</span>
-                    </div>
-                    <div className="space-y-1.5">
-                        {filteredNodes.map((node) => (
-                            <button
-                                key={node.id}
-                                type="button"
-                                className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm transition"
-                                style={{ background: selectedNodeIds.has(node.id) ? theme.toolbar.activeBg : "transparent", color: selectedNodeIds.has(node.id) ? theme.toolbar.activeText : theme.node.text }}
-                                onClick={() => onSelectNode(node.id)}
-                            >
-                                <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
-                                    {nodeIcon(node.type)}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate">{node.title || node.type}</span>
-                            </button>
-                        ))}
-                        {!filteredNodes.length ? <div className="rounded-lg px-2 py-8 text-center text-sm opacity-50">没有匹配的画布元素</div> : null}
-                    </div>
-                </div>
-            ) : (
-                <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
-                    <div className="mb-3 grid grid-cols-2 gap-2">
-                        <Button className="!h-9" icon={<FolderOpen className="size-4" />} onClick={onOpenAssetPicker}>
-                            从素材插入
-                        </Button>
-                        <Button className="!h-9" icon={<Upload className="size-4" />} onClick={onUpload}>
-                            上传
-                        </Button>
-                    </div>
-                    <div className="mb-2 flex items-center justify-between text-xs opacity-55">
-                        <span>我的素材</span>
-                        <span>共 {assets.length} 项</span>
-                    </div>
-                    <div className="space-y-1.5">
-                        {filteredAssets.slice(0, 40).map((asset) => (
-                            <button key={asset.id} type="button" className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm transition hover:bg-white/10" onClick={onOpenAssetPicker}>
-                                <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}>
-                                    {asset.kind === "text" ? <FileText className="size-4" /> : <ImageIcon className="size-4" />}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate">{asset.title}</span>
-                            </button>
-                        ))}
-                        {!filteredAssets.length ? <div className="rounded-lg px-2 py-8 text-center text-sm opacity-50">还没有素材，先上传或保存节点到素材库</div> : null}
-                    </div>
-                </div>
-            )}
         </aside>
     );
 }
