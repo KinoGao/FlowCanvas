@@ -1783,7 +1783,7 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
         const magnet = magnetRef.current;
         if (!magnet) return;
         magnet.style.transition = "transform 180ms cubic-bezier(.2,.8,.2,1)";
-        magnet.style.transform = "translate3d(0,0,0)";
+        magnet.style.transform = "scale(calc(1 / var(--canvas-k, 1)))";
     };
 
     const handleMagnetMove = (event: React.PointerEvent<HTMLSpanElement>) => {
@@ -1863,7 +1863,11 @@ function ConnectionHandleDot({ side, visible, active, onClickCreate }: { side: "
                 onPointerLeave={resetMagnet}
                 className="canvas-connection-handle group/connection-handle pointer-events-auto absolute left-1/2 top-1/2 flex size-16 cursor-crosshair items-center justify-center"
             >
-                <span ref={magnetRef} className="pointer-events-none grid place-items-center will-change-transform">
+                <span
+                    ref={magnetRef}
+                    className="pointer-events-none grid place-items-center will-change-transform"
+                    style={{ transform: "scale(calc(1 / var(--canvas-k, 1)))" }}
+                >
                     <span
                         className={`canvas-node-connection-dot pointer-events-none relative grid size-6 place-items-center rounded-full border transition duration-150 ${plusVisibility}`}
                         style={{
