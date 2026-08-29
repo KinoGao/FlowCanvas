@@ -107,7 +107,7 @@ export type CanvasNodeProps = {
     onOpenAssetPicker?: (node: CanvasNodeData) => void;
     onCaptureVideoFrame?: (node: CanvasNodeData, dataUrl: string, kind: "first" | "current" | "last") => void | Promise<void>;
     onViewImage?: (node: CanvasNodeData) => void;
-    onGroupAction?: (node: CanvasNodeData, action: "execute" | "storyboard" | "ungroup") => void;
+    onGroupAction?: (node: CanvasNodeData, action: "storyboard" | "ungroup") => void;
     /** TapNow: 点击节点右侧 + 连接点，请求宿主创建下游节点并自动连线。 */
     onClickCreate?: (node: CanvasNodeData) => void;
     /** 拖拽节点悬停在本组上时高亮（拖入归组 drop target，对齐上游） */
@@ -140,7 +140,7 @@ type NodeContentRendererProps = {
     onOpenComposer?: () => void;
     onNodeAction?: (intent: CanvasNodeActionIntent) => void;
     onUpload?: () => void;
-    onGroupAction?: (node: CanvasNodeData, action: "execute" | "storyboard" | "ungroup") => void;
+    onGroupAction?: (node: CanvasNodeData, action: "storyboard" | "ungroup") => void;
 };
 
 /** Custom memo comparator: skip function props (renderPanel, renderNodeContent, callbacks)
@@ -671,8 +671,7 @@ const nodeContentRenderers = {
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isStoryboard = node.metadata?.groupVariant === "storyboard";
-    const actions: Array<{ key: "execute" | "storyboard" | "ungroup"; label: string; disabled?: boolean }> = [
-        { key: "execute", label: "整组执行" },
+    const actions: Array<{ key: "storyboard" | "ungroup"; label: string; disabled?: boolean }> = [
         { key: "storyboard", label: isStoryboard ? "已设为分镜组" : "设为分镜组", disabled: isStoryboard },
         { key: "ungroup", label: "解散组" },
     ];
@@ -1110,26 +1109,23 @@ function GroupTitleEditor({
         onTitleChange(node.id, draft.trim() || fallbackTitle);
         setEditing(false);
     };
-    const sharedStyle: React.CSSProperties = {
-        color: theme.node.text,
-        background: theme.toolbar.panel,
-        borderColor: theme.toolbar.border,
-    };
-
+    // 对齐上游：组内左上标题行（图标 + 标题 + 子节点计数），无边框背景；双击进入编辑
     return (
-        <div className="absolute left-2 top-2 z-40 max-w-[70%]">
+        <div
+            className="absolute left-3 top-3 z-40 max-w-[70%]"
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+        >
             {editing ? (
                 <input
                     autoFocus
                     data-canvas-no-zoom
                     value={draft}
                     maxLength={64}
-                    className="h-7 w-40 select-text rounded-md border px-2 text-left text-xs outline-none"
-                    style={sharedStyle}
+                    className="h-6 w-40 select-text rounded-md border px-1.5 text-xs font-medium outline-none"
+                    style={{ color: theme.node.text, background: theme.node.fill, borderColor: theme.toolbar.border }}
                     onChange={(event) => setDraft(event.target.value)}
                     onBlur={commit}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
                     onKeyDown={(event) => {
                         event.stopPropagation();
                         if (event.key === "Enter") {
@@ -1147,10 +1143,8 @@ function GroupTitleEditor({
                     type="button"
                     data-canvas-no-zoom
                     title="双击重命名"
-                    className="block max-w-full truncate rounded-md border px-2 py-1 text-left text-xs font-medium"
-                    style={sharedStyle}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
+                    className="flex h-6 max-w-full items-center gap-1.5 px-0.5 text-left text-xs font-medium"
+                    style={{ color: theme.node.text }}
                     onDoubleClick={(event) => {
                         event.stopPropagation();
                         cancelRef.current = false;
@@ -1158,9 +1152,9 @@ function GroupTitleEditor({
                         setEditing(true);
                     }}
                 >
-                    <Group className="mr-1 inline-block size-3.5 shrink-0" style={{ color: theme.node.muted }} />
-                    {node.title || fallbackTitle}
-                    <span className="ml-1.5 text-[11px] font-normal" style={{ color: theme.node.muted }}>
+                    <Group className="size-3.5 shrink-0" style={{ color: theme.node.muted }} />
+                    <span className="truncate">{node.title || fallbackTitle}</span>
+                    <span className="shrink-0 text-[11px] font-normal" style={{ color: theme.node.muted }}>
                         {node.metadata?.groupChildIds?.length || 0} 节点
                     </span>
                 </button>
@@ -1782,12 +1776,9 @@ function ResizeBadge({ visible, onPointerDown }: { visible: boolean; onPointerDo
         <div
             data-canvas-no-zoom
             title="拖拽调整大小（按住 Shift 锁定比例）"
-            className={`nodrag nopan absolute -bottom-3 -right-3 z-50 grid size-6 cursor-nwse-resize place-items-center rounded-full border shadow-md transition ${visible ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"}`}
-            style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline, backdropFilter: "blur(8px)" }}
+            className={`nodrag nopan absolute -bottom-[14px] -right-[14px] z-50 size-7 cursor-nwse-resize transition ${visible ? "pointer-events-auto" : "pointer-events-none"}`}
             onPointerDown={onPointerDown}
-        >
-            <span className="block size-2 rounded-[1px] border-b-2 border-r-2" style={{ borderColor: theme.node.text }} />
-        </div>
+        />
     );
 }
 

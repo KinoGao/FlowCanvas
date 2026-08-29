@@ -167,7 +167,6 @@ function sendEvent(res: ServerResponse, type: string, payload: unknown) {
 // 输入字段与 op 字段一一对应的工具，直接透传编译为同名 op。
 const passthroughOpTypes = {
     canvas_retry_node: "retry_node",
-    canvas_execute_group: "execute_group",
     canvas_group_nodes: "group_nodes",
     canvas_ungroup_nodes: "ungroup_nodes",
     canvas_image_edit: "image_edit",

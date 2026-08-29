@@ -42,7 +42,6 @@ type CanvasNodeHoverToolbarProps = {
     onAnalyzeVideo: (node: CanvasNodeData) => void;
     onTrimVideo: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
-    onExecuteGroup: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onQuickStoryboard: (node: CanvasNodeData, command: CanvasSlashCommand) => void;
     onQuickImageCommand: (node: CanvasNodeData, command: CanvasImageQuickCommand) => void;
@@ -91,7 +90,6 @@ export function CanvasNodeHoverToolbar({
     onAnalyzeVideo,
     onTrimVideo,
     onRetry,
-    onExecuteGroup,
     onToggleFreeResize,
     onQuickStoryboard,
     onQuickImageCommand,
@@ -232,7 +230,6 @@ export function CanvasNodeHoverToolbar({
                 {toolbarTools.map((tool) => (
                     <ToolbarAction key={tool.id} {...tool} showLabel={showImageToolLabels} />
                 ))}
-                <ToolbarAction id="executeGroup" title="整组执行：按连线顺序重新执行整组生成节点" label="整组执行" icon={<Play className="size-4" />} onClick={() => onExecuteGroup(currentNode)} showLabel={showImageToolLabels} />
                 {hasImage ? <ToolbarAction id="more" title="配置快捷工具" label="更多" icon={<Ellipsis className="size-4" />} active={imageToolSettingsOpen} onClick={openImageToolSettings} showLabel={showImageToolLabels} /> : null}
                 {hasImage ? (
                     <ToolbarAction
