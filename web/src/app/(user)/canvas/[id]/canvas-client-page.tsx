@@ -53,7 +53,7 @@ import { CanvasToolbar } from "../components/canvas-toolbar";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasMiniMap } from "../components/canvas-minimap";
-import { centerViewportOnRect, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
+import { MIN_CANVAS_ZOOM, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
@@ -752,6 +752,7 @@ function LeaferCanvasPage() {
     const [searchOpen, setSearchOpen] = useState(false);
     const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null);
     const highlightTimerRef = useRef<number | null>(null);
+    const focusAnimRef = useRef<number | null>(null);
     const [mouseWorld, setMouseWorld] = useState<Position>({ x: 0, y: 0 });
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [createMenu, setCreateMenu] = useState<{ x: number; y: number; canvasPosition: Position } | null>(null);
@@ -5503,7 +5504,7 @@ function LeaferCanvasPage() {
         setAssetPreviewNode(node);
     }, [nodeById]);
 
-    /** 定位节点：选中 + 视口居中 + 短暂高亮（TapNow：搜索/分组定位后自动定位+高亮）。 */
+    /** 定位节点（对齐上游）：k 按节点尺寸自适应（60% 容器适配，上限 1）+ 450ms easeOutCubic 平滑动画） */
     const locateNode = useCallback(
         (nodeId: string) => {
             const node = nodeById.get(nodeId);
@@ -5514,14 +5515,29 @@ function LeaferCanvasPage() {
             const rect = containerRef.current?.getBoundingClientRect();
             const width = rect && rect.width > 0 ? rect.width : size.width;
             const height = rect && rect.height > 0 ? rect.height : size.height;
-            const targetK = Math.max(viewportRef.current.k, 0.9);
-            const next = centerViewportOnRect(
-                { x: node.position.x, y: node.position.y, width: node.width, height: node.height },
-                { width, height },
-                targetK,
-            );
-            viewportRef.current = next;
-            setViewport(next);
+            const worldX = node.position.x + node.width / 2;
+            const worldY = node.position.y + node.height / 2;
+            const k = Math.min(Math.max(Math.min((width * 0.6) / node.width, (height * 0.6) / node.height), MIN_CANVAS_ZOOM), 1);
+            const target = { x: width / 2 - worldX * k, y: height / 2 - worldY * k, k };
+            if (focusAnimRef.current) cancelAnimationFrame(focusAnimRef.current);
+            const start = { ...viewportRef.current };
+            const duration = 450;
+            const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+            let startTime: number | null = null;
+            const step = (now: number) => {
+                if (startTime === null) startTime = now;
+                const progress = Math.min((now - startTime) / duration, 1);
+                const t = easeOutCubic(progress);
+                const next = {
+                    x: start.x + (target.x - start.x) * t,
+                    y: start.y + (target.y - start.y) * t,
+                    k: start.k + (target.k - start.k) * t,
+                };
+                viewportRef.current = next;
+                setViewport(next);
+                focusAnimRef.current = progress < 1 ? requestAnimationFrame(step) : null;
+            };
+            focusAnimRef.current = requestAnimationFrame(step);
             if (highlightTimerRef.current) window.clearTimeout(highlightTimerRef.current);
             setHighlightNodeId(nodeId);
             highlightTimerRef.current = window.setTimeout(() => setHighlightNodeId(null), 1400);
