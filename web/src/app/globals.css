@@ -973,7 +973,9 @@
        translate 用独立属性居中，transform 只做反向缩放，避免与 Tailwind translate 冲突。 */
     .canvas-connection-handle {
         translate: -50% -50%;
-        transform: scale(calc(1 / var(--canvas-k, 1)));
+        /* 反缩放只对放大态生效（k>1 时抵消视口放大，端口视觉保持 64px 恒定）；
+           缩小视野时保持原始大小，避免端口被放大成巨大圆环侵入节点。 */
+        transform: scale(calc(min(1 / var(--canvas-k, 1), 1)));
         transform-origin: center;
     }
 
