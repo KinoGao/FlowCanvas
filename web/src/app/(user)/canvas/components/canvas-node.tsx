@@ -496,7 +496,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
             <Card
-                className="creative-os-node canvas-node-card relative h-full w-full overflow-visible border bg-transparent p-0 py-0 text-sm ring-0"
+                className="creative-os-node canvas-node-card relative h-full w-full overflow-visible border-2 bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
                     background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
                     borderColor: editorManaged ? "transparent" : isGroup
@@ -512,8 +512,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                                 : hasVideoContent
                                   ? theme.ui.hairline
                                   : theme.node.stroke,
-                    // 非媒体卡片在常态下用虚线描边（对齐目标视觉：虚线卡片 + 点阵背景）
-                    borderStyle: !editorManaged && !isGroup && !hasImageContent && !hasVideoContent && !isActive && !isRelated ? "dashed" : "solid",
+                    // 对齐上游节点样式：一律实线描边（虚线仅保留分组），选中用阴影描边过渡
+                    borderStyle: !editorManaged && isGroup ? "dashed" : "solid",
                     boxShadow: editorManaged ? undefined : isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
                 }}
                 onDoubleClick={(event) => {
