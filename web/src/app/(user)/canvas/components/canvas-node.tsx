@@ -397,8 +397,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             currentHeight: data.height,
             currentPosition: data.position,
             // 对齐上游 keepAspectRatio：图片默认等比（freeResize 开启才自由）、视频恒等比；其他类型按住 Shift 等比
-            const keepRatioDefault = (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video;
-            keepRatio: event.shiftKey || keepRatioDefault,
+            keepRatio: event.shiftKey || (data.type === CanvasNodeType.Image && !data.metadata?.freeResize) || data.type === CanvasNodeType.Video,
             ratio: (data.metadata?.naturalWidth || data.width) / (data.metadata?.naturalHeight || data.height || 1),
         };
         document.body.style.cursor = corner.includes("left") === corner.includes("top") ? "nwse-resize" : "nesw-resize";
