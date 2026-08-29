@@ -1950,7 +1950,6 @@ function LeaferCanvasPage() {
                 status: NODE_STATUS_IDLE,
                 count: 1,
                 size: "2048x1024",
-                freeResize: true,
             },
         });
     }, [createNode]);
@@ -2360,7 +2359,7 @@ function LeaferCanvasPage() {
         const image = await uploadImage(file);
         const size = fitNodeSize(image.width, image.height);
         const newNode: CanvasNodeData = {
-            ...createCanvasNode(CanvasNodeType.Image, position, { ...imageMetadata(image), freeResize: true }),
+            ...createCanvasNode(CanvasNodeType.Image, position, { ...imageMetadata(image) }),
             position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
             width: size.width,
             height: size.height,
@@ -3740,7 +3739,6 @@ function LeaferCanvasPage() {
                                       ...node.metadata,
                                       ...imageMetadata(image),
                                       errorDetails: undefined,
-                                      freeResize: true,
                                       isBatchRoot: undefined,
                                       batchRootId: undefined,
                                       batchChildIds: undefined,
@@ -4667,7 +4665,6 @@ function LeaferCanvasPage() {
                     status: NODE_STATUS_SUCCESS,
                     naturalWidth: persona.naturalWidth,
                     naturalHeight: persona.naturalHeight,
-                    freeResize: true,
                     prompt: persona.name,
                 }),
                 position: { x: center.x - size.width / 2, y: center.y - size.height / 2 },
@@ -4765,7 +4762,6 @@ function LeaferCanvasPage() {
                     },
                     {
                         ...imageMetadata(image),
-                        freeResize: true,
                         status: NODE_STATUS_SUCCESS,
                     },
                 ),
@@ -4808,7 +4804,6 @@ function LeaferCanvasPage() {
                                 prompt: `来自 ${directorNode.title} 的 3D 机位截图`,
                                 generationMode: "image",
                                 generationType: "generation",
-                                freeResize: true,
                                 status: NODE_STATUS_SUCCESS,
                             },
                         ),
@@ -5114,7 +5109,7 @@ function LeaferCanvasPage() {
             const position = { x: scriptNode.position.x - spec.width - 96, y: scriptNode.position.y + outputCount * (spec.height + 36) };
             const zoneLabel = asset.kind === "character" ? "角色" : asset.kind === "scene" ? "场景" : "道具";
             const node: CanvasNodeData = {
-                ...createCanvasNode(CanvasNodeType.Image, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, { ...imageMetadata(image), freeResize: true }),
+                ...createCanvasNode(CanvasNodeType.Image, { x: position.x + spec.width / 2, y: position.y + spec.height / 2 }, { ...imageMetadata(image) }),
                 ...(asset.name.trim() ? { title: `${zoneLabel}·${asset.name.trim()}` } : {}),
                 position,
                 width: spec.width,
@@ -5736,7 +5731,6 @@ function LeaferCanvasPage() {
                             ...imageMetadata(image),
                             prompt: "360全景沉浸式预览截图",
                             generationMode: "image",
-                            freeResize: true,
                         },
                     ),
                     position,
@@ -5900,7 +5894,6 @@ function LeaferCanvasPage() {
                             model: node.metadata?.model || effectiveConfig.imageModel || effectiveConfig.model,
                             size: "2048x1024",
                             count: 1,
-                            freeResize: true,
                             status: NODE_STATUS_IDLE,
                             errorDetails: undefined,
                         },
