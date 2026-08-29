@@ -3,7 +3,7 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -6093,6 +6093,8 @@ function LeaferCanvasPage() {
                     onStartTitleEditing={startTitleEditing}
                     onFinishTitleEditing={finishTitleEditing}
                     onCancelTitleEditing={() => setTitleEditing(false)}
+                    assetPanelOpen={canvasAssetPanelOpen}
+                    onToggleAssetPanel={() => setCanvasAssetPanelOpen((value) => !value)}
                     onHome={() => navigate("/")}
                     onProjects={() => navigate("/canvas")}
                     onCreateProject={createAndOpenProject}
@@ -6456,6 +6458,7 @@ function LeaferCanvasPage() {
                     onReset={resetViewport}
                     isMiniMapOpen={isMiniMapOpen}
                     onToggleMiniMap={() => setIsMiniMapOpen((value) => !value)}
+                    shifted={canvasAssetPanelOpen}
                     onOpenMyAssets={() => {
                         setCanvasAssetPanelInitialTab("canvas");
                         setCanvasAssetPanelOpen(true);
@@ -6493,6 +6496,7 @@ function LeaferCanvasPage() {
                         selectedNodeIds={selectedNodeIds}
                         viewport={viewport}
                         containerSize={size}
+                        shifted={canvasAssetPanelOpen}
                         onNavigate={(next) => {
                             viewportRef.current = next;
                             setViewport(next);
@@ -6985,10 +6989,13 @@ function CanvasAssetManagerPanel({
         if (open) setTab(initialTab);
     }, [initialTab, open]);
 
-    if (!open) return null;
-
     return (
-        <aside className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} data-canvas-composer onWheelCapture={(event) => event.stopPropagation()}>
+        <aside
+            className="absolute bottom-0 left-0 top-0 z-[65] flex w-[280px] flex-col border-r backdrop-blur-xl transition-transform duration-300 ease-out"
+            style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, transform: open ? "translateX(0)" : "translateX(-100%)", pointerEvents: open ? "auto" : "none" }}
+            data-canvas-composer
+            onWheelCapture={(event) => event.stopPropagation()}
+        >
             {/* 顶部页签：画布 | 资产 | 提示词库（对齐 TapNow） */}
             <div className="flex shrink-0 items-center gap-1 border-b px-3 pt-2" style={{ borderColor: theme.toolbar.border }}>
                 {([
@@ -7133,6 +7140,8 @@ function CanvasTopBar({
     onStartTitleEditing,
     onFinishTitleEditing,
     onCancelTitleEditing,
+    assetPanelOpen,
+    onToggleAssetPanel,
     onHome,
     onProjects,
     onCreateProject,
@@ -7149,6 +7158,8 @@ function CanvasTopBar({
     onStartTitleEditing: () => void;
     onFinishTitleEditing: () => void;
     onCancelTitleEditing: () => void;
+    assetPanelOpen: boolean;
+    onToggleAssetPanel: () => void;
     onHome: () => void;
     onProjects: () => void;
     onCreateProject: () => void;
@@ -7174,6 +7185,9 @@ function CanvasTopBar({
     return (
         <div className="creative-os-topbar pointer-events-none absolute inset-x-0 top-0 z-50 flex h-16 items-center justify-between px-3 sm:px-4">
             <div className="pointer-events-auto flex items-center gap-2">
+                <button type="button" className="creative-os-icon-button" onClick={onToggleAssetPanel} aria-label={assetPanelOpen ? "收起侧栏" : "展开侧栏"} title={assetPanelOpen ? "收起侧栏" : "展开侧栏"}>
+                    {assetPanelOpen ? <PanelLeftClose className="size-[17px]" /> : <PanelLeftOpen className="size-[17px]" />}
+                </button>
                 <Dropdown
                     trigger={["click"]}
                     menu={{

@@ -73,12 +73,15 @@ export function CanvasMiniMap({
     viewport,
     containerSize,
     onNavigate,
+    shifted = false,
 }: {
     nodes: CanvasNodeData[];
     selectedNodeIds: Set<string>;
     viewport: CanvasViewport;
     containerSize: { width: number; height: number };
     onNavigate: (viewport: CanvasViewport) => void;
+    /** 侧栏打开时右移，避免被遮 */
+    shifted?: boolean;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mapRef = useRef<HTMLDivElement>(null);
@@ -132,7 +135,7 @@ export function CanvasMiniMap({
     return (
         <div
             ref={mapRef}
-            className="creative-os-panel absolute bottom-20 left-4 z-50 touch-none overflow-hidden rounded-xl border"
+            className={`creative-os-panel absolute bottom-24 z-50 touch-none overflow-hidden rounded-xl border transition-all duration-300 ${shifted ? "left-[296px]" : "left-6"}`}
             style={{ width: MAP_WIDTH, height: MAP_HEIGHT, background: theme.ui.material, borderColor: theme.ui.hairline, boxShadow: theme.ui.shadow }}
             onPointerDown={(event) => {
                 event.stopPropagation();
