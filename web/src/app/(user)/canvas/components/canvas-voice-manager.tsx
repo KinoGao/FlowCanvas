@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, Mic, Trash2, Wand2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Mic, Play, Square, Trash2, Wand2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -41,6 +41,9 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
     const [voices, setVoices] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
+    const [previewing, setPreviewing] = useState<string | null>(null); // 正在合成试听的音色
+    const [playingVoice, setPlayingVoice] = useState<string | null>(null); // 正在播放试听的音色
+    const previewRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
     const [notice, setNotice] = useState<{ type: "ok" | "err"; text: string } | null>(null);
     const [tab, setTab] = useState<"design" | "clone" | null>(null);
     const [design, setDesign] = useState<DesignState>({ name: "", instructions: "", refLine: "大家好，欢迎使用画布数字人配音，很高兴认识你。", audioUrl: null, wavBlob: null });
@@ -127,6 +130,51 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
         [refresh],
     );
 
+    const stopPreview = useCallback(() => {
+        previewRef.current?.audio.pause();
+        if (previewRef.current) URL.revokeObjectURL(previewRef.current.url);
+        previewRef.current = null;
+        setPlayingVoice(null);
+    }, []);
+
+    /** 试听音色：用该音色合成一句样例并播放，再点一次停止 */
+    const previewVoice = useCallback(
+        async (name: string) => {
+            if (playingVoice === name) {
+                stopPreview();
+                return;
+            }
+            stopPreview();
+            setPreviewing(name);
+            setNotice(null);
+            try {
+                const resp = await fetch(`${TTS_MAIN}/audio/speech`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ model: "qwen3-tts", voice: name, input: "你好，这是我的声音试听。", response_format: "wav" }),
+                });
+                if (!resp.ok) {
+                    const body = await resp.json().catch(() => ({}));
+                    throw new Error(body.detail || `HTTP ${resp.status}`);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                previewRef.current = { audio, url };
+                audio.onended = () => stopPreview();
+                setPlayingVoice(name);
+                void audio.play();
+            } catch (error) {
+                setNotice({ type: "err", text: `试听失败：${error instanceof Error ? error.message : error}` });
+            } finally {
+                setPreviewing(null);
+            }
+        },
+        [playingVoice, stopPreview],
+    );
+
+    useEffect(() => () => stopPreview(), [stopPreview]);
+
     const inputStyle = { background: theme.ui.controlFill, borderColor: theme.ui.hairline, color: theme.node.text };
 
     return (
@@ -159,6 +207,15 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                 <div className="mb-2 flex flex-wrap gap-1.5">
                     {voices.map((name) => (
                         <span key={name} className="group/voice inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: voice === name ? theme.ui.accent : theme.ui.hairline, color: theme.node.text }}>
+                            <button
+                                type="button"
+                                title={playingVoice === name ? "停止试听" : "试听"}
+                                className="opacity-70 transition hover:opacity-100"
+                                disabled={previewing === name}
+                                onClick={() => void previewVoice(name)}
+                            >
+                                {previewing === name ? <Loader2 className="size-3 animate-spin" /> : playingVoice === name ? <Square className="size-3" /> : <Play className="size-3" />}
+                            </button>
                             <button type="button" className="max-w-[120px] truncate" onClick={() => onSelectVoice(name)} title="使用这个音色">
                                 {name}
                                 {voice === name ? " ✓" : ""}

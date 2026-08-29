@@ -36,7 +36,7 @@ function PersonaThumb({ persona, theme }: { persona: CanvasDigitalHuman; theme: 
 }
 
 /** 数字人资产库：管理分身形象照（+ 关联音色），可一键插入画布供「数字人分身口播」工作流引用 */
-export function DigitalHumanPanel({ theme, onInsert }: { theme: Theme; onInsert: (persona: CanvasDigitalHuman) => void }) {
+export function DigitalHumanPanel({ theme, onInsert, compact = false }: { theme: Theme; onInsert: (persona: CanvasDigitalHuman) => void; compact?: boolean }) {
     const { message } = App.useApp();
     const personas = useConfigStore((state) => state.config.digitalHumans) || [];
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -169,7 +169,7 @@ export function DigitalHumanPanel({ theme, onInsert }: { theme: Theme; onInsert:
                     </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-3 gap-3">
+                <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-3"}`}>
                     {personas.map((persona) => (
                         <div key={persona.id} className="group min-w-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
                             <div className="relative">

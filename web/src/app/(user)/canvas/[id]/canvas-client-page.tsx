@@ -32,6 +32,7 @@ import { CanvasWorkflowToolbox } from "../components/canvas-workflow-toolbox";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "../components/canvas-create-node-menu";
 import { DigitalHumanPanel } from "../components/canvas-digital-human-library";
+import { CanvasAssetPanel } from "../components/canvas-asset-panel";
 import { VoiceManagerSection } from "../components/canvas-voice-manager";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
@@ -769,6 +770,7 @@ function LeaferCanvasPage() {
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
     const [materialLibraryTab, setMaterialLibraryTab] = useState<MaterialLibraryTab>("styles");
+    const [assetPanelOpen, setAssetPanelOpen] = useState(false);
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [scriptStudioNodeId, setScriptStudioNodeId] = useState<string | null>(null);
     const [scriptStudioInitialExportTarget, setScriptStudioInitialExportTarget] = useState<"image" | "video" | null>(null);
@@ -1415,7 +1417,7 @@ function LeaferCanvasPage() {
     const batchVisibilityIndex = useMemo(() => buildBatchVisibilityIndex(nodes, nodeById, collapsingBatchIds), [collapsingBatchIds, nodeById, nodes]);
     const connectionAdjacency = useMemo(() => buildConnectionAdjacency(connections), [connections]);
     const mountedNodeItems = useMemo(
-        () => nodes.filter((node) => !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
+        () => nodes.filter((node) => !node.metadata?.hidden && !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
         [batchVisibilityIndex, nodes],
     );
     const canvasGraph = useMemo(() => createCanvasResourceGraph(nodes, connections, nodeById), [connections, nodeById, nodes]);
@@ -4669,7 +4671,7 @@ function LeaferCanvasPage() {
                     createPanorama360Node();
                     break;
                 case "materialLibrary":
-                    openMaterialLibrary("styles");
+                    setAssetPanelOpen((open) => !open);
                     break;
                 case "upload":
                     handleUploadRequest();
@@ -5490,6 +5492,17 @@ function LeaferCanvasPage() {
         [selectOnlyNode],
     );
 
+    /** 切换节点显隐（左侧资产面板「画布」页签的眼睛）。 */
+    const toggleNodeHidden = useCallback((nodeId: string) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, hidden: !node.metadata?.hidden } } : node)));
+        setSelectedNodeIds((prev) => {
+            if (!prev.has(nodeId)) return prev;
+            const next = new Set(prev);
+            next.delete(nodeId);
+            return next;
+        });
+    }, []);
+
     /** 定位节点：选中 + 视口居中 + 短暂高亮（TapNow：搜索/分组定位后自动定位+高亮）。 */
     const locateNode = useCallback(
         (nodeId: string) => {
@@ -5899,12 +5912,19 @@ function LeaferCanvasPage() {
         },
         [createConnectedGenerationNode, createScriptNarrationNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
     );
+    const hiddenNodeIds = useMemo(() => new Set(nodes.filter((node) => node.metadata?.hidden).map((node) => node.id)), [nodes]);
     const visibleConnections = useMemo(
         () =>
             showConnections
-                ? connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId))
+                ? connections.filter(
+                      (connection) =>
+                          !hiddenNodeIds.has(connection.fromNodeId)
+                          && !hiddenNodeIds.has(connection.toNodeId)
+                          && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId)
+                          && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId),
+                  )
                 : [],
-        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, showConnections],
+        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, hiddenNodeIds, showConnections],
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const scriptStudioNode = useMemo(() => (scriptStudioNodeId ? nodes.find((node) => node.id === scriptStudioNodeId && isCanvasScriptNode(node)) || null : null), [scriptStudioNodeId, nodes]);
@@ -6115,6 +6135,19 @@ function LeaferCanvasPage() {
 
                 <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
                 <CanvasSearchPanel open={searchOpen} nodes={nodes} onClose={() => setSearchOpen(false)} onLocateNode={locateNode} />
+
+                {assetPanelOpen ? (
+                    <CanvasAssetPanel
+                        theme={theme}
+                        nodes={nodes}
+                        selectedNodeIds={selectedNodeIds}
+                        onLocateNode={locateNode}
+                        onToggleNodeHidden={toggleNodeHidden}
+                        onInsertDigitalHuman={insertDigitalHuman}
+                        onOpenMaterialLibrary={openMaterialLibrary}
+                        onClose={() => setAssetPanelOpen(false)}
+                    />
+                ) : null}
 
                 <LeaferCanvas
                     containerRef={containerRef}

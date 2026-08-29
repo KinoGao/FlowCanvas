@@ -209,6 +209,8 @@ export type CanvasGenerationMetadata = {
 
 export type CanvasBatchMetadata = {
     freeResize?: boolean;
+    /** 在画布上隐藏该节点（左侧资产面板「画布」页签的眼睛开关），不参与渲染与连线显示 */
+    hidden?: boolean;
     isBatchRoot?: boolean;
     batchRootId?: string;
     batchChildIds?: string[];
