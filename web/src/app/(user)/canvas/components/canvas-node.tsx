@@ -220,6 +220,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const scaleRef = useCanvasScaleRef();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [isEditingContent, setIsEditingContent] = useState(false);
+    const [nodeHovered, setNodeHovered] = useState(false);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
@@ -489,10 +490,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                 containIntrinsicSize: `${data.width}px ${data.height}px`,
             }}
             onPointerEnter={() => {
+                setNodeHovered(true);
                 if (shouldUseOverview) return;
                 onHoverStart(data.id);
             }}
             onPointerLeave={() => {
+                setNodeHovered(false);
                 if (shouldUseOverview) return;
                 onHoverEnd(data.id);
             }}
@@ -588,7 +591,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />}
                 </div>
 
-                {!isGroup && !shouldUseOverview ? <NodeTitleBadge node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
+                {!isGroup && !shouldUseOverview ? <NodeTitleBadge visible={nodeHovered || isSelected || isEditingContent === undefined ? nodeHovered || isSelected : true} node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
@@ -670,43 +673,8 @@ const nodeContentRenderers = {
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const isStoryboard = node.metadata?.groupVariant === "storyboard";
-    const actions: Array<{ key: "storyboard" | "ungroup"; label: string; disabled?: boolean }> = [
-        { key: "storyboard", label: isStoryboard ? "已设为分镜组" : "设为分镜组", disabled: isStoryboard },
-        { key: "ungroup", label: "解散组" },
-    ];
-
-    return (
-        <div className="relative h-full w-full rounded-[inherit]">
-            {isSelected ? (
-                <div
-                    data-canvas-no-zoom
-                    className="pointer-events-auto absolute left-2 top-2 z-[60] flex max-w-[calc(100vw-40px)] items-center gap-1 rounded-lg border px-1.5 py-1 text-xs shadow-[0_10px_30px_rgba(0,0,0,.28)] backdrop-blur"
-                    style={{ background: theme.ui.materialElevated, color: theme.node.text, borderColor: theme.ui.hairline }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onClick={(event) => event.stopPropagation()}
-                >
-                    {actions.map((action) => (
-                        <button
-                            key={action.key}
-                            type="button"
-                            disabled={action.disabled}
-                            className="h-7 whitespace-nowrap rounded-md px-2 transition hover:opacity-75 disabled:cursor-default disabled:opacity-45"
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                onGroupAction?.(node, action.key);
-                            }}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                        >
-                            {action.label}
-                        </button>
-                    ))}
-                </div>
-            ) : null}
-        </div>
-    );
+    // 对齐上游：组内仅显示左上角标题（由 GroupTitleEditor 渲染），无操作浮条（避免与标题重叠）
+    return <div className="relative h-full w-full rounded-[inherit]" />;
 }
 
 function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
@@ -999,12 +967,14 @@ function ScriptNodeContent({ theme, onOpenComposer, node }: NodeContentRendererP
 }
 
 function NodeTitleBadge({
+    visible,
     node,
     theme,
     inputCount,
     outputCount,
     onTitleChange,
 }: {
+    visible: boolean;
     node: CanvasNodeData;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     inputCount: number;
@@ -1028,10 +998,11 @@ function NodeTitleBadge({
         setEditing(false);
     };
 
+    if (!visible) return null;
     return (
         <div
             data-canvas-no-zoom
-            className={`canvas-node-title absolute -top-[24px] z-30 flex items-center gap-1 text-[11px] leading-4 ${node.type === CanvasNodeType.Image ? "inset-x-0 justify-between" : "left-0 max-w-full"}`}
+            className={`canvas-node-title absolute -top-[28px] z-30 flex items-center gap-1 text-xs leading-4 ${node.type === CanvasNodeType.Image ? "inset-x-0 justify-between" : "left-0 max-w-full"}`}
             style={{ color: theme.node.label }}
         >
             <div className="flex min-w-0 items-center gap-1">

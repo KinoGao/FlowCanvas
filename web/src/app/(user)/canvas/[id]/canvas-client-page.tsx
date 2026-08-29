@@ -6534,6 +6534,7 @@ function LeaferCanvasPage() {
                     <CanvasNodeContextMenu
                         menu={contextMenu}
                         onClose={() => setContextMenu(null)}
+                        onUngroup={contextMenu.type === "node" && nodeById.get(contextMenu.nodeId)?.type === CanvasNodeType.Group ? () => { ungroupNodes([contextMenu.nodeId]); setContextMenu(null); } : undefined}
                         onDuplicate={() => {
                             if (contextMenu.type !== "node") return;
                             duplicateNode(contextMenu.nodeId);

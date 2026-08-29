@@ -13,7 +13,7 @@ import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type
 import { CanvasScaleCtx } from "./canvas-scale-context";
 import { buildSpatialIndex, querySpatialIndex } from "../utils/canvas-spatial-index";
 import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
-import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM, canvasToScreen, clampViewport, screenToCanvas, stepCanvasZoom, viewportToCssTransform, sameViewport } from "./leafer-viewport";
+import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM, canvasToScreen, clampCanvasZoom, clampViewport, screenToCanvas, stepCanvasZoom, viewportToCssTransform, sameViewport } from "./leafer-viewport";
 
 type LeaferCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
@@ -685,16 +685,15 @@ export function LeaferCanvas({
                 },
             },
             wheel: {
-                zoomMode: false,
+                zoomMode: true,
                 preventDefault: true,
-                // TapNow 契约：普通滚轮/触控板双指 = 平移（getScale 返回 1 时 Leafer 走 move 分支），
-                // Ctrl/Cmd + 滚轮或触控板捏合（浏览器上报为 ctrlKey wheel）= 以指针为锚点缩放。
+                // 对齐上游：普通滚轮/触控板双指 = 以指针为锚点连续缩放（1.1^(delta/100)）；
+                // 平移用空格/中键拖动（move.holdSpaceKey / holdMiddleKey）。
                 getScale: (event) => {
-                    if (!event.ctrlKey && !event.metaKey) return 1;
                     const delta = event.deltaY || event.deltaX;
                     if (!delta) return 1;
                     const current = viewportRef.current.k;
-                    const next = stepCanvasZoom(current, delta < 0 ? "in" : "out");
+                    const next = clampCanvasZoom(current * Math.pow(1.1, -delta / 100));
                     return next / current;
                 },
             },
@@ -1215,38 +1214,6 @@ export function LeaferCanvas({
 
     // Ctrl/Cmd + 滚轮落在 DOM 覆盖层（节点本体、连接手柄磁吸区等）时，事件到不了 leafer 画布，
     // 缩放会失效（时灵时不灵，像页面乱跳）。在容器捕获层转发为以指针为锚点的视口缩放。
-    useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-        const forwardWheelZoom = (event: WheelEvent) => {
-            if (!(event.ctrlKey || event.metaKey)) return;
-            const target = event.target;
-            if (!(target instanceof Element)) return;
-            if (target.closest(".leafer-app-view")) return; // 画布表面：leafer 自行处理
-            if (target.closest("[data-canvas-composer], .canvas-no-zoom-popup, [data-canvas-no-zoom]")) return; // 面板内滚动不缩放
-            const rect = container.getBoundingClientRect();
-            const px = event.clientX - rect.left;
-            const py = event.clientY - rect.top;
-            const current = viewportRef.current;
-            const nextK = stepCanvasZoom(current.k, event.deltaY < 0 ? "in" : "out");
-            event.preventDefault();
-            if (!Number.isFinite(nextK) || nextK === current.k) return;
-            const next = clampViewport(
-                {
-                    x: px - ((px - current.x) / current.k) * nextK,
-                    y: py - ((py - current.y) / current.k) * nextK,
-                    k: nextK,
-                },
-                rect.width,
-                rect.height,
-            );
-            applyViewportPresentation(next);
-            callbacksRef.current.onViewportChange(next);
-            event.stopPropagation();
-        };
-        container.addEventListener("wheel", forwardWheelZoom, { capture: true, passive: false });
-        return () => container.removeEventListener("wheel", forwardWheelZoom, { capture: true });
-    }, [applyViewportPresentation]);
 
     useEffect(() => () => {
         if (wheelCommitTimerRef.current) clearTimeout(wheelCommitTimerRef.current);

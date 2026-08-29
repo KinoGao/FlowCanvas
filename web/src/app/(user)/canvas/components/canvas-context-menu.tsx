@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Layers3, Plus, Trash2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -13,11 +13,13 @@ export function CanvasNodeContextMenu({
     onClose,
     onDuplicate,
     onDelete,
+    onUngroup,
 }: {
     menu: ContextMenuState;
     onClose: () => void;
     onDuplicate: () => void;
     onDelete: () => void;
+    onUngroup?: () => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const menuRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,7 @@ export function CanvasNodeContextMenu({
             onPointerDown={(event) => event.stopPropagation()}
         >
             {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
+            {onUngroup ? <MenuButton icon={<Layers3 className="size-4" />} label="解散组" onClick={onUngroup} /> : null}
             <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />
         </div>
     );
