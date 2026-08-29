@@ -1625,6 +1625,8 @@ export function LeaferCanvas({
         willChange: "transform",
         // 供节点远景标签做反向缩放（calc(1 / var(--canvas-k))），避免缩放时整树重渲染。
         ["--canvas-k" as string]: String(viewport.k),
+        // 统一反缩放 token（对齐 SHUO Canvas --zoom-inv）：放大时 UI 元素视觉恒定，缩小视野不放大
+        ["--zoom-inv" as string]: String(Math.min(1 / viewport.k, 1)),
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
     const cursor = isSpacePressed ? "grab" : "default";

@@ -478,15 +478,16 @@
     }
 
     .creative-os-canvas {
+        /* 画布中央淡色氛围光（对齐 SHUO Canvas v2-canvas-stage::before，画面中心更聚焦） */
         background:
-            radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 60%),
+            radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255, 255, 255, 0.05), transparent 70%),
             inherit;
         overscroll-behavior: none;
     }
 
     .dark .creative-os-canvas {
         background:
-            radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 55%),
+            radial-gradient(ellipse 80% 60% at 50% 50%, rgba(130, 160, 255, 0.07), transparent 70%),
             inherit;
     }
 
@@ -973,9 +974,9 @@
        translate 用独立属性居中，transform 只做反向缩放，避免与 Tailwind translate 冲突。 */
     .canvas-connection-handle {
         translate: -50% -50%;
-        /* 反缩放只对放大态生效（k>1 时抵消视口放大，端口视觉保持 64px 恒定）；
+        /* 统一反缩放 token（--zoom-inv，viewport 层注入）：放大态下端口视觉保持 64px 恒定；
            缩小视野时保持原始大小，避免端口被放大成巨大圆环侵入节点。 */
-        transform: scale(calc(min(1 / var(--canvas-k, 1), 1)));
+        transform: scale(var(--zoom-inv, 1));
         transform-origin: center;
     }
 

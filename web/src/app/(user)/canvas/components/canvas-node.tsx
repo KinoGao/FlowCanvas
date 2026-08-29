@@ -221,6 +221,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [nodeHovered, setNodeHovered] = useState(false);
+    const [resizeLabel, setResizeLabel] = useState<{ width: number; height: number } | null>(null);
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content || data.metadata?.storageKey);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
@@ -354,6 +355,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 resizeFrameRef.current = null;
                 // 实时提交：画布（Leafer 边框）与节点内容同步跟手，松手后无需二次同步。
                 onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
+                // 尺寸标签：拖动时跟随显示（对齐 SHUO Canvas size-label）
+                setResizeLabel({ width: Math.round(resizeRef.current.currentWidth), height: Math.round(resizeRef.current.currentHeight) });
             });
         },
         [data.metadata?.freeResize, data.type, data.id, onResize, scaleRef],
@@ -368,6 +371,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             resizeFrameRef.current = null;
         }
         onResize(data.id, resizeRef.current.currentWidth, resizeRef.current.currentHeight, resizeRef.current.currentPosition);
+        setResizeLabel(null);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
         // Remove the same stable wrappers that were registered in handleResizeMouseDown.
@@ -592,7 +596,17 @@ export const CanvasNode = React.memo(function CanvasNode({
                     />}
                 </div>
 
-                {!isGroup && !shouldUseOverview ? <NodeTitleBadge visible={nodeHovered || isSelected || isEditingContent === undefined ? nodeHovered || isSelected : true} node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
+{resizeLabel ? (
+                    <div
+                        data-canvas-no-zoom
+                        className="pointer-events-none absolute left-1/2 top-[-40px] z-50 whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-medium shadow-lg"
+                        style={{ background: "var(--creative-material-elevated)", borderColor: "var(--creative-hairline)", color: "var(--creative-text)", transform: "translateX(-50%) scale(var(--zoom-inv, 1))", transformOrigin: "bottom center" }}
+                    >
+                        {resizeLabel.width} × {resizeLabel.height}
+                    </div>
+                ) : null}
+
+                {!isGroup && !shouldUseOverview ? <NodeTitleBadge visible={nodeHovered || isSelected} node={data} theme={theme} inputCount={inputCount} outputCount={outputCount} onTitleChange={onTitleChange} /> : null}
                 {isGroup ? <GroupTitleEditor node={data} theme={theme} onTitleChange={onTitleChange} /> : null}
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
