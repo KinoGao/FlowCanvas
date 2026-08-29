@@ -44,6 +44,7 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
     const [previewing, setPreviewing] = useState<string | null>(null); // 正在合成试听的音色
     const [playingVoice, setPlayingVoice] = useState<string | null>(null); // 正在播放试听的音色
     const previewRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
+    const previewReqRef = useRef(0); // 单调递增请求序号：新试听/停止时作废在途请求
     const [notice, setNotice] = useState<{ type: "ok" | "err"; text: string } | null>(null);
     const [tab, setTab] = useState<"design" | "clone" | null>(null);
     const [design, setDesign] = useState<DesignState>({ name: "", instructions: "", refLine: "大家好，欢迎使用画布数字人配音，很高兴认识你。", audioUrl: null, wavBlob: null });
@@ -79,7 +80,10 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                 onSelectVoice(name);
                 await refresh();
                 setTab(null);
-                setDesign({ name: "", instructions: "", refLine: "大家好，欢迎使用画布数字人配音，很高兴认识你。", audioUrl: null, wavBlob: null });
+                setDesign((current) => {
+                    if (current.audioUrl) URL.revokeObjectURL(current.audioUrl);
+                    return { name: "", instructions: "", refLine: "大家好，欢迎使用画布数字人配音，很高兴认识你。", audioUrl: null, wavBlob: null };
+                });
                 setClone({ name: "", file: null, transcript: "" });
             } catch (error) {
                 setNotice({ type: "err", text: String(error instanceof Error ? error.message : error) });
@@ -108,7 +112,10 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                 throw new Error(body.detail || `HTTP ${resp.status}`);
             }
             const blob = await resp.blob();
-            setDesign((current) => ({ ...current, wavBlob: blob, audioUrl: URL.createObjectURL(blob) }));
+            setDesign((current) => {
+                if (current.audioUrl) URL.revokeObjectURL(current.audioUrl);
+                return { ...current, wavBlob: blob, audioUrl: URL.createObjectURL(blob) };
+            });
             setNotice({ type: "ok", text: "已生成，试听满意后点击保存" });
         } catch (error) {
             setNotice({ type: "err", text: String(error instanceof Error ? error.message : error) });
@@ -120,9 +127,16 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
     const deleteVoice = useCallback(
         async (name: string) => {
             setBusy(`del-${name}`);
+            setNotice(null);
             try {
-                await fetch(`${TTS_MAIN}/audio/voices/${encodeURIComponent(name)}`, { method: "DELETE" });
+                const resp = await fetch(`${TTS_MAIN}/audio/voices/${encodeURIComponent(name)}`, { method: "DELETE" });
+                if (!resp.ok) {
+                    const body = await resp.json().catch(() => ({}));
+                    throw new Error(body.detail || `HTTP ${resp.status}`);
+                }
                 await refresh();
+            } catch (error) {
+                setNotice({ type: "err", text: `删除失败：${error instanceof Error ? error.message : error}` });
             } finally {
                 setBusy(null);
             }
@@ -131,13 +145,15 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
     );
 
     const stopPreview = useCallback(() => {
+        previewReqRef.current += 1; // 作废在途试听请求
         previewRef.current?.audio.pause();
         if (previewRef.current) URL.revokeObjectURL(previewRef.current.url);
         previewRef.current = null;
         setPlayingVoice(null);
+        setPreviewing(null);
     }, []);
 
-    /** 试听音色：用该音色合成一句样例并播放，再点一次停止 */
+    /** 试听音色：用该音色合成一句样例并播放；新试听/停止会作废旧请求，防止两段音频同时播放 */
     const previewVoice = useCallback(
         async (name: string) => {
             if (playingVoice === name) {
@@ -145,6 +161,7 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                 return;
             }
             stopPreview();
+            const reqId = ++previewReqRef.current;
             setPreviewing(name);
             setNotice(null);
             try {
@@ -158,16 +175,22 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                     throw new Error(body.detail || `HTTP ${resp.status}`);
                 }
                 const blob = await resp.blob();
+                if (reqId !== previewReqRef.current) return; // 已被新试听/停止取代，丢弃
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
                 previewRef.current = { audio, url };
                 audio.onended = () => stopPreview();
                 setPlayingVoice(name);
-                void audio.play();
+                try {
+                    await audio.play();
+                } catch {
+                    stopPreview(); // 自动播放被拒/解码失败：清状态并回收
+                    throw new Error("播放被浏览器拦截，请再次点击试听");
+                }
             } catch (error) {
-                setNotice({ type: "err", text: `试听失败：${error instanceof Error ? error.message : error}` });
+                if (reqId === previewReqRef.current) setNotice({ type: "err", text: `试听失败：${error instanceof Error ? error.message : error}` });
             } finally {
-                setPreviewing(null);
+                if (reqId === previewReqRef.current) setPreviewing(null);
             }
         },
         [playingVoice, stopPreview],

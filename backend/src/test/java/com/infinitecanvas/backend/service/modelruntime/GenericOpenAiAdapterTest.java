@@ -1,6 +1,7 @@
 package com.infinitecanvas.backend.service.modelruntime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
 import org.junit.jupiter.api.Test;
 
@@ -101,6 +102,62 @@ class GenericOpenAiAdapterTest {
         model.setRequestModel("any");
         assertTrue(adapter.supports(new com.infinitecanvas.backend.service.PlatformConfigService.RuntimeModel(
                 new PlatformConfigDocument.Provider(), model), "/images/generations"));
+    }
+
+    @Test
+    void audioVoiceWildcardAllowsCustomVoicesWhenConfigured() throws Exception {
+        PlatformConfigDocument.AudioCapabilities capabilities = new PlatformConfigDocument.AudioCapabilities();
+        capabilities.setModes(List.of("text-to-speech"));
+        capabilities.setVoices(List.of("my-voice", "*"));
+        capabilities.setFormats(List.of("wav", "mp3"));
+        PlatformConfigDocument.Model model = new PlatformConfigDocument.Model();
+        model.setCategory("audio");
+        model.setRequestModel("configured-audio-model");
+        model.setAudioCapabilities(capabilities);
+
+        byte[] request = """
+                {
+                  "model": "client-selected-model",
+                  "input": "你好",
+                  "voice": "qinnian-yinse",
+                  "response_format": "wav"
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        // 通配符 "*" 放行任意自定义音色：不应抛 "音色不受当前模型支持"
+        byte[] result = adapter.validateAndRewriteJson(request, "/audio/speech", model, false);
+        ObjectNode json = (ObjectNode) new ObjectMapper().readTree(result);
+        assertEquals("configured-audio-model", json.get("model").asText());
+        assertEquals("qinnian-yinse", json.get("voice").asText());
+    }
+
+    @Test
+    void wildcardDoesNotRelaxNonVoiceEnumerations() throws Exception {
+        // "*" 只放宽 voice；video 的 resolution 等枚举仍须精准匹配（PlatformConfigService 对视频用非白名单 cleanStrings，* 会保留）
+        PlatformConfigDocument.VideoCapabilities capabilities = new PlatformConfigDocument.VideoCapabilities();
+        capabilities.setModes(List.of("text-to-video"));
+        capabilities.setDurations(List.of(5));
+        capabilities.setResolutions(List.of("720p", "*"));
+        capabilities.setRatios(List.of("16:9"));
+        PlatformConfigDocument.Model model = new PlatformConfigDocument.Model();
+        model.setCategory("video");
+        model.setRequestModel("configured-request-model");
+        model.setVideoCapabilities(capabilities);
+
+        byte[] request = """
+                {
+                  "model": "client-selected-model",
+                  "prompt": "test",
+                  "seconds": 5,
+                  "aspect_ratio": "16:9",
+                  "resolution": "8k"
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        // resolutions 虽含 "*"，但 * 仅放宽 voice：resolution=8k 不在 720p 内，应被拒
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                adapter.validateAndRewriteJson(request, "/videos", model, false));
+        assertTrue(error.getMessage().contains("分辨率"));
     }
 
     private static void assertRewritten(byte[] result, byte[] binary) {

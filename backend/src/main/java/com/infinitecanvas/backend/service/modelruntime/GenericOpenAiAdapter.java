@@ -469,8 +469,9 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
 
     private void validateString(ObjectNode json, List<String> keys, List<String> allowed, String label) {
         if (allowed == null || allowed.isEmpty()) return;
-        // "*" 为通配约定：平台配置声明任意取值均可（如本地 TTS 的自定义音色）
-        if (allowed.contains("*")) return;
+        // "*" 为通配约定，仅限音色（voice）语义：平台配置声明任意音色均可（如本地 TTS 的自定义音色）。
+        // 不得放宽到画质/比例/分辨率/格式等其他枚举（非白名单清理会保留 *，会意外绕过整类校验）。
+        if (allowed.contains("*") && keys.contains("voice")) return;
         JsonNode value = first(json, keys);
         if (value != null && value.isTextual() && !allowed.contains(value.asText())) throw new IllegalArgumentException(label + "不受当前模型支持: " + value.asText());
     }
