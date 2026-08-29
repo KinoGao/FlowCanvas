@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -110,6 +110,8 @@ export type CanvasNodeProps = {
     onGroupAction?: (node: CanvasNodeData, action: "execute" | "storyboard" | "ungroup") => void;
     /** TapNow: 点击节点右侧 + 连接点，请求宿主创建下游节点并自动连线。 */
     onClickCreate?: (node: CanvasNodeData) => void;
+    /** 拖拽节点悬停在本组上时高亮（拖入归组 drop target，对齐上游） */
+    isGroupDropTarget?: boolean;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -212,6 +214,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onGroupAction,
     onClickCreate,
+    isGroupDropTarget = false,
     onContextMenu,
 }: CanvasNodeProps) {
     const scaleRef = useCanvasScaleRef();
@@ -498,11 +501,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             <Card
                 className="creative-os-node canvas-node-card relative h-full w-full overflow-visible border-2 bg-transparent p-0 py-0 text-sm ring-0"
                 style={{
-                    background: editorManaged ? "transparent" : isGroup ? theme.ui.controlFill : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
+                    background: editorManaged ? "transparent" : isGroup ? (isGroupDropTarget ? theme.ui.accentSoft : theme.ui.controlFill) : !hasImageContent && !hasVideoContent ? theme.node.panel : "rgba(14,14,14,.45)",
                     borderColor: editorManaged ? "transparent" : isGroup
-                        ? isSelected
+                        ? isGroupDropTarget
                             ? theme.ui.accent
-                            : theme.ui.hairline
+                            : isSelected
+                              ? theme.ui.accent
+                              : theme.ui.hairline
                         : hasImageContent
                             ? imageBorderColor
                             : isActive
@@ -514,7 +519,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                                   : theme.node.stroke,
                     // 对齐上游节点样式：一律实线描边（虚线仅保留分组），选中用阴影描边过渡
                     borderStyle: !editorManaged && isGroup ? "dashed" : "solid",
-                    boxShadow: editorManaged ? undefined : isGroup ? (isSelected ? `0 0 0 2px ${theme.ui.accentSoft}` : undefined) : isActive ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}` : undefined,
+                    boxShadow: editorManaged ? undefined : isGroup
+                        ? isGroupDropTarget
+                            ? `0 0 0 3px ${theme.ui.accent}, ${theme.ui.shadow}`
+                            : isSelected
+                              ? `0 0 0 2px ${theme.ui.accentSoft}`
+                              : undefined
+                        : isActive
+                          ? `0 0 0 2px ${theme.ui.accent}, ${theme.ui.shadow}`
+                          : undefined,
                 }}
                 onDoubleClick={(event) => {
                     if (data.type === CanvasNodeType.Image && hasImageContent) return;
@@ -1104,14 +1117,14 @@ function GroupTitleEditor({
     };
 
     return (
-        <div className="absolute right-2 top-2 z-40 max-w-[70%]">
+        <div className="absolute left-2 top-2 z-40 max-w-[70%]">
             {editing ? (
                 <input
                     autoFocus
                     data-canvas-no-zoom
                     value={draft}
                     maxLength={64}
-                    className="h-7 w-40 select-text rounded-md border px-2 text-right text-xs outline-none"
+                    className="h-7 w-40 select-text rounded-md border px-2 text-left text-xs outline-none"
                     style={sharedStyle}
                     onChange={(event) => setDraft(event.target.value)}
                     onBlur={commit}
@@ -1134,7 +1147,7 @@ function GroupTitleEditor({
                     type="button"
                     data-canvas-no-zoom
                     title="双击重命名"
-                    className="block max-w-full truncate rounded-md border px-2 py-1 text-right text-xs font-medium"
+                    className="block max-w-full truncate rounded-md border px-2 py-1 text-left text-xs font-medium"
                     style={sharedStyle}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
@@ -1145,7 +1158,11 @@ function GroupTitleEditor({
                         setEditing(true);
                     }}
                 >
+                    <Group className="mr-1 inline-block size-3.5 shrink-0" style={{ color: theme.node.muted }} />
                     {node.title || fallbackTitle}
+                    <span className="ml-1.5 text-[11px] font-normal" style={{ color: theme.node.muted }}>
+                        {node.metadata?.groupChildIds?.length || 0} 节点
+                    </span>
                 </button>
             )}
         </div>

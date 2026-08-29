@@ -253,6 +253,22 @@ function isGenerationConfigNode(type?: CanvasNodeType) {
     return type === CanvasNodeType.Config || type === CanvasNodeType.ComfyUI || type === CanvasNodeType.Clip;
 }
 
+/** 找节点中心点落入的组（拖拽高亮用，排除自身/组类型），对齐上游 findContainingGroupId */
+function findContainingGroup(node: CanvasNodeData, nodes: CanvasNodeData[]): string | null {
+    const centerX = node.position.x + node.width / 2;
+    const centerY = node.position.y + node.height / 2;
+    const owner = nodes.find(
+        (group) =>
+            group.type === CanvasNodeType.Group
+            && group.id !== node.id
+            && centerX >= group.position.x
+            && centerX <= group.position.x + group.width
+            && centerY >= group.position.y
+            && centerY <= group.position.y + group.height,
+    );
+    return owner?.id ?? null;
+}
+
 function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
     const groups = nodes.filter((node) => node.type === CanvasNodeType.Group);
     if (!groups.length) return nodes;
@@ -296,7 +312,26 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
         changed = true;
         return { ...node, metadata: { ...node.metadata, groupChildIds: nextChildIds } };
     });
-    return changed ? next : nodes;
+    // pad 吸附（对齐上游 snapNodesIntoGroup）：归组后位置越出组内边距的节点修正到 pad 区内；组自身被移动/缩放时子节点跟随，不受影响
+    const snapPass = nodes.map((node) => {
+        if (node.type === CanvasNodeType.Group) return node;
+        const children = childIdsByGroupId;
+        const ownerId = (Array.from(children.entries()).find(([, ids]) => ids.includes(node.id)) || [])[0] as string | undefined;
+        if (!ownerId) return node;
+        const group = nodes.find((item) => item.id === ownerId);
+        if (!group) return node;
+        const pad = 24;
+        const left = group.position.x + pad;
+        const top = group.position.y + pad;
+        const right = group.position.x + group.width - pad;
+        const bottom = group.position.y + group.height - pad;
+        const dx = node.position.x < left ? left - node.position.x : node.position.x + node.width > right ? right - node.position.x - node.width : 0;
+        const dy = node.position.y < top ? top - node.position.y : node.position.y + node.height > bottom ? bottom - node.position.y - node.height : 0;
+        if (!dx && !dy) return node;
+        changed = true;
+        return { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } };
+    });
+    return changed ? snapPass : nodes;
 }
 
 const VIDEO_NODE_MAX_WIDTH = VIDEO_NODE_SIZE_RANGE.maxWidth;
@@ -813,6 +848,7 @@ function LeaferCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+    const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null);
     const [nodeSequenceCounters, setNodeSequenceCounters] = useState<CanvasNodeSequenceCounters>({});
     const [referenceOrderCounter, setReferenceOrderCounter] = useState(0);
     const [composerContentHeight, setComposerContentHeight] = useState(360);
@@ -2747,6 +2783,10 @@ function LeaferCanvasPage() {
             return next;
         });
         nodesRef.current = applyUpdates(nodesRef.current);
+        // 拖拽中高亮可归入的组（拖入归组视觉反馈，对齐上游 drop target）
+        const anchorNode = nodesRef.current.find((node) => updates[0]?.id === node.id);
+        const nextDropTarget = anchorNode && anchorNode.type !== CanvasNodeType.Group ? findContainingGroup(anchorNode, nodesRef.current) : null;
+        setDropTargetGroupId(nextDropTarget);
     }, []);
 
     const handleLeaferNodesTransformEnd = useCallback(() => {
@@ -2758,6 +2798,7 @@ function LeaferCanvasPage() {
         nodesRef.current = reconcileGroupMembership(nodesRef.current);
         multiNodeDragStartRef.current = null;
         setAlignmentGuides(null);
+        setDropTargetGroupId(null);
         historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
@@ -6278,6 +6319,7 @@ function LeaferCanvasPage() {
                                 onCaptureVideoFrame={insertVideoFrameCapture}
                                 onViewImage={handleViewNodeImage}
                                 onGroupAction={(node, action) => (action === "execute" ? void handleExecuteGroup(node) : handleGroupAction(node, action))}
+                                isGroupDropTarget={dropTargetGroupId === node.id}
                                 onContextMenu={handleNodeContextMenu}
                             />
                         );
