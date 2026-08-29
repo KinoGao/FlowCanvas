@@ -48,6 +48,25 @@
 }
 
 :root {
+    /* 画布语义 token（对齐 SHUO Canvas 设计体系） */
+    --node-r: 24px;
+    --panel-w: 280px;
+    --header-h: 64px;
+    --dock-h: 56px;
+    --font-11: 11px;
+    --font-12: 12px;
+    --font-13: 13px;
+    --font-14: 14px;
+    --space-4: 4px;
+    --space-8: 8px;
+    --space-12: 12px;
+    --space-16: 16px;
+    --space-20: 20px;
+    --space-24: 24px;
+    --radius-8: 8px;
+    --radius-12: 12px;
+    --radius-16: 16px;
+    --radius-24: 24px;
     --radius: 0.625rem;
     --border: #e5e8ec;
     --ring: oklch(0.708 0 0);
@@ -897,6 +916,18 @@
 
     .node-element {
         --canvas-node-radius: 24px;
+    }
+
+    /* 聚焦模式（对齐 SHUO Canvas）：打开工具型工作台时虚化非目标节点，聚焦当前任务 */
+    .is-focus-mode .node-element {
+        opacity: 0.12;
+        filter: saturate(0.6);
+        pointer-events: none;
+    }
+    .is-focus-mode .node-element.is-focus-node {
+        opacity: 1;
+        filter: none;
+        pointer-events: auto;
     }
 
     .creative-os-node {

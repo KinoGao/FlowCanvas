@@ -35,6 +35,7 @@ import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "../components/canvas-create-node-menu";
 import { DigitalHumanPanel } from "../components/canvas-digital-human-library";
 import { CanvasNodesTab, PromptListTab } from "../components/canvas-asset-panel";
+import { CanvasMultiSelectToolbar } from "../components/canvas-multi-select-toolbar";
 import { VoiceManagerSection } from "../components/canvas-voice-manager";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { BackendWorkspaceGate } from "@/components/layout/backend-workspace-gate";
@@ -849,6 +850,7 @@ function LeaferCanvasPage() {
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null);
+    const [alignPanelOpen, setAlignPanelOpen] = useState(false);
     const [nodeSequenceCounters, setNodeSequenceCounters] = useState<CanvasNodeSequenceCounters>({});
     const [referenceOrderCounter, setReferenceOrderCounter] = useState(0);
     const [composerContentHeight, setComposerContentHeight] = useState(360);
@@ -2582,6 +2584,17 @@ function LeaferCanvasPage() {
             // Tab 打开统一创建菜单（落在最后画布交互点，无视口交互过则在视口中心）
             if (event.key === "Tab") {
                 event.preventDefault();
+                // 多选时 Tab = 循环切换焦点节点（对齐 SHUO Canvas）；单选/无选中时打开创建菜单
+                const selected = selectedNodeIdsRef.current;
+                const selectedNodes = nodesRef.current.filter((node) => selected.has(node.id));
+                if (selectedNodes.length >= 2) {
+                    const active = dialogNodeId && selected.has(dialogNodeId) ? dialogNodeId : selectedNodes[0].id;
+                    const index = selectedNodes.findIndex((node) => node.id === active);
+                    const next = selectedNodes[(index + 1) % selectedNodes.length];
+                    setDialogNodeId(null);
+                    selectOnlyNode(next.id);
+                    return;
+                }
                 const shellRect = canvasShellRef.current?.getBoundingClientRect();
                 const vp = viewportRef.current;
                 const centerClient = {
@@ -5512,6 +5525,43 @@ function LeaferCanvasPage() {
         if (viewportRafRef.current) cancelAnimationFrame(viewportRafRef.current);
     }, []);
 
+    /** 多选工具条：重跑选中的可生成节点（对齐 SHUO Canvas 多选框工具条） */
+    const runSelectedNodes = useCallback(() => {
+        const selected = selectedNodeIdsRef.current;
+        const targets = nodesRef.current.filter((node) => selected.has(node.id) && isGroupExecutableNode(node, connectionsRef.current.some((connection) => connection.toNodeId === node.id)));
+        if (!targets.length) {
+            message.info("选中的节点没有可执行的生成任务");
+            return;
+        }
+        targets.forEach((node) => retryNodeRef.current?.(node));
+    }, [message]);
+
+    /** 9 宫格对齐（对齐 SHUO Canvas align-center-panel）：1-9 为 左/中/右 × 顶/中/底 */
+    const alignSelectedNodes = useCallback((slot: number) => {
+        const ids = selectedNodeIdsRef.current;
+        const items = nodesRef.current.filter((node) => ids.has(node.id) && node.type !== CanvasNodeType.Group);
+        if (items.length < 2) return;
+        const left = Math.min(...items.map((node) => node.position.x));
+        const right = Math.max(...items.map((node) => node.position.x + node.width));
+        const top = Math.min(...items.map((node) => node.position.y));
+        const bottom = Math.max(...items.map((node) => node.position.y + node.height));
+        const centerX = (left + right) / 2;
+        const centerY = (top + bottom) / 2;
+        const col = (slot - 1) % 3;
+        const row = Math.floor((slot - 1) / 3);
+        setNodes((prev) => {
+            const next = prev.map((node) => {
+                if (!ids.has(node.id) || node.type === CanvasNodeType.Group) return node;
+                const x = col === 0 ? left : col === 1 ? centerX - node.width / 2 : right - node.width;
+                const y = row === 0 ? top : row === 1 ? centerY - node.height / 2 : bottom - node.height;
+                return { ...node, position: { x, y } };
+            });
+            nodesRef.current = next;
+            return next;
+        });
+        setAlignPanelOpen(false);
+    }, []);
+
     const selectOnlyNode = useCallback((nodeId: string) => {
         const next = new Set([nodeId]);
         if (setsEqual(selectedNodeIdsRef.current, next)) return;
@@ -5956,6 +6006,14 @@ function LeaferCanvasPage() {
         const node = dialogNodeId ? mountedNodeItems.find((item) => item.id === dialogNodeId) || null : null;
         return node?.metadata?.canvasTool === "director" ? null : node;
     }, [dialogNodeId, mountedNodeItems]);
+    // 聚焦模式（对齐 SHUO Canvas）：打开工具型工作台（导演台/脚本工作室/剪辑/360/ComfyUI）时虚化其余节点，聚焦目标
+    const focusNodeId = useMemo(() => {
+        const tool = dialogNode?.metadata?.canvasTool;
+        if (tool && tool !== "director") return dialogNode?.id ?? null;
+        if (directorStudioNodeId) return directorStudioNodeId;
+        if (scriptStudioNodeId) return scriptStudioNodeId;
+        return null;
+    }, [dialogNode, directorStudioNodeId, scriptStudioNodeId]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
     const composerWidth = dialogNode
         ? Math.min(
@@ -6061,7 +6119,7 @@ function LeaferCanvasPage() {
 
     return (
         <main
-            className="creative-os-shell relative flex h-full min-h-0 overflow-hidden"
+            className={`creative-os-shell relative flex h-full min-h-0 overflow-hidden ${focusNodeId ? "is-focus-mode" : ""}`}
             style={
                 {
                     background: theme.canvas.background,
@@ -6138,6 +6196,18 @@ function LeaferCanvasPage() {
                 ) : null}
 
                 <CanvasColorGroupBar nodes={nodes} onLocateNode={locateNode} />
+
+                {selectedNodeIds.size >= 2 && !isNodeDragging && !dialogNode ? (
+                    <CanvasMultiSelectToolbar
+                        theme={theme}
+                        count={selectedNodeIds.size}
+                        alignOpen={alignPanelOpen}
+                        onToggleAlign={() => setAlignPanelOpen((value) => !value)}
+                        onAlignSlot={alignSelectedNodes}
+                        onRun={runSelectedNodes}
+                        onDelete={() => deleteNodes(selectedNodeIds)}
+                    />
+                ) : null}
                 <CanvasSearchPanel open={searchOpen} nodes={nodes} onClose={() => setSearchOpen(false)} onLocateNode={locateNode} />
 
                 <LeaferCanvas
@@ -6257,6 +6327,7 @@ function LeaferCanvasPage() {
                                 onViewImage={handleViewNodeImage}
                                 onGroupAction={(node, action) => handleGroupAction(node, action)}
                                 isGroupDropTarget={dropTargetGroupId === node.id}
+                                isFocusNode={focusNodeId === node.id}
                                 onContextMenu={handleNodeContextMenu}
                             />
                         );

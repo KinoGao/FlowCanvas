@@ -112,6 +112,8 @@ export type CanvasNodeProps = {
     onClickCreate?: (node: CanvasNodeData) => void;
     /** 拖拽节点悬停在本组上时高亮（拖入归组 drop target，对齐上游） */
     isGroupDropTarget?: boolean;
+    /** 聚焦模式目标节点（工具型工作台打开时其余节点虚化） */
+    isFocusNode?: boolean;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -215,6 +217,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onGroupAction,
     onClickCreate,
     isGroupDropTarget = false,
+    isFocusNode = false,
     onContextMenu,
 }: CanvasNodeProps) {
     const scaleRef = useCanvasScaleRef();
@@ -482,7 +485,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-empty-media={isEmptyMediaNode ? "true" : undefined}
             data-node-batch-root={isBatchRoot ? "true" : undefined}
             data-node-batch-child={isBatchChild ? "true" : undefined}
-            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"}`}
+            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"} ${isFocusNode ? "is-focus-node" : ""}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
