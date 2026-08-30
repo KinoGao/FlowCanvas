@@ -1,6 +1,6 @@
 "use client";
 
-import { AlignCenterVertical, Download, RefreshCw, Trash2 } from "lucide-react";
+import { AlignCenterVertical, Download, Play, RefreshCw, Trash2 } from "lucide-react";
 
 import type { canvasThemes } from "@/lib/canvas-theme";
 
@@ -8,20 +8,24 @@ import type { canvasThemes } from "@/lib/canvas-theme";
 export function CanvasMultiSelectToolbar({
     theme,
     count,
+    canSync,
     alignOpen,
     onToggleAlign,
     onAlignSlot,
     onRun,
     onDownload,
+    onSyncPreview,
     onDelete,
 }: {
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     count: number;
+    canSync: boolean;
     alignOpen: boolean;
     onToggleAlign: () => void;
     onAlignSlot: (slot: number) => void;
     onRun: () => void;
     onDownload: () => void;
+    onSyncPreview: () => void;
     onDelete: () => void;
 }) {
     const barStyle = { background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text, boxShadow: theme.ui.shadow };
@@ -39,6 +43,12 @@ export function CanvasMultiSelectToolbar({
                     <Download className="size-3.5" />
                     下载选中
                 </button>
+                {canSync ? (
+                    <button type="button" className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs transition hover:bg-white/10" onClick={onSyncPreview}>
+                        <Play className="size-3.5" />
+                        同步预览
+                    </button>
+                ) : null}
                 <button type="button" className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs transition hover:bg-white/10 ${alignOpen ? "bg-white/10" : ""}`} onClick={onToggleAlign}>
                     <AlignCenterVertical className="size-3.5" />
                     对齐

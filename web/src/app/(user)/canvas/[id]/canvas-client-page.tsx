@@ -52,6 +52,7 @@ import { CanvasNode, type CanvasNodeProps } from "../components/canvas-node";
 import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { CanvasAudioToolModal } from "../components/canvas-audio-tool-modal";
+import { CanvasVideoSyncPreviewModal, type SyncVideoSource } from "../components/canvas-video-sync-preview-modal";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasMiniMap } from "../components/canvas-minimap";
@@ -847,6 +848,7 @@ function LeaferCanvasPage() {
     const [audioToolNodeId, setAudioToolNodeId] = useState<string | null>(null);
     const [audioToolSrc, setAudioToolSrc] = useState("");
     const [audioToolBusy, setAudioToolBusy] = useState(false);
+    const [syncVideoSources, setSyncVideoSources] = useState<SyncVideoSource[]>([]);
     const [trimVideoNodeId, setTrimVideoNodeId] = useState<string | null>(null);
     const [trimVideoSrc, setTrimVideoSrc] = useState("");
     const [compositionNodeId, setCompositionNodeId] = useState<string | null>(null);
@@ -1483,6 +1485,11 @@ function LeaferCanvasPage() {
     }, []);
 
     const nodeById = useMemo(() => buildNodeById(nodes), [nodes]);
+    const selectedSyncVideos = useMemo(
+        () => nodes.filter((node) => selectedNodeIds.has(node.id) && node.type === CanvasNodeType.Video && Boolean(node.metadata?.content || node.metadata?.storageKey)),
+        [nodes, selectedNodeIds],
+    );
+    const canSyncVideos = selectedSyncVideos.length >= 2;
     const batchVisibilityIndex = useMemo(() => buildBatchVisibilityIndex(nodes, nodeById, collapsingBatchIds), [collapsingBatchIds, nodeById, nodes]);
     const hiddenNodeIds = useMemo(() => new Set(nodes.filter((node) => node.metadata?.hidden).map((node) => node.id)), [nodes]);
     const connectionAdjacency = useMemo(() => buildConnectionAdjacency(connections), [connections]);
@@ -3376,6 +3383,23 @@ function LeaferCanvasPage() {
             message.error({ content: error instanceof Error ? error.message : "关键帧提取失败", key: loadingKey });
         }
     }, [createCanvasConnection, createCanvasNode, message]);
+
+    const openSyncVideoPreview = useCallback(async () => {
+        const sources: SyncVideoSource[] = [];
+        for (const node of selectedSyncVideos) {
+            try {
+                const src = await resolveNodeContent(node);
+                if (src) sources.push({ id: node.id, title: node.title, src });
+            } catch {
+                // 单视频加载失败不阻塞其他视频。
+            }
+        }
+        if (sources.length < 2) {
+            message.warning("至少需要两个可播放的视频节点");
+            return;
+        }
+        setSyncVideoSources(sources);
+    }, [message, selectedSyncVideos]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -6671,6 +6695,8 @@ function LeaferCanvasPage() {
                         onAlignSlot={alignSelectedNodes}
                         onRun={runSelectedNodes}
                         onDownload={() => void downloadSelectedNodes()}
+                        canSync={canSyncVideos}
+                        onSyncPreview={() => void openSyncVideoPreview()}
                         onDelete={() => deleteNodes(selectedNodeIds)}
                     />
                 ) : null}
@@ -6965,6 +6991,13 @@ function LeaferCanvasPage() {
                             setAudioToolSrc("");
                         }}
                         onConfirm={(options) => void confirmAudioTool(options)}
+                    />
+                ) : null}
+                {syncVideoSources.length ? (
+                    <CanvasVideoSyncPreviewModal
+                        open={Boolean(syncVideoSources.length)}
+                        sources={syncVideoSources}
+                        onClose={() => setSyncVideoSources([])}
                     />
                 ) : null}
 
