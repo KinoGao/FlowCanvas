@@ -26,7 +26,7 @@ export function CanvasNodeWebPreviewContent({ node, theme, onContentChange }: Ca
         onContentChange(node.id, JSON.stringify(next));
     };
 
-    const url = data.url.trim();
+    const url = draftUrl.trim();
     const safeUrl = /^https?:\/\//i.test(url) ? url : url ? `https://${url}` : "";
     const openExternal = () => {
         if (safeUrl) window.open(safeUrl, "_blank", "noopener,noreferrer");
