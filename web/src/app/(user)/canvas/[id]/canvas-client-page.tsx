@@ -51,6 +51,7 @@ import { CanvasSearchPanel } from "../components/canvas-search-panel";
 import { CanvasNode, type CanvasNodeProps } from "../components/canvas-node";
 import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-panel";
 import { CanvasToolbar } from "../components/canvas-toolbar";
+import { CanvasAudioToolModal } from "../components/canvas-audio-tool-modal";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasMiniMap } from "../components/canvas-minimap";
@@ -83,6 +84,7 @@ import {
     type VideoTrimRange,
 } from "../utils/canvas-video-tools";
 import { composeVideoTimeline, createTimelineClip, withClipDuration, type TimelineClip } from "../utils/canvas-video-timeline";
+import { editAudioFile, type AudioEditOptions } from "../utils/canvas-audio-tools";
 import type { CompositionSource } from "../components/canvas-video-composition-dialog";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
@@ -841,6 +843,9 @@ function LeaferCanvasPage() {
     const [outpaintNodeId, setOutpaintNodeId] = useState<string | null>(null);
     const [lightingNodeId, setLightingNodeId] = useState<string | null>(null);
     const [imageToolDialogUrl, setImageToolDialogUrl] = useState("");
+    const [audioToolNodeId, setAudioToolNodeId] = useState<string | null>(null);
+    const [audioToolSrc, setAudioToolSrc] = useState("");
+    const [audioToolBusy, setAudioToolBusy] = useState(false);
     const [trimVideoNodeId, setTrimVideoNodeId] = useState<string | null>(null);
     const [trimVideoSrc, setTrimVideoSrc] = useState("");
     const [compositionNodeId, setCompositionNodeId] = useState<string | null>(null);
@@ -3187,6 +3192,59 @@ function LeaferCanvasPage() {
             message.error("批量下载失败，请稍后重试");
         }
     }, [message]);
+
+    const openAudioTool = useCallback(async (node: CanvasNodeData) => {
+        if (node.type !== CanvasNodeType.Audio || !node.metadata?.content) {
+            message.warning("请先上传或生成音频");
+            return;
+        }
+        const src = await resolveNodeContent(node);
+        if (!src) {
+            message.error("音频加载失败，请稍后重试");
+            return;
+        }
+        setAudioToolSrc(src);
+        setAudioToolNodeId(node.id);
+    }, [message]);
+
+    const confirmAudioTool = useCallback(async (options: AudioEditOptions) => {
+        const source = audioToolNodeId ? nodeByIdRef.current.get(audioToolNodeId) : null;
+        if (!source || !audioToolSrc) return;
+        setAudioToolBusy(true);
+        try {
+            const blob = await editAudioFile(audioToolSrc, options);
+            const uploaded = await uploadMediaFile(blob, "audio");
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+            const position = {
+                x: source.position.x + source.width + 96,
+                y: source.position.y + source.height / 2 - spec.height / 2,
+            };
+            const node: CanvasNodeData = {
+                ...createCanvasNode(CanvasNodeType.Audio, {
+                    x: position.x + spec.width / 2,
+                    y: position.y + spec.height / 2,
+                }, audioMetadata(uploaded)),
+                position,
+                width: spec.width,
+                height: spec.height,
+            };
+            const nextNodes = [...nodesRef.current, node];
+            const nextConnections = [...connectionsRef.current, createCanvasConnection(source.id, node.id)];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([node.id]));
+            setSelectedConnectionId(null);
+            setAudioToolNodeId(null);
+            setAudioToolSrc("");
+            message.success("已生成裁剪/变速音频节点");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "音频处理失败");
+        } finally {
+            setAudioToolBusy(false);
+        }
+    }, [audioToolNodeId, audioToolSrc, createCanvasConnection, createCanvasNode, message]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -6701,6 +6759,19 @@ function LeaferCanvasPage() {
 
                 {assetPreviewNode ? <AssetPreviewModal node={assetPreviewNode} theme={theme} onClose={() => setAssetPreviewNode(null)} /> : null}
 
+                {audioToolSrc ? (
+                    <CanvasAudioToolModal
+                        open={Boolean(audioToolNodeId)}
+                        src={audioToolSrc}
+                        busy={audioToolBusy}
+                        onClose={() => {
+                            setAudioToolNodeId(null);
+                            setAudioToolSrc("");
+                        }}
+                        onConfirm={(options) => void confirmAudioTool(options)}
+                    />
+                ) : null}
+
                 {pendingConnectionCreate && pendingConnectionCreatePosition ? (
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
                 ) : null}
@@ -6719,6 +6790,7 @@ function LeaferCanvasPage() {
                         onUpload={(node) => handleUploadRequest(node.id)}
                         onMarkPanorama360={(node) => markNodeAsPanorama360(node.id)}
                         onDownload={downloadNodeImage}
+                        onEditAudio={(node) => void openAudioTool(node)}
                         onSaveAsset={(node) => void saveNodeAsset(node)}
                         onMaskEdit={(node) => void openImageToolDialog(node, setMaskEditNodeId)}
                         onCrop={(node) => void openImageToolDialog(node, setCropNodeId)}

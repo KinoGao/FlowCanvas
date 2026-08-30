@@ -27,6 +27,7 @@ type CanvasNodeHoverToolbarProps = {
     onUpload: (node: CanvasNodeData) => void;
     onMarkPanorama360: (node: CanvasNodeData) => void;
     onDownload: (node: CanvasNodeData) => void;
+    onEditAudio: (node: CanvasNodeData) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
     onCrop: (node: CanvasNodeData) => void;
@@ -75,6 +76,7 @@ export function CanvasNodeHoverToolbar({
     onUpload,
     onMarkPanorama360,
     onDownload,
+    onEditAudio,
     onSaveAsset,
     onMaskEdit,
     onCrop,
@@ -177,6 +179,7 @@ export function CanvasNodeHoverToolbar({
             : []),
         ...(hasImage || hasVideo || (isText && !isScriptTool) ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
+        ...(hasAudio ? [{ id: "editAudio", title: "裁剪 / 变速音频", label: "音频编辑", icon: <Scissors className="size-4" />, onClick: () => onEditAudio(node) }] : []),
         ...(canOpenDialog && !isScriptTool ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...((isText || isAnnotation) && !isScriptTool ? [{ id: "editText", title: "编辑内容", label: "编辑", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText || isScriptTool ? [{ id: "quickStoryboard", title: "快捷分镜", label: "快捷分镜", icon: <LayoutGrid className="size-4" />, onClick: () => { onKeep(currentNode.id); setStoryboardMenuOpen((value) => !value); } }] : []),
