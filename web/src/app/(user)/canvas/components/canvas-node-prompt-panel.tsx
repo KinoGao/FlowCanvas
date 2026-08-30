@@ -14,6 +14,7 @@ import { CanvasPromptLibrary } from "./canvas-prompt-library";
 import { CanvasReferenceStrip } from "./canvas-reference-strip";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasResourceMentionTextarea, normalizeAdjacentMentionLabels } from "./canvas-resource-mention-textarea";
+import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasGenerationRun, type CanvasNodeData } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { CanvasConfirmCard } from "./canvas-confirm-card";
@@ -87,7 +88,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [comfyWorkflows, setComfyWorkflows] = useState<ComfyWorkflow[]>([]);
     const [confirmMode, setConfirmMode] = useState<"auto" | "manual">("auto");
     const [pendingConfirmation, setPendingConfirmation] = useState<GenerationConfirmation | null>(null);
@@ -350,8 +350,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 />
             ) : (
                 <div className="relative">
-                    <CanvasResourceMentionTextarea
-                        ref={textareaRef}
+                    <CanvasPromptChipInput
                         value={prompt}
                         references={mentionReferences}
                         placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
@@ -506,15 +505,13 @@ function ImageComposer({
             />
 
             <div className="relative">
-                <CanvasResourceMentionTextarea
+                <CanvasPromptChipInput
                     value={prompt}
                     references={references}
                     mentionRequestNonce={mentionRequestNonce}
                     onChange={onPromptChange}
                     onSubmit={onGenerate}
-                    data-canvas-no-zoom
-                    containerClassName={expanded ? "min-h-[220px]" : "min-h-[112px]"}
-                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35`}
+                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none`}
                     style={{ color: theme.node.text }}
                     placeholder={hasImageContent ? "描述你想如何修改这张图片，输入 @ 可引用画布素材" : "描述画面主体、环境、构图、光线与风格，输入 @ 可引用画布素材"}
                 />
@@ -716,15 +713,13 @@ function VideoComposer({
             />
 
             <div className="relative">
-                <CanvasResourceMentionTextarea
+                <CanvasPromptChipInput
                     value={prompt}
                     references={references}
                     mentionRequestNonce={mentionRequestNonce}
                     onChange={onPromptChange}
                     onSubmit={onGenerate}
-                    data-canvas-no-zoom
-                    containerClassName={expanded ? "min-h-[220px]" : "min-h-[112px]"}
-                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none placeholder:opacity-35`}
+                    className={`${expanded ? "h-[220px]" : "h-[112px]"} w-full resize-none border-0 bg-transparent px-1 pb-4 pr-9 pt-1 text-[14px] leading-6 outline-none`}
                     style={{ color: theme.node.text }}
                     placeholder="描述视频主体、动作、环境、镜头与声音，输入 @ 可引用画布素材"
                 />
