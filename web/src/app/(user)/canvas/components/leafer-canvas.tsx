@@ -45,6 +45,7 @@ type LeaferCanvasProps = {
     onConnectEnd?: (canvasPos?: { x: number; y: number }) => void;
     onConnect?: (fromNodeId: string, toNodeId: string) => void;
     onEdgeClick?: (connectionId: string) => void;
+    onEdgeDelete?: (connectionId: string) => void;
     onEdgeContextMenu?: (connectionId: string, clientX: number, clientY: number) => void;
     onDrop?: (files: FileList, canvasPos: { x: number; y: number }) => void;
     onSelectionBox?: (nodeIds: string[], mode: 'replace' | 'add' | 'toggle') => void;
@@ -106,6 +107,7 @@ export function LeaferCanvas({
     onConnectEnd,
     onConnect,
     onEdgeClick,
+    onEdgeDelete,
     onEdgeContextMenu,
     onDrop,
     onSelectionBox,
@@ -156,6 +158,8 @@ export function LeaferCanvas({
     const readyFrameRef = useRef<number | null>(null);
     const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyReportedRef = useRef(false);
+    const [hoveredConnectionId, setHoveredConnectionId] = useState<string | null>(null);
+    const hoveredConnectionHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onReadyRef = useRef(onReady);
     onReadyRef.current = onReady;
     const viewportPresentationFrameRef = useRef<number | null>(null);
@@ -200,8 +204,8 @@ export function LeaferCanvas({
     const isSpacePressedRef = useRef(isSpacePressed); isSpacePressedRef.current = isSpacePressed;
     const connectStartScreenRef = useRef<{ x: number; y: number } | null>(null);
     const lastNodeDoubleTapAtRef = useRef(0);
-    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick });
-    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick };
+    const callbacksRef = useRef({ onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeDelete, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick });
+    callbacksRef.current = { onViewportChange, onViewportPresentation, onNodePointerDown, onNodeTap, onNodeDragStart, resolveNodeMove, onNodesTransform, onNodesTransformEnd, onNodeHoverChange, onNodeContextMenu, onCanvasMouseDown, onCanvasDeselect, onConnectStart, onConnectEnd, onConnect, onEdgeClick, onEdgeDelete, onEdgeContextMenu, onDrop, onSelectionBox, onConnectionTargetChange, onContextMenu, onCanvasDoubleClick };
 
     // Drag state
     const dragRef = useRef<{
@@ -367,6 +371,22 @@ export function LeaferCanvas({
         });
         if (flowCount) ensureConnectionFlowAnimation();
     }, [ensureConnectionFlowAnimation, theme]);
+
+    const showConnectionDelete = useCallback((connectionId: string) => {
+        if (hoveredConnectionHideTimerRef.current) {
+            clearTimeout(hoveredConnectionHideTimerRef.current);
+            hoveredConnectionHideTimerRef.current = null;
+        }
+        setHoveredConnectionId(connectionId);
+    }, []);
+
+    const scheduleHideConnectionDelete = useCallback((connectionId: string) => {
+        if (hoveredConnectionHideTimerRef.current) clearTimeout(hoveredConnectionHideTimerRef.current);
+        hoveredConnectionHideTimerRef.current = setTimeout(() => {
+            hoveredConnectionHideTimerRef.current = null;
+            setHoveredConnectionId((current) => (current === connectionId ? null : current));
+        }, 160);
+    }, []);
 
     const getNodeElement = useCallback((nodeId: string) => {
         const cached = nodeElementMapRef.current.get(nodeId);
@@ -1141,12 +1161,14 @@ export function LeaferCanvas({
                     if (!current) return;
                     current.hovered = true;
                     updateConnectionVisualStyle(connection.id);
+                    showConnectionDelete(connection.id);
                 });
                 hit.on(LUI.PointerEvent.LEAVE, () => {
                     const current = connectionVisualMapRef.current.get(connection.id);
                     if (!current) return;
                     current.hovered = false;
                     updateConnectionVisualStyle(connection.id);
+                    scheduleHideConnectionDelete(connection.id);
                 });
                 hit.on(LUI.PointerEvent.MENU, (event: LUI.PointerEvent) => {
                     if (suppressContextMenuRef.current) {
@@ -1168,7 +1190,11 @@ export function LeaferCanvas({
             }
             updateConnectionVisualStyle(connection.id);
         });
-    }, [connectionStyle, connections, containerRef, nodes, relatedConnectionIds, selectedConnectionId, updateConnectionVisualStyle]);
+    }, [connectionStyle, connections, containerRef, nodes, relatedConnectionIds, scheduleHideConnectionDelete, selectedConnectionId, showConnectionDelete, updateConnectionVisualStyle]);
+
+    useEffect(() => () => {
+        if (hoveredConnectionHideTimerRef.current) clearTimeout(hoveredConnectionHideTimerRef.current);
+    }, []);
 
     useEffect(() => {
         const editor = editorRef.current;
@@ -1634,6 +1660,16 @@ export function LeaferCanvas({
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
     const cursor = isSpacePressed ? "grab" : "default";
+    const hoveredConnectionDeletePosition = useMemo(() => {
+        if (!hoveredConnectionId) return null;
+        const connection = connections.find((item) => item.id === hoveredConnectionId);
+        if (!connection) return null;
+        const points = getConnectionPoints(connection, new Map(nodes.map((node) => [node.id, node])));
+        if (!points) return null;
+        const from = canvasToScreen(points.from.x, points.from.y, viewport);
+        const to = canvasToScreen(points.to.x, points.to.y, viewport);
+        return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    }, [connections, hoveredConnectionId, nodes, viewport]);
 
     return (
         <div
@@ -1658,6 +1694,40 @@ export function LeaferCanvas({
             <div data-leafer-editor-layer className="absolute inset-0">
                 <div ref={leaferContainerRef} className="h-full w-full" />
             </div>
+            {hoveredConnectionDeletePosition ? (
+                <button
+                    type="button"
+                    data-canvas-no-zoom
+                    aria-label="删除连线"
+                    className="pointer-events-auto absolute z-[60] grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md border text-sm leading-none shadow-md backdrop-blur"
+                    style={{
+                        left: hoveredConnectionDeletePosition.x,
+                        top: hoveredConnectionDeletePosition.y,
+                        background: theme.ui.materialElevated,
+                        borderColor: theme.ui.hairline,
+                        color: theme.ui.danger,
+                        boxShadow: theme.ui.shadow,
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerEnter={() => {
+                        if (hoveredConnectionHideTimerRef.current) {
+                            clearTimeout(hoveredConnectionHideTimerRef.current);
+                            hoveredConnectionHideTimerRef.current = null;
+                        }
+                    }}
+                    onPointerLeave={() => hoveredConnectionId && scheduleHideConnectionDelete(hoveredConnectionId)}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        const connectionId = hoveredConnectionId;
+                        if (connectionId) {
+                            callbacksRef.current.onEdgeDelete?.(connectionId);
+                            setHoveredConnectionId(null);
+                        }
+                    }}
+                >
+                    ✂
+                </button>
+            ) : null}
             <div ref={viewportElementRef} style={viewportStyle}>
                 <CanvasScaleCtx.Provider value={scaleRef}>
                     {children}

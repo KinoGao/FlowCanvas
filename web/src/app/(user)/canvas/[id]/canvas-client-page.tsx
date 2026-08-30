@@ -6383,6 +6383,7 @@ function LeaferCanvasPage() {
                     onEdgeClick={(connectionId) => {
                         if (!referencePickerNodeId) selectConnection(connectionId);
                     }}
+                    onEdgeDelete={deleteConnection}
                     onDrop={(files, canvasPos) => {
                         handleDropFiles(files, canvasPos);
                     }}
