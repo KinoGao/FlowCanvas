@@ -43,6 +43,7 @@ type CanvasNodeHoverToolbarProps = {
     onAnalyzeVideo: (node: CanvasNodeData) => void;
     onTrimVideo: (node: CanvasNodeData) => void;
     onReverseVideo: (node: CanvasNodeData) => void;
+    onExtractVideoAudio: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onQuickStoryboard: (node: CanvasNodeData, command: CanvasSlashCommand) => void;
@@ -93,6 +94,7 @@ export function CanvasNodeHoverToolbar({
     onAnalyzeVideo,
     onTrimVideo,
     onReverseVideo,
+    onExtractVideoAudio,
     onRetry,
     onToggleFreeResize,
     onQuickStoryboard,
@@ -194,6 +196,7 @@ export function CanvasNodeHoverToolbar({
         ...(hasVideo ? [{ id: "analyzeVideo", title: "解析视频为分镜表（抽帧 + 识图模型）", label: "解析", icon: <ScanSearch className="size-4" />, onClick: () => onAnalyzeVideo(currentNode) }] : []),
         ...(hasVideo ? [{ id: "trimVideo", title: "剪辑视频（设置入点/出点导出片段）", label: "剪辑", icon: <Scissors className="size-4" />, onClick: () => onTrimVideo(currentNode) }] : []),
         ...(hasVideo ? [{ id: "reverseVideo", title: "本地倒放视频（无声导出）", label: "倒放", icon: <RefreshCw className="size-4" />, onClick: () => onReverseVideo(currentNode) }] : []),
+        ...(hasVideo ? [{ id: "extractAudio", title: "提取视频音轨为音频节点", label: "提取音轨", icon: <Music2 className="size-4" />, onClick: () => onExtractVideoAudio(currentNode) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];

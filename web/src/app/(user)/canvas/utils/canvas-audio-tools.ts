@@ -53,13 +53,27 @@ export async function editAudioFile(src: string, options: AudioEditOptions): Pro
         source.connect(offline.destination);
         source.start(0, range.start, range.end - range.start);
         const rendered = await offline.startRendering();
-        return encodeWav(rendered);
+        return audioBufferToWav(rendered);
     } finally {
         void context.close();
     }
 }
 
-function encodeWav(buffer: AudioBuffer): Blob {
+/** 从视频/音频媒体文件解码首个可读音轨并导出 WAV；本地处理，不调用外部模型。 */
+export async function extractAudioFile(src: string): Promise<Blob> {
+    if (typeof AudioContext === "undefined") throw new Error("当前浏览器不支持音频提取");
+    const context = new AudioContext();
+    try {
+        const response = await fetch(src);
+        if (!response.ok) throw new Error("媒体读取失败");
+        const buffer = await context.decodeAudioData(await response.arrayBuffer());
+        return audioBufferToWav(buffer);
+    } finally {
+        void context.close();
+    }
+}
+
+export function audioBufferToWav(buffer: AudioBuffer): Blob {
     const channels = Math.min(2, Math.max(1, buffer.numberOfChannels));
     const sampleRate = buffer.sampleRate;
     const frames = buffer.length;
