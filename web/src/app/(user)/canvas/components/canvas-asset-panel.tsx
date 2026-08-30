@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type UIEvent } from "react";
 import { App, Spin } from "antd";
-import { Check, ChevronRight, Clapperboard, Download, Eye, EyeOff, FileText, Image as ImageIcon, Layers3, ListChecks, Maximize2, Music2, PenTool, Search, SlidersHorizontal, StickyNote, Type, Video, Workflow } from "lucide-react";
+import { Check, ChevronRight, Clapperboard, Download, Eye, EyeOff, FileText, Globe, Image as ImageIcon, Layers3, ListChecks, Maximize2, Music2, PenTool, Search, SlidersHorizontal, StickyNote, Type, Video, Workflow } from "lucide-react";
 
 import type { canvasThemes, CanvasTheme } from "@/lib/canvas-theme";
 import { peekCachedImageUrl } from "@/services/image-storage";
@@ -17,6 +17,7 @@ const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Text]: "文本",
     [CanvasNodeType.Annotation]: "注释",
     [CanvasNodeType.Whiteboard]: "白板",
+    [CanvasNodeType.WebPreview]: "网页预览",
     [CanvasNodeType.Image]: "图片",
     [CanvasNodeType.Video]: "视频",
     [CanvasNodeType.Audio]: "音频",
@@ -27,7 +28,7 @@ const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Config]: "生成配置",
 };
 
-const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Annotation, CanvasNodeType.Whiteboard, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
+const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Annotation, CanvasNodeType.Whiteboard, CanvasNodeType.WebPreview, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
 
 function nodeTypeIcon(node: CanvasNodeData) {
     switch (node.type) {
@@ -37,6 +38,8 @@ function nodeTypeIcon(node: CanvasNodeData) {
             return <StickyNote className="size-4" />;
         case CanvasNodeType.Whiteboard:
             return <PenTool className="size-4" />;
+        case CanvasNodeType.WebPreview:
+            return <Globe className="size-4" />;
         case CanvasNodeType.Image:
             return <ImageIcon className="size-4" />;
         case CanvasNodeType.Video:

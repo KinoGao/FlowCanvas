@@ -38,6 +38,7 @@ export enum CanvasNodeType {
     Group = "group",
     Annotation = "annotation",
     Whiteboard = "whiteboard",
+    WebPreview = "webpreview",
 }
 
 export type CanvasWhiteboardStroke = {
@@ -55,6 +56,14 @@ export type CanvasWhiteboardStroke = {
 export type CanvasWhiteboardData = {
     background: string;
     items: CanvasWhiteboardStroke[];
+};
+
+export type CanvasWebPreviewData = {
+    url: string;
+    mode: "preview" | "reference";
+    title: string;
+    summary: string;
+    image: string;
 };
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -256,6 +265,10 @@ export type CanvasWhiteboardMetadata = {
     whiteboardData?: CanvasWhiteboardData;
 };
 
+export type CanvasWebPreviewMetadata = {
+    webPreviewData?: CanvasWebPreviewData;
+};
+
 export type CanvasMediaMetadata = {
     naturalWidth?: number;
     naturalHeight?: number;
@@ -271,7 +284,7 @@ export type CanvasAgentRunMetadata = {
     agentTaskId?: string;
 };
 
-export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasWhiteboardMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
+export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasWhiteboardMetadata & CanvasWebPreviewMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
 
 export type CanvasNodeData = {
     id: string;

@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, PenTool, Plus, Search, Share2, Sparkles, StickyNote, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Globe, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, PenTool, Plus, Search, Share2, Sparkles, StickyNote, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -4973,6 +4973,9 @@ function LeaferCanvasPage() {
                 case "whiteboard":
                     createNode(CanvasNodeType.Whiteboard, options);
                     break;
+                case "webpreview":
+                    createNode(CanvasNodeType.WebPreview, options);
+                    break;
                 case "comfyui":
                     createNode(CanvasNodeType.ComfyUI, options);
                     break;
@@ -5846,7 +5849,8 @@ function LeaferCanvasPage() {
             const isStudioKind = isCanvasScriptNode(studioNode) || studioNode?.metadata?.canvasTool === "director";
             const isAnnotation = studioNode?.type === CanvasNodeType.Annotation;
             const isWhiteboard = studioNode?.type === CanvasNodeType.Whiteboard;
-            if (!isStudioKind && !isAnnotation && !isWhiteboard) setDialogNodeId(nodeId);
+            const isWebPreview = studioNode?.type === CanvasNodeType.WebPreview;
+            if (!isStudioKind && !isAnnotation && !isWhiteboard && !isWebPreview) setDialogNodeId(nodeId);
         },
         [selectOnlyNode],
     );
@@ -7529,6 +7533,7 @@ function nodeIcon(type: CanvasNodeType) {
     if (type === CanvasNodeType.Text) return <FileText className="size-4" />;
     if (type === CanvasNodeType.Annotation) return <StickyNote className="size-4" />;
     if (type === CanvasNodeType.Whiteboard) return <PenTool className="size-4" />;
+    if (type === CanvasNodeType.WebPreview) return <Globe className="size-4" />;
     if (type === CanvasNodeType.Image) return <ImageIcon className="size-4" />;
     if (type === CanvasNodeType.Video) return <Video className="size-4" />;
     if (type === CanvasNodeType.Audio) return <Music2 className="size-4" />;

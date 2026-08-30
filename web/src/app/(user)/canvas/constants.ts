@@ -21,6 +21,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Group]: { width: 360, height: 260, title: "分组" },
     [CanvasNodeType.Annotation]: { width: 320, height: 200, title: "注释" },
     [CanvasNodeType.Whiteboard]: { width: 640, height: 480, title: "白板" },
+    [CanvasNodeType.WebPreview]: { width: 560, height: 380, title: "网页预览" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export function getConfigNodeHeight(mode?: CanvasGenerationMode) {
@@ -72,6 +73,10 @@ export const NODE_SPECS = {
     [CanvasNodeType.Whiteboard]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Whiteboard],
         metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Whiteboard),
+    },
+    [CanvasNodeType.WebPreview]: {
+        ...NODE_DEFAULT_SIZE[CanvasNodeType.WebPreview],
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.WebPreview),
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 
