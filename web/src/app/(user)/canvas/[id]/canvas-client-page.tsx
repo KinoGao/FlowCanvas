@@ -85,6 +85,7 @@ import {
 } from "../utils/canvas-video-tools";
 import { composeVideoTimeline, createTimelineClip, withClipDuration, type TimelineClip } from "../utils/canvas-video-timeline";
 import { editAudioFile, type AudioEditOptions } from "../utils/canvas-audio-tools";
+import { reverseVideoFile } from "../utils/canvas-video-reverse";
 import type { CompositionSource } from "../components/canvas-video-composition-dialog";
 import { buildCutoutPrompt, buildLightingPrompt, buildOutpaintPrompt, buildPanorama720Prompt, type CanvasLightingSettings } from "../utils/canvas-image-tools";
 import {
@@ -3245,6 +3246,46 @@ function LeaferCanvasPage() {
             setAudioToolBusy(false);
         }
     }, [audioToolNodeId, audioToolSrc, createCanvasConnection, createCanvasNode, message]);
+
+    const reverseVideoNode = useCallback(async (node: CanvasNodeData) => {
+        if (node.type !== CanvasNodeType.Video || !node.metadata?.content) {
+            message.warning("请先上传或生成视频");
+            return;
+        }
+        const loadingKey = `reverse-video-${node.id}`;
+        message.loading({ content: "正在生成本地倒放视频…", key: loadingKey, duration: 0 });
+        try {
+            const src = await resolveNodeContent(node);
+            const blob = await reverseVideoFile(src);
+            const uploaded = await uploadMediaFile(blob, "video");
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
+            const position = {
+                x: node.position.x + node.width + 96,
+                y: node.position.y + node.height / 2 - spec.height / 2,
+            };
+            const child: CanvasNodeData = {
+                ...createCanvasNode(CanvasNodeType.Video, {
+                    x: position.x + spec.width / 2,
+                    y: position.y + spec.height / 2,
+                }, { ...videoMetadata(uploaded), prompt: "本地倒放视频", status: NODE_STATUS_SUCCESS }),
+                position,
+                width: spec.width,
+                height: spec.height,
+            };
+            const nextNodes = [...nodesRef.current, child];
+            const nextConnections = [...connectionsRef.current, createCanvasConnection(node.id, child.id)];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([child.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(child.id);
+            message.success({ content: "倒放视频已生成", key: loadingKey });
+        } catch (error) {
+            message.error({ content: error instanceof Error ? error.message : "视频倒放失败", key: loadingKey });
+        }
+    }, [createCanvasConnection, createCanvasNode, message]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -6870,6 +6911,7 @@ function LeaferCanvasPage() {
                         onReversePrompt={createImageReversePromptNodes}
                         onAnalyzeVideo={(node) => void analyzeVideoNode(node)}
                         onTrimVideo={(node) => void openVideoTrim(node)}
+                        onReverseVideo={(node) => void reverseVideoNode(node)}
                         onRetry={handleRetryNodeAction}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                         onQuickStoryboard={(node, command) => createScriptGridStoryboard(node, command)}
