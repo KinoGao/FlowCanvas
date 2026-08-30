@@ -698,6 +698,7 @@ function NodeContent(props: NodeContentRendererProps): React.ReactElement {
     if (props.node.metadata?.canvasTool === "director") return <DirectorContent {...props} />;
     if (isCanvasScriptNode(props.node)) return <ScriptNodeContent {...props} />;
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
+    if (props.node.type === CanvasNodeType.Image && !props.isBatchRoot && !props.node.metadata?.canvasTool && props.renderNodeContent) return <>{props.renderNodeContent(props.node)}</>;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
