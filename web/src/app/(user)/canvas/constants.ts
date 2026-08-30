@@ -10,7 +10,7 @@ type CanvasNodeSpec = {
 };
 
 export const NODE_DEFAULT_SIZE = {
-    [CanvasNodeType.Image]: { width: 500, height: 420, title: "New Generation" },
+    [CanvasNodeType.Image]: { width: 500, height: 460, title: "New Generation" },
     [CanvasNodeType.Text]: { width: 384, height: 216, title: "Note" },
     [CanvasNodeType.Script]: { width: 384, height: 216, title: "脚本节点" },
     [CanvasNodeType.Clip]: { width: 220, height: 132, title: "智能剪辑" },

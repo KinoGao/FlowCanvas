@@ -6049,22 +6049,24 @@ function LeaferCanvasPage() {
     const renderCanvasGenerationNodeContent = useCallback(
         (contentNode: CanvasNodeData) =>
             contentNode.type === CanvasNodeType.Image && !contentNode.metadata?.canvasTool ? (
-                <CanvasNodeInlineComposer node={contentNode} onHeightChange={handleConfigNodeHeightChange} editor={
-                    <CanvasNodePromptPanel
-                        node={contentNode}
-                        isRunning={runningNodeId === contentNode.id}
-                        mentionReferences={mentionReferencesByNodeId.get(contentNode.id) || EMPTY_MENTION_REFERENCES}
-                        onPromptChange={handleNodePromptChange}
-                        onConfigChange={handleConfigNodeChange}
-                        onGenerate={handleGenerateNode}
-                        onStop={confirmStopGeneration}
-                        onRemoveReference={removeNodeReference}
-                        onStartReferenceSelection={startNodeReferenceSelection}
-                        onRetry={(nodeId) => {
-                            const retryNode = nodesRef.current.find((item) => item.id === nodeId);
-                            if (retryNode) void handleRetryNode(retryNode);
-                        }}
-                    />
+                <CanvasNodeInlineComposer node={contentNode} editor={
+                    <Suspense fallback={<div className="p-3 text-xs opacity-60">正在加载节点面板…</div>}>
+                        <CanvasNodePromptPanel
+                            node={contentNode}
+                            isRunning={runningNodeId === contentNode.id}
+                            mentionReferences={mentionReferencesByNodeId.get(contentNode.id) || EMPTY_MENTION_REFERENCES}
+                            onPromptChange={handleNodePromptChange}
+                            onConfigChange={handleConfigNodeChange}
+                            onGenerate={handleGenerateNode}
+                            onStop={confirmStopGeneration}
+                            onRemoveReference={removeNodeReference}
+                            onStartReferenceSelection={startNodeReferenceSelection}
+                            onRetry={(nodeId) => {
+                                const retryNode = nodesRef.current.find((item) => item.id === nodeId);
+                                if (retryNode) void handleRetryNode(retryNode);
+                            }}
+                        />
+                    </Suspense>
                 } />
             ) : null,
         [confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, handleRetryNode, mentionReferencesByNodeId, removeNodeReference, runningNodeId, startNodeReferenceSelection],
