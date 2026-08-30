@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
-import type { CanvasConnectionStyle, CanvasInputPreference } from "../types";
+import type { CanvasConnectionStyle, CanvasInputPreference, CanvasToolbarDock } from "../types";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "./canvas-create-node-menu";
@@ -41,6 +41,7 @@ export function CanvasToolbar({
     backgroundMode,
     connectionStyle,
     inputPreference,
+    toolbarDock,
     snapToGrid,
     alignmentGuidesEnabled,
     showImageInfo,
@@ -56,6 +57,7 @@ export function CanvasToolbar({
     onBackgroundModeChange,
     onConnectionStyleChange,
     onInputPreferenceChange,
+    onToolbarDockChange,
     onSnapToGridChange,
     onAlignmentGuidesEnabledChange,
     onShowImageInfoChange,
@@ -71,6 +73,7 @@ export function CanvasToolbar({
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
     inputPreference: CanvasInputPreference;
+    toolbarDock: CanvasToolbarDock;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -87,6 +90,7 @@ export function CanvasToolbar({
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onConnectionStyleChange: (style: CanvasConnectionStyle) => void;
     onInputPreferenceChange: (preference: CanvasInputPreference) => void;
+    onToolbarDockChange: (dock: CanvasToolbarDock) => void;
     onSnapToGridChange: (enabled: boolean) => void;
     onAlignmentGuidesEnabledChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
@@ -114,6 +118,26 @@ export function CanvasToolbar({
     const activeStyle = { background: theme.toolbar.activeBg, color: theme.toolbar.activeText };
     const tip = hovered ? toolLabel(hovered) : "";
     const dockPanelOpen = addMenuOpen || appearanceOpen || materialOpen;
+    const dockIsVertical = toolbarDock !== "bottom";
+    const dockParentBox = wrapRef.current?.parentElement?.getBoundingClientRect();
+    const dockPopupStyle: CSSProperties =
+        toolbarDock === "bottom"
+            ? { left: panelPosition.x, bottom: 68, transform: "translateX(-50%)" }
+            : {
+                  left: toolbarDock === "left" ? panelPosition.x + 44 : undefined,
+                  right: toolbarDock === "right" ? (dockParentBox?.width || window.innerWidth) - panelPosition.x + 44 : undefined,
+                  top: (dockParentBox?.height || window.innerHeight) - panelPosition.y,
+                  transform: "translateY(-50%)",
+              };
+    const dockContainerClass =
+        toolbarDock === "bottom"
+            ? "inset-x-0 bottom-5 justify-center px-4"
+            : toolbarDock === "left"
+              ? "left-4 top-1/2 -translate-y-1/2 items-center"
+              : "right-4 top-1/2 -translate-y-1/2 items-center";
+    const dockInnerClass = dockIsVertical
+        ? "creative-os-dock pointer-events-auto flex w-14 max-h-[calc(100vh-32px)] flex-col items-center gap-1 overflow-y-auto rounded-2xl border px-1.5 py-2 shadow-lg backdrop-blur [&>*]:shrink-0"
+        : "creative-os-dock pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-2xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0";
 
     const closeDockPopovers = () => {
         setAddMenuOpen(false);
@@ -139,13 +163,13 @@ export function CanvasToolbar({
     }, [assetPanelOpen]);
 
     return (
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-50 flex justify-center px-4">
+        <div className={`pointer-events-none absolute z-50 flex ${dockContainerClass}`}>
             {tip ? <DockTip label={tip} position={tipPosition} theme={theme} /> : null}
-            <div ref={wrapRef} className="creative-os-dock pointer-events-auto flex h-14 max-w-full items-center gap-1 overflow-x-auto rounded-2xl border px-2 shadow-lg backdrop-blur [&>*]:shrink-0" style={dockStyle}>
+            <div ref={wrapRef} className={dockInnerClass} style={dockStyle}>
                 <ToolbarButton id="tool-add" label="添加节点" active={addMenuOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "add")}>
                     <Plus className="size-5" />
                 </ToolbarButton>
-                <Divider theme={theme} />
+                <Divider theme={theme} vertical={dockIsVertical} />
                 <ToolbarButton id="tool-material" label="素材库" active={materialOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "material")}>
                     <Boxes className="size-4.5" />
                 </ToolbarButton>
@@ -161,13 +185,13 @@ export function CanvasToolbar({
                 <ToolbarButton id="tool-clear" label="清空画布" danger hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); onClear(); }}>
                     <Eraser className="size-4.5" />
                 </ToolbarButton>
-                <Divider theme={theme} />
+                <Divider theme={theme} vertical={dockIsVertical} />
                 <ToolbarButton id="tool-shortcuts" label="快捷键" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={() => { closeDockPopovers(); setShortcutsOpen(true); }}>
                     <Keyboard className="size-4.5" />
                 </ToolbarButton>
                 {selectedCount >= 2 ? (
                     <>
-                        <Divider theme={theme} />
+                        <Divider theme={theme} vertical={dockIsVertical} />
                         <ToolbarButton id={'tool-group'} label={'成组'} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={onGroup}>
                             <Layers3 className={'size-4.5'} />
                         </ToolbarButton>
@@ -178,13 +202,13 @@ export function CanvasToolbar({
                 ) : null}
                 {selectedCount ? (
                     <>
-                        <Divider theme={theme} />
+                        <Divider theme={theme} vertical={dockIsVertical} />
                         <ToolbarButton id="tool-delete" label="删除选中" hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={onDelete} danger>
                             <Trash2 className="size-4.5" />
                         </ToolbarButton>
                     </>
                 ) : null}
-                <Divider theme={theme} />
+                <Divider theme={theme} vertical={dockIsVertical} />
                 <ToolbarButton id="tool-style" label="画布外观" active={appearanceOpen} activeStyle={activeStyle} hovered={hovered} hoverStyle={hoverStyle} wrapRef={wrapRef} onTipPosition={setTipPosition} onHover={setHovered} onClick={(event) => openPanelAt(event, "appearance")}>
                     <Palette className="size-4.5" />
                 </ToolbarButton>
@@ -205,7 +229,7 @@ export function CanvasToolbar({
                 <div
                     ref={panelRef}
                     className="canvas-toolbar-popover creative-os-panel pointer-events-auto absolute z-30 w-[196px] rounded-[8px] border p-2"
-                    style={{ left: panelPosition.x, bottom: 68, transform: "translateX(-50%)", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
+                    style={{ ...dockPopupStyle, background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.node.text }}
                 >
                     <AddNodeOption theme={theme} icon={<Sparkles className="size-4" />} label="风格库" tag="NEW" onClick={() => onOpenMaterialLibrary("styles")} onClose={() => setMaterialOpen(false)} />
                     <AddNodeOption theme={theme} icon={<WandSparkles className="size-4" />} label="效果库" tag="NEW" onClick={() => onOpenMaterialLibrary("effects")} onClose={() => setMaterialOpen(false)} />
@@ -219,7 +243,7 @@ export function CanvasToolbar({
                 <div
                     ref={panelRef}
                     className="canvas-toolbar-popover creative-os-panel pointer-events-auto absolute z-30 w-[248px] rounded-[8px] border p-2.5"
-                    style={{ left: panelPosition.x, bottom: 68, transform: "translateX(-50%)", background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.toolbar.item }}
+                    style={{ ...dockPopupStyle, background: theme.ui.materialElevated, borderColor: theme.ui.hairline, color: theme.toolbar.item }}
                 >
                     <div className="px-1 pb-2 text-sm font-medium opacity-65">画布外观</div>
                     <div className="px-1 pb-1.5 text-[11px] font-medium opacity-50">主题模式</div>
@@ -295,6 +319,17 @@ export function CanvasToolbar({
                         options={[
                             { value: "normal", label: "常规" },
                             { value: "inverted", label: "反向" },
+                        ]}
+                    />
+                    <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">工具栏位置</div>
+                    <Segmented
+                        className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"
+                        value={toolbarDock}
+                        onChange={(value) => onToolbarDockChange(value as CanvasToolbarDock)}
+                        options={[
+                            { value: "bottom", label: "底部" },
+                            { value: "left", label: "左侧" },
+                            { value: "right", label: "右侧" },
                         ]}
                     />
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
@@ -403,8 +438,8 @@ function ToolbarButton({
     );
 }
 
-function Divider({ theme }: { theme: CanvasTheme }) {
-    return <div className="my-1 h-px w-6 max-md:mx-1 max-md:my-0 max-md:h-6 max-md:w-px" style={{ background: theme.toolbar.border }} />;
+function Divider({ theme, vertical = false }: { theme: CanvasTheme; vertical?: boolean }) {
+    return <div className={`${vertical ? "my-0.5 h-6 w-px" : "my-1 h-px w-6 max-md:mx-1 max-md:my-0 max-md:h-6 max-md:w-px"}`} style={{ background: theme.toolbar.border }} />;
 }
 
 function DividerBlock({ theme }: { theme: CanvasTheme }) {

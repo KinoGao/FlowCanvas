@@ -113,7 +113,8 @@ import {
     type CanvasNodeData,
     type CanvasNodeMetadata,
     type CanvasScriptAsset,
-type CanvasScriptBeat,
+    type CanvasScriptBeat,
+    type CanvasToolbarDock,
     type ConnectionHandle,
     type ContextMenuState,
     type Position,
@@ -238,6 +239,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
     inputPreference: CanvasInputPreference;
+    toolbarDock: CanvasToolbarDock;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -810,6 +812,7 @@ function LeaferCanvasPage() {
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
     const [connectionStyle, setConnectionStyle] = useState<CanvasConnectionStyle>("curve");
     const [inputPreference, setInputPreference] = useState<CanvasInputPreference>({ wheelMode: "zoom", wheelDirection: "normal" });
+    const [toolbarDock, setToolbarDock] = useState<CanvasToolbarDock>("bottom");
     const [snapToGrid, setSnapToGrid] = useState(false);
     const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
     const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
@@ -953,12 +956,13 @@ function LeaferCanvasPage() {
             backgroundMode,
             connectionStyle,
             inputPreference,
+            toolbarDock,
             snapToGrid,
             alignmentGuidesEnabled,
             showImageInfo,
             showConnections,
         }),
-        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, inputPreference, showConnections, showImageInfo, snapToGrid],
+        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, inputPreference, showConnections, showImageInfo, snapToGrid, toolbarDock],
     );
 
     const cleanupCanvasFiles = useCallback(
@@ -1200,6 +1204,7 @@ function LeaferCanvasPage() {
             setBackgroundMode(project.backgroundMode);
             setConnectionStyle(project.connectionStyle || "curve");
             setInputPreference(project.inputPreference || { wheelMode: "zoom", wheelDirection: "normal" });
+            setToolbarDock(project.toolbarDock || "bottom");
             setSnapToGrid(project.snapToGrid || false);
             setAlignmentGuidesEnabled(project.alignmentGuidesEnabled !== false);
             setShowImageInfo(project.showImageInfo || false);
@@ -1219,6 +1224,7 @@ function LeaferCanvasPage() {
                 backgroundMode: project.backgroundMode,
                 connectionStyle: project.connectionStyle || "curve",
                 inputPreference: project.inputPreference || { wheelMode: "zoom", wheelDirection: "normal" },
+                toolbarDock: project.toolbarDock || "bottom",
                 snapToGrid: project.snapToGrid || false,
                 alignmentGuidesEnabled: project.alignmentGuidesEnabled !== false,
                 showImageInfo: project.showImageInfo || false,
@@ -1248,6 +1254,7 @@ function LeaferCanvasPage() {
             previous.connectionStyle === next.connectionStyle &&
             previous.inputPreference?.wheelMode === next.inputPreference.wheelMode &&
             previous.inputPreference?.wheelDirection === next.inputPreference.wheelDirection &&
+            previous.toolbarDock === next.toolbarDock &&
             previous.snapToGrid === next.snapToGrid &&
             previous.alignmentGuidesEnabled === next.alignmentGuidesEnabled &&
             previous.showImageInfo === next.showImageInfo &&
@@ -1273,7 +1280,7 @@ function LeaferCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, createHistoryEntry, inputPreference, nodes, projectLoaded, showConnections, showImageInfo, snapToGrid]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, createHistoryEntry, inputPreference, nodes, projectLoaded, showConnections, showImageInfo, snapToGrid, toolbarDock]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1302,7 +1309,7 @@ function LeaferCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, toolbarDock, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
             setSaveState("saved");
         }, 300);
         return () => {
@@ -1311,7 +1318,7 @@ function LeaferCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject, versionHistory]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, toolbarDock, updateProject, versionHistory]);
 
     // 后端工作区不可用时标记「离线」，恢复后回到已保存态。
     useEffect(() => {
@@ -1321,7 +1328,7 @@ function LeaferCanvasPage() {
 
     const retrySave = useCallback(async () => {
         setSaveState("saving");
-        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
+        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, toolbarDock, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
         if (saveMode === "backend" && token) {
             try {
                 const latest = useCanvasStore.getState();
@@ -1333,7 +1340,7 @@ function LeaferCanvasPage() {
         } else {
             setSaveState("saved");
         }
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject, versionHistory]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, toolbarDock, token, updateProject, versionHistory]);
 
     const saveCurrentVersion = useCallback(() => {
         const version: CanvasProjectVersion = {
@@ -1349,6 +1356,7 @@ function LeaferCanvasPage() {
             backgroundMode,
             connectionStyle,
             inputPreference,
+            toolbarDock,
             snapToGrid,
             alignmentGuidesEnabled,
             showImageInfo,
@@ -1359,7 +1367,7 @@ function LeaferCanvasPage() {
         versionHistoryRef.current = next;
         setVersionHistory(next);
         message.success("已保存画布快照");
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, inputPreference, message, showConnections, showImageInfo, snapToGrid]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, inputPreference, message, showConnections, showImageInfo, snapToGrid, toolbarDock]);
 
     const restoreVersion = useCallback(async (version: CanvasProjectVersion) => {
         try {
@@ -1378,6 +1386,7 @@ function LeaferCanvasPage() {
             setBackgroundMode(version.backgroundMode);
             setConnectionStyle(version.connectionStyle || "curve");
             setInputPreference(version.inputPreference || { wheelMode: "zoom", wheelDirection: "normal" });
+            setToolbarDock(version.toolbarDock || "bottom");
             setSnapToGrid(version.snapToGrid);
             setAlignmentGuidesEnabled(version.alignmentGuidesEnabled !== false);
             setShowImageInfo(version.showImageInfo);
@@ -2549,6 +2558,7 @@ function LeaferCanvasPage() {
         setBackgroundMode(entry.backgroundMode);
         setConnectionStyle(entry.connectionStyle || "curve");
         setInputPreference(entry.inputPreference || { wheelMode: "zoom", wheelDirection: "normal" });
+        setToolbarDock(entry.toolbarDock || "bottom");
         setSnapToGrid(entry.snapToGrid);
         setAlignmentGuidesEnabled(entry.alignmentGuidesEnabled !== false);
         setShowImageInfo(entry.showImageInfo);
@@ -7126,6 +7136,7 @@ function LeaferCanvasPage() {
                     backgroundMode={backgroundMode}
                     connectionStyle={connectionStyle}
                     inputPreference={inputPreference}
+                    toolbarDock={toolbarDock}
                     snapToGrid={snapToGrid}
                     alignmentGuidesEnabled={alignmentGuidesEnabled}
                     showImageInfo={showImageInfo}
@@ -7142,6 +7153,7 @@ function LeaferCanvasPage() {
                     onBackgroundModeChange={setBackgroundMode}
                     onConnectionStyleChange={setConnectionStyle}
                     onInputPreferenceChange={setInputPreference}
+                    onToolbarDockChange={setToolbarDock}
                     onSnapToGridChange={setSnapToGrid}
                     onAlignmentGuidesEnabledChange={handleAlignmentGuidesEnabledChange}
                     onShowImageInfoChange={setShowImageInfo}

@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
-import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasInputPreference, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasInputPreference, CanvasNodeData, CanvasNodeType, CanvasToolbarDock, ViewportTransform } from "../types";
 
 export type CanvasProjectVersion = {
     id: string;
@@ -18,6 +18,7 @@ export type CanvasProjectVersion = {
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
     inputPreference: CanvasInputPreference;
+    toolbarDock: CanvasToolbarDock;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -39,6 +40,7 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
     inputPreference: CanvasInputPreference;
+    toolbarDock: CanvasToolbarDock;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -47,7 +49,7 @@ export type CanvasProject = {
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "inputPreference" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "versionHistory" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "inputPreference" | "toolbarDock" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "versionHistory" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -76,6 +78,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         backgroundMode: "dots",
         connectionStyle: "curve",
         inputPreference: defaultInputPreference,
+        toolbarDock: "bottom",
         snapToGrid: false,
         alignmentGuidesEnabled: true,
         showImageInfo: false,
@@ -104,6 +107,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         backgroundMode: source.backgroundMode || "dots",
         connectionStyle: source.connectionStyle || "curve",
         inputPreference: source.inputPreference || defaultInputPreference,
+        toolbarDock: source.toolbarDock || "bottom",
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),

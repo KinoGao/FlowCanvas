@@ -35,6 +35,7 @@ type CanvasProject = {
   backgroundMode: "lines" | "dots" | "blank";
   connectionStyle: "curve" | "orthogonal" | "straight";
   inputPreference: { wheelMode: "zoom" | "pan"; wheelDirection: "normal" | "inverted" };
+  toolbarDock: "bottom" | "left" | "right";
   showConnections: boolean;
   snapToGrid: boolean;
   alignmentGuidesEnabled: boolean;
@@ -69,6 +70,7 @@ type CanvasProject = {
 - `backgroundMode`：画布背景模式。
 - `connectionStyle`：连线样式（曲线 / 直角 / 直线），随画布项目持久化。
 - `inputPreference`：画布输入偏好，普通滚轮/双指为缩放或 Figma 式平移，可切换缩放方向。
+- `toolbarDock`：主工具栏停靠位置（底部 / 左侧 / 右侧）。
 - `showConnections`：是否显示所有正式连线。
 - `snapToGrid` / `alignmentGuidesEnabled`：网格吸附与辅助基准线开关。
 - `showImageInfo`：是否显示图片尺寸信息。

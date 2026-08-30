@@ -15,6 +15,8 @@ export type CanvasInputPreference = {
     wheelDirection: "normal" | "inverted";
 };
 
+export type CanvasToolbarDock = "bottom" | "left" | "right";
+
 export type ViewportTransform = {
     x: number;
     y: number;
