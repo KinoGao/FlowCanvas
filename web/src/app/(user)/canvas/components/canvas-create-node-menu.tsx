@@ -52,7 +52,8 @@ export type CanvasCreateMenuAction =
     | "personReplacement"
     | "videoReplication"
     | "voiceStudio"
-    | "debug";
+    | "debug"
+    | "digitalHumans";
 
 const MENU_WIDTH = 424;
 
@@ -72,14 +73,11 @@ export function CanvasCreateNodeMenu({
 
     const personReplace = useModelFeatureAvailable("person_replace");
     const videoReplicate = useModelFeatureAvailable("video_replicate");
-    const voiceStudio = useModelFeatureAvailable("asr");
     const unavailableTip = "该模型未接入，请联系管理员（可在设置「模型接入/功能开关」临时开启）";
     const personReplaceAvailable = personReplace.available;
     const videoReplicateAvailable = videoReplicate.available;
-    const voiceStudioAvailable = voiceStudio.available;
     const personReplaceUnavailableTip = personReplace.available ? undefined : unavailableTip;
     const videoReplicateUnavailableTip = videoReplicate.available ? undefined : unavailableTip;
-    const voiceStudioUnavailableTip = voiceStudio.available ? undefined : unavailableTip;
 
     useLayoutEffect(() => {
         const element = menuRef.current;
@@ -169,13 +167,14 @@ export function CanvasCreateNodeMenu({
             <CreateMenuOption theme={theme} icon={<Bug className="size-4" />} label="调试节点" description="查看 Payload 与任务状态" onClick={() => onAction("debug")} />
             <CreateMenuOption theme={theme} icon={<UserRoundCog className="size-4" />} label="人物替换" description="角色/人脸替换工作室" tag="Beta" disabled={!personReplaceAvailable} onClick={() => onAction("personReplacement")} tooltip={personReplaceUnavailableTip} />
             <CreateMenuOption theme={theme} icon={<Copy className="size-4" />} label="视频复刻" description="参考视频的生成复刻" tag="Beta" disabled={!videoReplicateAvailable} onClick={() => onAction("videoReplication")} tooltip={videoReplicateUnavailableTip} />
-            <CreateMenuOption theme={theme} icon={<Mic className="size-4" />} label="语音工作台" description="语音识别与声音克隆" tag="Beta" disabled={!voiceStudioAvailable} onClick={() => onAction("voiceStudio")} tooltip={voiceStudioUnavailableTip} />
+            <CreateMenuOption theme={theme} icon={<Mic className="size-4" />} label="语音工作台" description="配音、音色与声音" onClick={() => onAction("voiceStudio")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="3D 世界" description="空间创作能力即将开放" tag="Beta" disabled />
             </div>
             <div className="px-2 pb-1 pt-2 text-xs font-medium opacity-60">资源</div>
             <div className="grid grid-cols-2 gap-1">
             <CreateMenuOption theme={theme} icon={<Upload className="size-4" />} label="上传" description="图片、视频、音频与文件" onClick={() => onAction("upload")} />
             <CreateMenuOption theme={theme} icon={<PackagePlus className="size-4" />} label="素材库" description="素材、数字人与音色资产" tag="NEW" onClick={() => onAction("materialLibrary")} />
+            <CreateMenuOption theme={theme} icon={<UserRoundCog className="size-4" />} label="数字人" description="分身形象照与口播工作流" onClick={() => onAction("digitalHumans")} />
             <CreateMenuOption theme={theme} icon={<Clock3 className="size-4" />} label="从生成历史选择" description="回到已有生成结果" onClick={() => onAction("generationHistory")} />
             </div>
         </div>

@@ -5269,6 +5269,9 @@ function LeaferCanvasPage() {
                 case "materialLibrary":
                     openMaterialLibrary("styles");
                     break;
+                case "digitalHumans":
+                    openMaterialLibrary("digitalHumans");
+                    break;
                 case "upload":
                     handleUploadRequest();
                     break;
