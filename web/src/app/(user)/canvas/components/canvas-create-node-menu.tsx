@@ -8,6 +8,7 @@ import {
     Clock3,
     FileText,
     Globe,
+    Grid2x2,
     Image as ImageIcon,
     Layers3,
     Music2,
@@ -38,7 +39,8 @@ export type CanvasCreateMenuAction =
     | "generationHistory"
     | "annotation"
     | "whiteboard"
-    | "webpreview";
+    | "webpreview"
+    | "collage";
 
 const MENU_WIDTH = 424;
 
@@ -135,6 +137,7 @@ export function CanvasCreateNodeMenu({
             <CreateMenuOption theme={theme} icon={<StickyNote className="size-4" />} label="注释" description="画布便签、批注与灵感" onClick={() => onAction("annotation")} />
             <CreateMenuOption theme={theme} icon={<PenTool className="size-4" />} label="白板" description="画笔、矩形、橡皮与灵感草稿" tag="NEW" onClick={() => onAction("whiteboard")} />
             <CreateMenuOption theme={theme} icon={<Globe className="size-4" />} label="网页预览" description="在画布内预览网页或保存参考卡" tag="NEW" onClick={() => onAction("webpreview")} />
+            <CreateMenuOption theme={theme} icon={<Grid2x2 className="size-4" />} label="拼图" description="把连接的图片按宫格合成整图" tag="NEW" onClick={() => onAction("collage")} />
             <CreateMenuOption theme={theme} icon={<Clapperboard className="size-4" />} label="剪辑时间线" description="时间轴串联多段素材" tag="Beta" onClick={() => onAction("videoComposition")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" description="在 3D 空间搭建场景" tag="NEW" onClick={() => onAction("director")} />
             <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" description="生成沉浸式全景素材" tag="NEW" onClick={() => onAction("panorama360")} />

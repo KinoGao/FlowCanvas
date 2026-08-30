@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Globe, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Globe, Grid2x2, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -719,6 +719,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Annotation]: TextContent,
     [CanvasNodeType.Whiteboard]: WhiteboardContent,
     [CanvasNodeType.WebPreview]: WebPreviewContent,
+    [CanvasNodeType.Collage]: CollageContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function WhiteboardContent(props: NodeContentRendererProps) {
@@ -727,6 +728,30 @@ function WhiteboardContent(props: NodeContentRendererProps) {
 
 function WebPreviewContent(props: NodeContentRendererProps) {
     return <CanvasNodeWebPreviewContent node={props.node} theme={props.theme} onContentChange={props.onContentChange} />;
+}
+
+function CollageContent({ theme, onNodeAction }: NodeContentRendererProps) {
+    return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
+            <span className="grid size-11 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
+                <Grid2x2 className="size-5" />
+            </span>
+            <div className="text-xs leading-5 opacity-70">连接至少两张图片节点后，按宫格拼成一张新图片</div>
+            <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-xs transition"
+                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onNodeAction?.("image-collage");
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                拼接上游图片
+            </button>
+        </div>
+    );
 }
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
@@ -1039,7 +1064,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : node.type === CanvasNodeType.WebPreview ? Globe : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : node.type === CanvasNodeType.WebPreview ? Globe : node.type === CanvasNodeType.Collage ? Grid2x2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

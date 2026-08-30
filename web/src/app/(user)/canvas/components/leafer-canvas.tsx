@@ -1916,7 +1916,7 @@ function getNodeLeaferText(node: CanvasNodeData) {
     if (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Clip) {
         return node.title.trim();
     }
-    if (node.type === CanvasNodeType.Whiteboard || node.type === CanvasNodeType.WebPreview) return node.title.trim();
+    if (node.type === CanvasNodeType.Whiteboard || node.type === CanvasNodeType.WebPreview || node.type === CanvasNodeType.Collage) return node.title.trim();
     return "";
 }
 

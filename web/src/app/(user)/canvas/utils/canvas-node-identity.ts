@@ -17,6 +17,7 @@ const TITLE_STEM_BY_TYPE: Record<CanvasNodeData["type"], string> = {
     annotation: "注释",
     whiteboard: "白板",
     webpreview: "网页",
+    collage: "拼图",
 };
 
 const LEGACY_DEFAULT_TITLES: Partial<Record<CanvasNodeData["type"], string[]>> = {
@@ -32,6 +33,7 @@ const LEGACY_DEFAULT_TITLES: Partial<Record<CanvasNodeData["type"], string[]>> =
     annotation: ["注释", "Annotation", "Sticky Note", "便签"],
     whiteboard: ["白板", "Whiteboard"],
     webpreview: ["网页预览", "Web Preview", "参考卡"],
+    collage: ["拼图", "Collage", "Puzzle"],
 };
 
 export function getDefaultCanvasNodeTitle(type: CanvasNodeData["type"], sequence: number) {
