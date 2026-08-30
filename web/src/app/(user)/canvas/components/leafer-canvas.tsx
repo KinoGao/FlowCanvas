@@ -9,7 +9,7 @@ import "@leafer-in/viewport";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasNodeData, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasConnectionStyle, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
 import { buildSpatialIndex, querySpatialIndex } from "../utils/canvas-spatial-index";
 import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
@@ -21,6 +21,7 @@ type LeaferCanvasProps = {
     nodes: CanvasNodeData[];
     connections: CanvasConnection[];
     backgroundMode?: CanvasBackgroundMode;
+    connectionStyle?: CanvasConnectionStyle;
     alignmentGuides?: CanvasAlignmentGuides | null;
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
@@ -81,6 +82,7 @@ export function LeaferCanvas({
     nodes = EMPTY_NODES,
     connections = EMPTY_CONNECTIONS,
     backgroundMode = "dots",
+    connectionStyle = "curve",
     alignmentGuides,
     selectedNodeIds,
     selectedConnectionId,
@@ -119,6 +121,8 @@ export function LeaferCanvas({
     themeRef.current = theme;
     const backgroundModeRef = useRef(backgroundMode);
     backgroundModeRef.current = backgroundMode;
+    const connectionStyleRef = useRef(connectionStyle);
+    connectionStyleRef.current = connectionStyle;
     const alignmentGuidesRef = useRef(alignmentGuides);
     alignmentGuidesRef.current = alignmentGuides;
     const scaleRef = useRef(viewport.k);
@@ -576,7 +580,7 @@ export function LeaferCanvas({
             affectedConnections.forEach((connection) => {
                 const points = getConnectionPoints(connection, nodeMap);
                 if (!points) return;
-                const path = buildConnectionPathFromPoints(points.from, points.to);
+                const path = buildConnectionPathFromPoints(points.from, points.to, connectionStyleRef.current);
                 const visual = connectionVisualMapRef.current.get(connection.id);
                 if (!visual) return;
                 visual.path = path;
@@ -1106,7 +1110,7 @@ export function LeaferCanvas({
         connections.forEach((connection) => {
             const points = getConnectionPoints(connection, nodeMap);
             if (!points) return;
-            const path = buildConnectionPathFromPoints(points.from, points.to);
+            const path = buildConnectionPathFromPoints(points.from, points.to, connectionStyleRef.current);
             let visual = connectionVisualMapRef.current.get(connection.id);
             if (!visual) {
                 const hit = new LUI.Path({
@@ -1164,7 +1168,7 @@ export function LeaferCanvas({
             }
             updateConnectionVisualStyle(connection.id);
         });
-    }, [connections, containerRef, nodes, relatedConnectionIds, selectedConnectionId, updateConnectionVisualStyle]);
+    }, [connectionStyle, connections, containerRef, nodes, relatedConnectionIds, selectedConnectionId, updateConnectionVisualStyle]);
 
     useEffect(() => {
         const editor = editorRef.current;
@@ -1277,7 +1281,7 @@ export function LeaferCanvas({
         const sourcePoint = connection.handleType === "source" ? fixedScreenPoint : pointerScreenPoint;
         const targetPoint = connection.handleType === "source" ? pointerScreenPoint : fixedScreenPoint;
 
-        const connectionPath = buildConnectionPathFromPoints(sourcePoint, targetPoint);
+        const connectionPath = buildConnectionPathFromPoints(sourcePoint, targetPoint, connectionStyleRef.current);
         flowPath.set({
             path: connectionPath,
             visible: true,

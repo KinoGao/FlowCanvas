@@ -1,4 +1,4 @@
-import type { CanvasConnection, CanvasNodeData } from "../types";
+import type { CanvasConnection, CanvasConnectionStyle, CanvasNodeData } from "../types";
 
 export type ConnectionSide = "source" | "target";
 
@@ -21,7 +21,18 @@ export function getConnectionPoints(connection: CanvasConnection, nodeMap: Map<s
     };
 }
 
-export function buildConnectionPathFromPoints(from: { x: number; y: number }, to: { x: number; y: number }) {
+export function buildConnectionPathFromPoints(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    style: CanvasConnectionStyle = "curve",
+) {
+    if (style === "straight") {
+        return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
+    }
+    if (style === "orthogonal") {
+        const midX = (from.x + to.x) / 2;
+        return `M ${from.x} ${from.y} L ${midX} ${from.y} L ${midX} ${to.y} L ${to.x} ${to.y}`;
+    }
     const dx = Math.max(80, Math.abs(to.x - from.x) * 0.5);
     return `M ${from.x} ${from.y} C ${from.x + dx} ${from.y}, ${to.x - dx} ${to.y}, ${to.x} ${to.y}`;
 }

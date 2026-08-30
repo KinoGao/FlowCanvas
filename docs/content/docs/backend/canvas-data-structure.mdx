@@ -33,6 +33,8 @@ type CanvasProject = {
   chatSessions: CanvasAssistantSession[];
   activeChatId: string | null;
   backgroundMode: "lines" | "dots" | "blank";
+  connectionStyle: "curve" | "orthogonal" | "straight";
+  showConnections: boolean;
   snapToGrid: boolean;
   alignmentGuidesEnabled: boolean;
   showImageInfo: boolean;
@@ -53,6 +55,8 @@ type CanvasProject = {
 - `chatSessions`：右侧画布助手会话。
 - `activeChatId`：当前选中的助手会话 ID。
 - `backgroundMode`：画布背景模式。
+- `connectionStyle`：连线样式（曲线 / 直角 / 直线），随画布项目持久化。
+- `showConnections`：是否显示所有正式连线。
 - `snapToGrid` / `alignmentGuidesEnabled`：网格吸附与辅助基准线开关。
 - `showImageInfo`：是否显示图片尺寸信息。
 - `viewport`：视口变换，`x/y` 是屏幕平移，`k` 是缩放比例。

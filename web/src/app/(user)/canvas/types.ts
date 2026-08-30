@@ -6,6 +6,8 @@ export type Position = {
     y: number;
 };
 
+export type CanvasConnectionStyle = "curve" | "orthogonal" | "straight";
+
 export type ViewportTransform = {
     x: number;
     y: number;

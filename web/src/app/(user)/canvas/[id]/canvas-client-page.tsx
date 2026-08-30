@@ -99,6 +99,7 @@ import {
     type CanvasAssistantReference,
     type CanvasAssistantSession,
     type CanvasConnection,
+    type CanvasConnectionStyle,
     type CanvasImageGenerationType,
     type CanvasNodeActionIntent,
     type CanvasNodeData,
@@ -227,6 +228,7 @@ type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> & {
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
+    connectionStyle: CanvasConnectionStyle;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -797,6 +799,7 @@ function LeaferCanvasPage() {
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(true);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("dots");
+    const [connectionStyle, setConnectionStyle] = useState<CanvasConnectionStyle>("curve");
     const [snapToGrid, setSnapToGrid] = useState(false);
     const [alignmentGuidesEnabled, setAlignmentGuidesEnabled] = useState(true);
     const [alignmentGuides, setAlignmentGuides] = useState<CanvasAlignmentGuides | null>(null);
@@ -930,12 +933,13 @@ function LeaferCanvasPage() {
             chatSessions,
             activeChatId,
             backgroundMode,
+            connectionStyle,
             snapToGrid,
             alignmentGuidesEnabled,
             showImageInfo,
             showConnections,
         }),
-        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, showConnections, showImageInfo, snapToGrid],
+        [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, showConnections, showImageInfo, snapToGrid],
     );
 
     const cleanupCanvasFiles = useCallback(
@@ -1175,6 +1179,7 @@ function LeaferCanvasPage() {
             setChatSessions(restoredSessions);
             setActiveChatId(project.activeChatId || null);
             setBackgroundMode(project.backgroundMode);
+            setConnectionStyle(project.connectionStyle || "curve");
             setSnapToGrid(project.snapToGrid || false);
             setAlignmentGuidesEnabled(project.alignmentGuidesEnabled !== false);
             setShowImageInfo(project.showImageInfo || false);
@@ -1191,6 +1196,7 @@ function LeaferCanvasPage() {
                 chatSessions: restoredSessions,
                 activeChatId: project.activeChatId || null,
                 backgroundMode: project.backgroundMode,
+                connectionStyle: project.connectionStyle || "curve",
                 snapToGrid: project.snapToGrid || false,
                 alignmentGuidesEnabled: project.alignmentGuidesEnabled !== false,
                 showImageInfo: project.showImageInfo || false,
@@ -1217,6 +1223,7 @@ function LeaferCanvasPage() {
             previous.chatSessions === next.chatSessions &&
             previous.activeChatId === next.activeChatId &&
             previous.backgroundMode === next.backgroundMode &&
+            previous.connectionStyle === next.connectionStyle &&
             previous.snapToGrid === next.snapToGrid &&
             previous.alignmentGuidesEnabled === next.alignmentGuidesEnabled &&
             previous.showImageInfo === next.showImageInfo &&
@@ -1242,7 +1249,7 @@ function LeaferCanvasPage() {
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showConnections, showImageInfo, snapToGrid]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, createHistoryEntry, nodes, projectLoaded, showConnections, showImageInfo, snapToGrid]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1271,7 +1278,7 @@ function LeaferCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
             setSaveState("saved");
         }, 300);
         return () => {
@@ -1280,7 +1287,7 @@ function LeaferCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject]);
 
     // 后端工作区不可用时标记「离线」，恢复后回到已保存态。
     useEffect(() => {
@@ -1290,7 +1297,7 @@ function LeaferCanvasPage() {
 
     const retrySave = useCallback(async () => {
         setSaveState("saving");
-        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
+        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
         if (saveMode === "backend" && token) {
             try {
                 const latest = useCanvasStore.getState();
@@ -1302,7 +1309,7 @@ function LeaferCanvasPage() {
         } else {
             setSaveState("saved");
         }
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connections, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -2389,6 +2396,7 @@ function LeaferCanvasPage() {
         setChatSessions(entry.chatSessions);
         setActiveChatId(entry.activeChatId);
         setBackgroundMode(entry.backgroundMode);
+        setConnectionStyle(entry.connectionStyle || "curve");
         setSnapToGrid(entry.snapToGrid);
         setAlignmentGuidesEnabled(entry.alignmentGuidesEnabled !== false);
         setShowImageInfo(entry.showImageInfo);
@@ -6322,6 +6330,7 @@ function LeaferCanvasPage() {
                     nodes={mountedNodeItems}
                     connections={visibleConnections}
                     backgroundMode={backgroundMode}
+                    connectionStyle={connectionStyle}
                     alignmentGuides={alignmentGuides}
                     selectedNodeIds={selectedNodeIds}
                     selectedConnectionId={selectedConnectionId}
@@ -6639,6 +6648,7 @@ function LeaferCanvasPage() {
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
+                    connectionStyle={connectionStyle}
                     snapToGrid={snapToGrid}
                     alignmentGuidesEnabled={alignmentGuidesEnabled}
                     showImageInfo={showImageInfo}
@@ -6653,6 +6663,7 @@ function LeaferCanvasPage() {
                     onClear={() => setClearConfirmOpen(true)}
                     onDeselect={deselectCanvas}
                     onBackgroundModeChange={setBackgroundMode}
+                    onConnectionStyleChange={setConnectionStyle}
                     onSnapToGridChange={setSnapToGrid}
                     onAlignmentGuidesEnabledChange={handleAlignmentGuidesEnabledChange}
                     onShowImageInfoChange={setShowImageInfo}

@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
 
 export type CanvasProject = {
     id: string;
@@ -17,6 +17,7 @@ export type CanvasProject = {
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
+    connectionStyle: CanvasConnectionStyle;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -24,7 +25,7 @@ export type CanvasProject = {
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -50,6 +51,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         chatSessions: [],
         activeChatId: null,
         backgroundMode: "dots",
+        connectionStyle: "curve",
         snapToGrid: false,
         alignmentGuidesEnabled: true,
         showImageInfo: false,
@@ -75,6 +77,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         chatSessions: Array.isArray(source.chatSessions) ? source.chatSessions : [],
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "dots",
+        connectionStyle: source.connectionStyle || "curve",
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),

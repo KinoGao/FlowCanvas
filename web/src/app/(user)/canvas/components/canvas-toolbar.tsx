@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
+import type { CanvasConnectionStyle } from "../types";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "./canvas-create-node-menu";
@@ -38,6 +39,7 @@ export function CanvasToolbar({
     canUndo,
     canRedo,
     backgroundMode,
+    connectionStyle,
     snapToGrid,
     alignmentGuidesEnabled,
     showImageInfo,
@@ -51,6 +53,7 @@ export function CanvasToolbar({
     onDelete,
     onClear,
     onBackgroundModeChange,
+    onConnectionStyleChange,
     onSnapToGridChange,
     onAlignmentGuidesEnabledChange,
     onShowImageInfoChange,
@@ -64,6 +67,7 @@ export function CanvasToolbar({
     canUndo: boolean;
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
+    connectionStyle: CanvasConnectionStyle;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -78,6 +82,7 @@ export function CanvasToolbar({
     onClear: () => void;
     onDeselect: () => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
+    onConnectionStyleChange: (style: CanvasConnectionStyle) => void;
     onSnapToGridChange: (enabled: boolean) => void;
     onAlignmentGuidesEnabledChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
@@ -255,6 +260,17 @@ export function CanvasToolbar({
                                     </span>
                                 ),
                             },
+                        ]}
+                    />
+                    <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">连接线样式</div>
+                    <Segmented
+                        className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"
+                        value={connectionStyle}
+                        onChange={(value) => onConnectionStyleChange(value as CanvasConnectionStyle)}
+                        options={[
+                            { value: "curve", label: "曲线" },
+                            { value: "orthogonal", label: "直角" },
+                            { value: "straight", label: "直线" },
                         ]}
                     />
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
