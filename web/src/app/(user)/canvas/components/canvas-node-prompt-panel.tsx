@@ -496,13 +496,6 @@ function ImageComposer({
             }}
         >
             <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry} />
-            <CanvasReferenceStrip
-                references={activeReferences}
-                variant="media"
-                className={activeReferences.length ? "mb-2" : ""}
-                onRemove={onRemoveReference}
-                onAddReference={onAddReference}
-            />
 
             <div className="relative">
                 <CanvasPromptChipInput
@@ -528,6 +521,14 @@ function ImageComposer({
                     onSelect={onPromptChange}
                 />
             ) : null}
+
+            <CanvasReferenceStrip
+                references={activeReferences}
+                variant="media"
+                className={activeReferences.length ? "mb-2 mt-1" : "mb-2"}
+                onRemove={onRemoveReference}
+                onAddReference={onAddReference}
+            />
 
             <div className="image-composer-toolbar sticky bottom-0 -mx-4 flex h-11 min-w-0 items-center gap-1 border-t px-4 pt-2" style={{ background: theme.ui.materialElevated, borderColor: theme.ui.hairline }}>
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
@@ -703,13 +704,6 @@ function VideoComposer({
             }}
         >
             <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry} />
-            <CanvasReferenceStrip
-                references={activeReferences}
-                variant="media"
-                className={activeReferences.length ? "mb-2" : ""}
-                onRemove={onRemoveReference}
-                onAddReference={onAddReference}
-            />
 
             <div className="relative">
                 <CanvasPromptChipInput
@@ -729,6 +723,14 @@ function VideoComposer({
                 </Tooltip>
             </div>
             {!prompt.trim() ? <ComposerQuickPrompts items={COMPOSER_QUICK_PROMPTS.video} theme={theme} onSelect={onPromptChange} /> : null}
+
+            <CanvasReferenceStrip
+                references={activeReferences}
+                variant="media"
+                className={activeReferences.length ? "mb-2 mt-1" : "mb-2"}
+                onRemove={onRemoveReference}
+                onAddReference={onAddReference}
+            />
 
             {capabilityPending || capabilityUnavailable ? (
                 <ComposerNotice
