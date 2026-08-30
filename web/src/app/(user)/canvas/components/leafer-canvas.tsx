@@ -1717,7 +1717,11 @@ export function LeaferCanvas({
         if (!points) return null;
         const from = canvasToScreen(points.from.x, points.from.y, viewport);
         const to = canvasToScreen(points.to.x, points.to.y, viewport);
-        return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+        return {
+            x: (from.x + to.x) / 2,
+            // 按钮稍微偏离连线，避免渲染到鼠标正下方后触发连线 LEAVE，导致悬停按钮闪烁。
+            y: Math.max(18, (from.y + to.y) / 2 - 18),
+        };
     }, [connections, hoveredConnectionId, nodes, viewport]);
 
     return (
