@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import { getNodeSpec } from "../constants";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "../types";
+import { canvasRightmostGridPosition, findAvailableCanvasPosition } from "./canvas-node-placement";
 
 export type CanvasAgentOp =
     | { type: "add_node"; id?: string; nodeType?: CanvasNodeType; title?: string; position?: { x: number; y: number }; x?: number; y?: number; width?: number; height?: number; metadata?: CanvasNodeMetadata }
@@ -60,7 +61,7 @@ export type CanvasAgentSnapshot = {
 };
 
 export type CanvasAgentApplyOptions = {
-    createNode?: (op: Extract<CanvasAgentOp, { type: "add_node" }>, index: number) => CanvasNodeData;
+    createNode?: (op: Extract<CanvasAgentOp, { type: "add_node" }>, index: number, currentNodes: CanvasNodeData[]) => CanvasNodeData;
     createConnection?: (op: Extract<CanvasAgentOp, { type: "connect_nodes" }>, index: number) => CanvasConnection;
 };
 
@@ -84,7 +85,7 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
     (Array.isArray(ops) ? ops : []).forEach((op, index) => {
         if (!op?.type) return;
         if (op.type === "add_node") {
-            const node = options.createNode?.(op, index) || createAgentNode(op, index, nodes);
+            const node = options.createNode?.(op, index, nodes) || createAgentNode(op, index, nodes);
             nodes = [...nodes, node];
             selectedNodeIds = [node.id];
         }
@@ -118,29 +119,24 @@ export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasA
 function createAgentNode(op: Extract<CanvasAgentOp, { type: "add_node" }>, index: number, currentNodes: CanvasNodeData[]): CanvasNodeData {
     const nodeType = Object.values(CanvasNodeType).includes(op.nodeType as CanvasNodeType) ? op.nodeType! : CanvasNodeType.Text;
     const spec = getNodeSpec(nodeType);
+    const requested = op.position || { x: op.x ?? 0, y: op.y ?? 0 };
+    const hasExplicitPosition = Boolean(op.position || typeof op.x === "number" || typeof op.y === "number");
+    const position = hasExplicitPosition
+        ? requested
+        : findAvailableCanvasPosition(
+              currentNodes.length ? canvasRightmostGridPosition(currentNodes) : requested,
+              { width: spec.width, height: spec.height },
+              currentNodes,
+          );
     return {
         id: op.id || `${nodeType}-${Date.now()}-${index}`,
         type: nodeType,
         title: op.title || spec.title,
-        position: op.position || { x: op.x ?? nextAgentNodeX(currentNodes), y: op.y ?? nextAgentNodeY(currentNodes) },
+        position,
         width: op.width || spec.width,
         height: op.height || spec.height,
         metadata: { ...spec.metadata, ...op.metadata },
     };
-}
-
-/** 未显式指定位置的新节点：横向流式排到已有节点右侧，避免与 Agent 快照导致的重叠/斜向堆叠。 */
-function nextAgentNodeX(nodes: CanvasNodeData[]): number {
-    if (!nodes.length) return 0;
-    const maxRight = Math.max(...nodes.map((node) => node.position.x + (node.width || 240)));
-    return Math.round(maxRight + 40);
-}
-
-function nextAgentNodeY(nodes: CanvasNodeData[]): number {
-    if (!nodes.length) return 0;
-    const maxRight = Math.max(...nodes.map((node) => node.position.x + (node.width || 240)));
-    const rightMost = nodes.filter((node) => node.position.x + (node.width || 240) === maxRight);
-    return rightMost.length ? rightMost[0].position.y : 0;
 }
 
 function opLabel(type: string) {

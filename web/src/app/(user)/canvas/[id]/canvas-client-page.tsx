@@ -59,6 +59,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph, getMentionResourceNodes, isCanvasResourceNode } from "../utils/canvas-resource-references";
+import { canvasRightmostGridPosition, findAvailableCanvasPosition } from "../utils/canvas-node-placement";
 import { resolveComposerOverlayPosition } from "../utils/canvas-composer-position";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { isGroupExecutableNode } from "../utils/canvas-group-execution";
@@ -1592,13 +1593,15 @@ function LeaferCanvasPage() {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            const newNode = createCanvasNode(type, pending.position);
+            const spec = NODE_DEFAULT_SIZE[type];
+            const newNode = createCanvasNode(type, findAvailableCanvasPosition(pending.position, spec, nodesRef.current));
             const connection = normalizeConnectionWithNodeMap(pending.connection.nodeId, newNode.id, buildNodeById([...nodesRef.current, newNode]), pending.connection.handleType);
             if (!connection) {
                 message.warning("配置节点之间不能连接");
                 return;
             }
-            setNodes((prev) => [...prev, newNode]);
+            nodesRef.current = [...nodesRef.current, newNode];
+            setNodes(nodesRef.current);
             setConnections((prev) => [...prev, createCanvasConnection(connection.fromNodeId, connection.toNodeId)]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
@@ -1761,9 +1764,25 @@ function LeaferCanvasPage() {
                 before,
                 pureOps,
                 {
-                    createNode: (op, index) => {
+                    createNode: (op, index, currentNodes) => {
                         const type = op.nodeType === CanvasNodeType.Config ? CanvasNodeType.ComfyUI : op.nodeType || CanvasNodeType.Text;
-                        const node = createCanvasNode(type, op.position || { x: op.x ?? index * 36, y: op.y ?? index * 36 }, op.metadata);
+                        const spec = getNodeSpec(type);
+                        const width = typeof op.width === "number" ? op.width : spec.width;
+                        const height = typeof op.height === "number" ? op.height : spec.height;
+                        const requested = op.position || { x: op.x ?? 0, y: op.y ?? 0 };
+                        const hasExplicitPosition = Boolean(op.position || typeof op.x === "number" || typeof op.y === "number");
+                        const placement = hasExplicitPosition
+                            ? requested
+                            : findAvailableCanvasPosition(
+                                  currentNodes.length ? canvasRightmostGridPosition(currentNodes) : requested,
+                                  { width, height },
+                                  currentNodes,
+                              );
+                        const node = createCanvasNode(
+                            type,
+                            placement,
+                            op.metadata,
+                        );
                         return {
                             ...node,
                             ...(op.id ? { id: op.id } : null),
@@ -1822,6 +1841,11 @@ function LeaferCanvasPage() {
             } = {},
         ) => {
             const targetPosition = options.position || lastCanvasPositionRef.current || getCanvasCenter();
+            const fallbackSize = NODE_DEFAULT_SIZE[type];
+            const placement = findAvailableCanvasPosition(targetPosition, {
+                width: options.width || fallbackSize.width,
+                height: options.height || fallbackSize.height,
+            }, nodesRef.current);
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -1831,12 +1855,13 @@ function LeaferCanvasPage() {
                       }
                     : undefined;
             const newNode = {
-                ...createCanvasNode(type, targetPosition, { ...configMetadata, ...options.metadata }),
+                ...createCanvasNode(type, placement, { ...configMetadata, ...options.metadata }),
                 ...(options.width ? { width: options.width } : null),
                 ...(options.height ? { height: options.height } : null),
             };
 
-            setNodes((prev) => [...prev, newNode]);
+            nodesRef.current = [...nodesRef.current, newNode];
+            setNodes(nodesRef.current);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             // 自定义工具节点（脚本/剪辑/导演台等）拥有独立交互面板，不打开通用生成 Composer。
@@ -1917,8 +1942,9 @@ function LeaferCanvasPage() {
 
     const createScriptNode = useCallback(() => {
         const targetPosition = lastCanvasPositionRef.current || getCanvasCenter();
+        const placement = findAvailableCanvasPosition(targetPosition, NODE_DEFAULT_SIZE[CanvasNodeType.Script], nodesRef.current);
         const newNode = {
-            ...createCanvasNode(CanvasNodeType.Script, targetPosition, {
+            ...createCanvasNode(CanvasNodeType.Script, placement, {
                 canvasTool: "script",
                 content: DEFAULT_SCRIPT_BODY,
                 scriptTitle: "未命名脚本",
@@ -1932,7 +1958,7 @@ function LeaferCanvasPage() {
             height: 160,
         };
         nodesRef.current = [...nodesRef.current, newNode];
-        setNodes((prev) => [...prev, newNode]);
+        setNodes(nodesRef.current);
         setSelectedNodeIds(new Set([newNode.id]));
         setSelectedConnectionId(null);
         setDialogNodeId(null);
@@ -2540,9 +2566,11 @@ function LeaferCanvasPage() {
             const trimmed = text.trim();
             if (!trimmed) return false;
 
-            const node = createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS });
+            const position = findAvailableCanvasPosition(getCanvasCenter(), NODE_DEFAULT_SIZE[CanvasNodeType.Text], nodesRef.current);
+            const node = createCanvasNode(CanvasNodeType.Text, position, { content: trimmed, status: NODE_STATUS_SUCCESS });
 
-            setNodes((prev) => [...prev, node]);
+            nodesRef.current = [...nodesRef.current, node];
+            setNodes(nodesRef.current);
             setSelectedNodeIds(new Set([node.id]));
             setSelectedConnectionId(null);
             setContextMenu(null);
