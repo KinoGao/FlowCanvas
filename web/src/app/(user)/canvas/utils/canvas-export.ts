@@ -29,7 +29,7 @@ export async function exportCanvasNodes(nodes: CanvasNodeData[], fileName = "画
                 continue;
             }
         }
-        if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Script) {
+        if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Script || node.type === CanvasNodeType.Annotation) {
             zipFiles.push({ name: uniqueName(title, "txt"), data: node.metadata?.content || node.metadata?.scriptBody || node.metadata?.prompt || "" });
             continue;
         }

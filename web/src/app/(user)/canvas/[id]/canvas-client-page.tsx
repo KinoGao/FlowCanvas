@@ -61,6 +61,7 @@ import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, nor
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph, getMentionResourceNodes, isCanvasResourceNode } from "../utils/canvas-resource-references";
 import { canvasRightmostGridPosition, findAvailableCanvasPosition } from "../utils/canvas-node-placement";
 import { resolveComposerOverlayPosition } from "../utils/canvas-composer-position";
+import { exportCanvasNodes } from "../utils/canvas-export";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { isGroupExecutableNode } from "../utils/canvas-group-execution";
 import { buildGridBeatPrompt, buildScriptBeats, buildScriptBeatsWithActs, formatScriptBeatNodeTitle } from "../utils/canvas-script-beats";
@@ -3148,6 +3149,17 @@ function LeaferCanvasPage() {
         const url = await resolveNodeContent(node);
         saveAs(url, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(url)}`);
     }, []);
+
+    const downloadSelectedNodes = useCallback(async () => {
+        const selected = nodesRef.current.filter((node) => selectedNodeIdsRef.current.has(node.id));
+        if (!selected.length) return;
+        try {
+            await exportCanvasNodes(selected, `画布选中-${selected.length}`);
+            message.success(`已打包下载 ${selected.length} 个选中节点`);
+        } catch {
+            message.error("批量下载失败，请稍后重试");
+        }
+    }, [message]);
 
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
@@ -6371,6 +6383,7 @@ function LeaferCanvasPage() {
                         onToggleAlign={() => setAlignPanelOpen((value) => !value)}
                         onAlignSlot={alignSelectedNodes}
                         onRun={runSelectedNodes}
+                        onDownload={() => void downloadSelectedNodes()}
                         onDelete={() => deleteNodes(selectedNodeIds)}
                     />
                 ) : null}
