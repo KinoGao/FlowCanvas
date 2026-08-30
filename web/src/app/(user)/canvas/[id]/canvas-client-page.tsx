@@ -1470,10 +1470,11 @@ function LeaferCanvasPage() {
 
     const nodeById = useMemo(() => buildNodeById(nodes), [nodes]);
     const batchVisibilityIndex = useMemo(() => buildBatchVisibilityIndex(nodes, nodeById, collapsingBatchIds), [collapsingBatchIds, nodeById, nodes]);
+    const hiddenNodeIds = useMemo(() => new Set(nodes.filter((node) => node.metadata?.hidden).map((node) => node.id)), [nodes]);
     const connectionAdjacency = useMemo(() => buildConnectionAdjacency(connections), [connections]);
     const mountedNodeItems = useMemo(
-        () => nodes.filter((node) => !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
-        [batchVisibilityIndex, nodes],
+        () => nodes.filter((node) => !hiddenNodeIds.has(node.id) && !batchVisibilityIndex.hiddenBatchChildIds.has(node.id)).sort((a, b) => (a.type === CanvasNodeType.Group ? 0 : 1) - (b.type === CanvasNodeType.Group ? 0 : 1)),
+        [batchVisibilityIndex, hiddenNodeIds, nodes],
     );
     const canvasGraph = useMemo(() => createCanvasResourceGraph(nodes, connections, nodeById), [connections, nodeById, nodes]);
     const nodeRelationCounts = useMemo(
@@ -2066,6 +2067,23 @@ function LeaferCanvasPage() {
         deleteNodes(new Set(selectedNodeIdsRef.current));
     }, [deleteNodes]);
 
+    const toggleNodeVisibility = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (!node) return;
+        const hidden = !node.metadata?.hidden;
+        const next = nodesRef.current.map((item) =>
+            item.id === nodeId
+                ? { ...item, metadata: { ...item.metadata, hidden } }
+                : item,
+        );
+        nodesRef.current = next;
+        setNodes(next);
+        if (hidden && selectedNodeIdsRef.current.has(nodeId)) {
+            selectedNodeIdsRef.current.delete(nodeId);
+            setSelectedNodeIds(new Set(selectedNodeIdsRef.current));
+        }
+    }, [setSelectedNodeIds]);
+
     const deleteConnection = useCallback((connectionId: string) => {
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
@@ -2377,7 +2395,7 @@ function LeaferCanvasPage() {
         const rect = containerRef.current?.getBoundingClientRect();
         const width = rect?.width || size.width;
         const height = rect?.height || size.height;
-        const fitNodes = nodes.filter((node) => !hiddenBatchChildIdsRef.current.has(node.id));
+        const fitNodes = nodes.filter((node) => !hiddenNodeIds.has(node.id) && !hiddenBatchChildIdsRef.current.has(node.id));
         if (!fitNodes.length || !width || !height) {
             const next = { x: width / 2, y: height / 2, k: 1 };
             viewportRef.current = next;
@@ -2404,7 +2422,7 @@ function LeaferCanvasPage() {
         viewportRef.current = next;
         setViewport(next);
         setContextMenu(null);
-    }, [nodes, size.height, size.width]);
+    }, [hiddenNodeIds, nodes, size.height, size.width]);
 
     const setZoomScale = useCallback(
         (scale: number) => {
@@ -6137,9 +6155,14 @@ function LeaferCanvasPage() {
     const visibleConnections = useMemo(
         () =>
             showConnections
-                ? connections.filter((connection) => !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId) && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId))
+                ? connections.filter((connection) =>
+                    !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.fromNodeId)
+                    && !batchVisibilityIndex.hiddenConnectionEndpointIds.has(connection.toNodeId)
+                    && !hiddenNodeIds.has(connection.fromNodeId)
+                    && !hiddenNodeIds.has(connection.toNodeId),
+                )
                 : [],
-        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, showConnections],
+        [batchVisibilityIndex.hiddenConnectionEndpointIds, connections, hiddenNodeIds, showConnections],
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const scriptStudioNode = useMemo(() => (scriptStudioNodeId ? nodes.find((node) => node.id === scriptStudioNodeId && isCanvasScriptNode(node)) || null : null), [scriptStudioNodeId, nodes]);
@@ -6326,6 +6349,7 @@ function LeaferCanvasPage() {
                     onSelectNode={selectSingleNode}
                     onLocateNode={locateNode}
                     onPreviewNode={openAssetPreview}
+                    onToggleVisibility={toggleNodeVisibility}
                     onInsertDigitalHuman={insertDigitalHuman}
                     onOpenAssetPicker={() => openAssetPicker()}
                     onUpload={() => handleUploadRequest()}
@@ -6782,7 +6806,7 @@ function LeaferCanvasPage() {
 
                 {isMiniMapOpen ? (
                     <CanvasMiniMap
-                        nodes={nodes}
+                        nodes={mountedNodeItems}
                         selectedNodeIds={selectedNodeIds}
                         viewport={viewport}
                         containerSize={size}
@@ -7250,6 +7274,7 @@ function CanvasAssetManagerPanel({
     onSelectNode,
     onLocateNode,
     onPreviewNode,
+    onToggleVisibility,
     onInsertDigitalHuman,
     onOpenAssetPicker,
     onUpload,
@@ -7262,6 +7287,7 @@ function CanvasAssetManagerPanel({
     onSelectNode: (nodeId: string) => void;
     onLocateNode: (nodeId: string) => void;
     onPreviewNode: (nodeId: string) => void;
+    onToggleVisibility: (nodeId: string) => void;
     onInsertDigitalHuman: (persona: CanvasDigitalHuman) => void;
     onOpenAssetPicker: () => void;
     onUpload: () => void;
@@ -7329,7 +7355,7 @@ function CanvasAssetManagerPanel({
                 {/* 顶部页签：画布 | 资产 | 提示词库（指示条弹性滑动，对齐上游） */}
                 <div className="flex shrink-0 items-center gap-5 border-b px-4 pt-3" style={{ borderColor: theme.toolbar.border }}>
                     {([
-                        ["canvas", "画布"],
+                        ["canvas", "节点管理"],
                         ["assets", "资产"],
                         ["prompts", "提示词库"],
                     ] as const).map(([value, label]) => (
@@ -7351,14 +7377,14 @@ function CanvasAssetManagerPanel({
                             ) : null}
                         </button>
                     ))}
-                    <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭资产管理">
+                    <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭节点管理">
                         <X className="size-4" />
                     </button>
                 </div>
 
             <div className="flex min-h-0 flex-1 flex-col p-3">
                 {tab === "canvas" ? (
-                    <CanvasNodesTab theme={theme} nodes={nodes} selectedNodeIds={selectedNodeIds} onLocateNode={onLocateNode} onPreviewNode={onPreviewNode} />
+                    <CanvasNodesTab theme={theme} nodes={nodes} selectedNodeIds={selectedNodeIds} onLocateNode={onLocateNode} onPreviewNode={onPreviewNode} onToggleVisibility={onToggleVisibility} />
                 ) : tab === "prompts" ? (
                     <PromptListTab theme={theme} />
                 ) : (

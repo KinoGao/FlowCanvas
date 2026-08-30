@@ -58,7 +58,7 @@ export function CanvasZoomControls({ scale, onScaleChange, onReset, isMiniMapOpe
             ) : null}
 
             <div className="creative-os-zoom-cluster flex h-11 items-center gap-1 border px-1.5" style={dockStyle}>
-                <Tooltip title="资产管理">
+                <Tooltip title="节点管理 / 资产">
                     <button type="button" className="creative-os-icon-button !size-8" style={{ color: theme.toolbar.item }} onClick={onOpenMyAssets} aria-label="资产管理">
                         <FolderOpen className="size-4" />
                     </button>

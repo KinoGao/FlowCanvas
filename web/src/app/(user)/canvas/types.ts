@@ -69,6 +69,8 @@ export type CanvasNodeActionIntent =
     | "composition-timeline";
 export type CanvasBaseMetadata = {
     typeSequence?: number;
+    /** 节点管理面板隐藏节点：仅影响画布显示与连接线，不影响保存和引用计算。 */
+    hidden?: boolean;
     content?: string;
     composerContent?: string;
     canvasTool?: "script" | "videoComposition" | "director" | "panorama360";

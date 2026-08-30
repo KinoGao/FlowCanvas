@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type UIEvent } from "react";
 import { App, Spin } from "antd";
-import { Check, ChevronRight, Clapperboard, Download, Eye, FileText, Image as ImageIcon, Layers3, ListChecks, Music2, Search, SlidersHorizontal, StickyNote, Type, Video, Workflow } from "lucide-react";
+import { Check, ChevronRight, Clapperboard, Download, Eye, EyeOff, FileText, Image as ImageIcon, Layers3, ListChecks, Maximize2, Music2, Search, SlidersHorizontal, StickyNote, Type, Video, Workflow } from "lucide-react";
 
 import type { canvasThemes, CanvasTheme } from "@/lib/canvas-theme";
 import { peekCachedImageUrl } from "@/services/image-storage";
@@ -92,12 +92,14 @@ export function CanvasNodesTab({
     selectedNodeIds,
     onLocateNode,
     onPreviewNode,
+    onToggleVisibility,
 }: {
     theme: CanvasTheme;
     nodes: CanvasNodeData[];
     selectedNodeIds: Set<string>;
     onLocateNode: (nodeId: string) => void;
     onPreviewNode: (nodeId: string) => void;
+    onToggleVisibility: (nodeId: string) => void;
 }) {
     const { message } = App.useApp();
     const [keyword, setKeyword] = useState("");
@@ -169,10 +171,11 @@ export function CanvasNodesTab({
             {/* 标题行：元素数 + 多选模式 + 类型筛选 */}
             <div className="mb-2 flex items-center gap-2">
                 <span className="text-xs font-medium" style={{ color: theme.node.faint }}>
-                    画布元素
+                    节点管理
                 </span>
                 <span className="text-xs" style={{ color: theme.node.faint }}>
                     {filtered.length}
+                    {nodes.some((node) => node.metadata?.hidden) ? ` · 隐藏 ${nodes.filter((node) => node.metadata?.hidden).length}` : ""}
                 </span>
                 {selectMode ? (
                     <button type="button" className="ml-auto rounded-md px-2 py-0.5 text-xs transition hover:bg-white/10" style={{ color: theme.node.text }} onClick={exitSelect}>
@@ -226,7 +229,7 @@ export function CanvasNodesTab({
                                 <div
                                     key={node.id}
                                     className={`group relative flex items-center rounded-lg transition ${depth ? "ml-5" : ""} ${active ? "" : "hover:bg-white/5"}`}
-                                    style={active ? { background: theme.toolbar.activeBg } : undefined}
+                                    style={{ ...(active ? { background: theme.toolbar.activeBg } : {}), opacity: node.metadata?.hidden ? 0.58 : undefined }}
                                 >
                                     {depth ? <span className="pointer-events-none absolute -left-3 top-[-0.4rem] h-[calc(100%+0.4rem)] w-3 rounded-bl-md border-b border-l opacity-45" style={{ borderColor: theme.toolbar.border }} /> : null}
                                     {node.type === CanvasNodeType.Group && groupChildren ? (
@@ -271,17 +274,30 @@ export function CanvasNodesTab({
                                         {nodeStatusColor(node) ? <span className="size-1.5 shrink-0 rounded-full" style={{ background: nodeStatusColor(node) as string }} /> : null}
                                     </div>
                                     {selectMode ? null : (
-                                        <button
-                                            type="button"
-                                            className="grid size-7 shrink-0 place-items-center rounded-md opacity-45 transition hover:bg-white/10 hover:opacity-100"
-                                            title="放大预览"
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                onPreviewNode(node.id);
-                                            }}
-                                        >
-                                            <Eye className="size-3.5" />
-                                        </button>
+                                        <div className="flex shrink-0 items-center">
+                                            <button
+                                                type="button"
+                                                className="grid size-7 shrink-0 place-items-center rounded-md opacity-45 transition hover:bg-white/10 hover:opacity-100"
+                                                title={node.metadata?.hidden ? "显示节点" : "隐藏节点"}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onToggleVisibility(node.id);
+                                                }}
+                                            >
+                                                {node.metadata?.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="grid size-7 shrink-0 place-items-center rounded-md opacity-45 transition hover:bg-white/10 hover:opacity-100"
+                                                title="放大预览"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onPreviewNode(node.id);
+                                                }}
+                                            >
+                                                <Maximize2 className="size-3.5" />
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             );

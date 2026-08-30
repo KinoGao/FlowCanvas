@@ -88,12 +88,14 @@ type CanvasNodeData = {
 - `width` / `height`：画布世界坐标下的节点尺寸。
 - `pinColor`：节点的 Pin 颜色标记（右上角色点），对应画布 Pin 色板内的 id。
 - `metadata`：节点内容和业务状态。
+- `metadata.hidden`：节点管理面板隐藏标记，仅影响画布显示、连线和小地图，不影响保存与引用计算。
 
 `metadata` 当前常用字段：
 
 ```ts
 type CanvasNodeMetadata = {
   typeSequence?: number;
+  hidden?: boolean;
   content?: string;
   prompt?: string;
   status?: "idle" | "success" | "loading" | "error";
