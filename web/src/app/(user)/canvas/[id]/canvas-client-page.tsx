@@ -5234,10 +5234,8 @@ function LeaferCanvasPage() {
                     });
                     break;
                 case "voiceStudio":
-                    createNode(CanvasNodeType.Audio, {
-                        ...options,
-                        metadata: { canvasTool: "voiceStudio" },
-                    });
+                    // 语音工作台 = 素材库「音色」页签（音色管理/语音设计/克隆，直连本地 Qwen3-TTS）
+                    openMaterialLibrary("voices");
                     break;
                 case "debug":
                     createNode(CanvasNodeType.Debug, options);

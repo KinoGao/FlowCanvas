@@ -167,7 +167,7 @@ export function CanvasCreateNodeMenu({
             <CreateMenuOption theme={theme} icon={<Bug className="size-4" />} label="调试节点" description="查看 Payload 与任务状态" onClick={() => onAction("debug")} />
             <CreateMenuOption theme={theme} icon={<UserRoundCog className="size-4" />} label="人物替换" description="角色/人脸替换工作室" tag="Beta" disabled={!personReplaceAvailable} onClick={() => onAction("personReplacement")} tooltip={personReplaceUnavailableTip} />
             <CreateMenuOption theme={theme} icon={<Copy className="size-4" />} label="视频复刻" description="参考视频的生成复刻" tag="Beta" disabled={!videoReplicateAvailable} onClick={() => onAction("videoReplication")} tooltip={videoReplicateUnavailableTip} />
-            <CreateMenuOption theme={theme} icon={<Mic className="size-4" />} label="语音工作台" description="配音、音色与声音" onClick={() => onAction("voiceStudio")} />
+            <CreateMenuOption theme={theme} icon={<Mic className="size-4" />} label="语音工作台" description="音色管理、语音设计与克隆" onClick={() => onAction("voiceStudio")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="3D 世界" description="空间创作能力即将开放" tag="Beta" disabled />
             </div>
             <div className="px-2 pb-1 pt-2 text-xs font-medium opacity-60">资源</div>
