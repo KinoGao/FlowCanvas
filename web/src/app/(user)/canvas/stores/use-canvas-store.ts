@@ -5,6 +5,26 @@ import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
 import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasInputPreference, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
 
+export type CanvasProjectVersion = {
+    id: string;
+    createdAt: string;
+    label: string;
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    nodeSequenceCounters: CanvasNodeSequenceCounters;
+    referenceOrderCounter: number;
+    chatSessions: CanvasAssistantSession[];
+    activeChatId: string | null;
+    backgroundMode: CanvasBackgroundMode;
+    connectionStyle: CanvasConnectionStyle;
+    inputPreference: CanvasInputPreference;
+    snapToGrid: boolean;
+    alignmentGuidesEnabled: boolean;
+    showImageInfo: boolean;
+    showConnections: boolean;
+    viewport: ViewportTransform;
+};
+
 export type CanvasProject = {
     id: string;
     title: string;
@@ -23,10 +43,11 @@ export type CanvasProject = {
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
     showConnections: boolean;
+    versionHistory: CanvasProjectVersion[];
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "inputPreference" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "inputPreference" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "versionHistory" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -59,6 +80,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         alignmentGuidesEnabled: true,
         showImageInfo: false,
         showConnections: true,
+        versionHistory: [],
         viewport: initialViewport,
     };
 }
@@ -86,6 +108,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         showConnections: source.showConnections !== false,
+        versionHistory: Array.isArray(source.versionHistory) ? source.versionHistory.slice(0, 5) : [],
         viewport: source.viewport || initialViewport,
     };
 }

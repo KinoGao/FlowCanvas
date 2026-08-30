@@ -106,6 +106,7 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
         showConnections: source.showConnections !== false,
+        versionHistory: Array.isArray(source.versionHistory) ? source.versionHistory.slice(0, 5) : [],
         viewport: source.viewport || { x: 0, y: 0, k: 1 },
     };
 }

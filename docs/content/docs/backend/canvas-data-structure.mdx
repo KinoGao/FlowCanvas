@@ -39,6 +39,17 @@ type CanvasProject = {
   snapToGrid: boolean;
   alignmentGuidesEnabled: boolean;
   showImageInfo: boolean;
+  versionHistory: {
+    id: string;
+    createdAt: string;
+    label: string;
+    nodes: CanvasNodeData[];
+    connections: CanvasConnection[];
+    nodeSequenceCounters: /* 类型级拆序号计数器 */;
+    referenceOrderCounter: number;
+    chatSessions: CanvasAssistantSession[];
+    viewport: { x: number; y: number; k: number };
+  }[];
   viewport: { x: number; y: number; k: number };
   workflowTemplates: CanvasWorkflowTemplate[];
 };
@@ -61,6 +72,7 @@ type CanvasProject = {
 - `showConnections`：是否显示所有正式连线。
 - `snapToGrid` / `alignmentGuidesEnabled`：网格吸附与辅助基准线开关。
 - `showImageInfo`：是否显示图片尺寸信息。
+- `versionHistory`：画布版本快照列表（最多保留 5 份），保存节点、连线、设置与视图，可一键恢复。
 - `viewport`：视口变换，`x/y` 是屏幕平移，`k` 是缩放比例。
 - `workflowTemplates`：工作流工具箱保存的项目内模板。
 

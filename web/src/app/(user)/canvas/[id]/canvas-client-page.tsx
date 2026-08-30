@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Globe, Grid2x2, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, PenTool, Plus, Search, Share2, Sparkles, StickyNote, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Globe, Grid2x2, History, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, PenTool, Plus, Search, Share2, Sparkles, StickyNote, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -53,11 +53,12 @@ import type { CanvasNodeGenerationMode } from "../components/canvas-node-prompt-
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { CanvasAudioToolModal } from "../components/canvas-audio-tool-modal";
 import { CanvasVideoSyncPreviewModal, type SyncVideoSource } from "../components/canvas-video-sync-preview-modal";
+import { CanvasVersionHistoryModal } from "../components/canvas-version-history-modal";
 import type { InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
 import { CanvasMiniMap } from "../components/canvas-minimap";
 import { MIN_CANVAS_ZOOM, clampCanvasZoom, stepCanvasZoom } from "../components/leafer-viewport";
-import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasStore, type CanvasProjectVersion } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
 import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph, getMentionResourceNodes, isCanvasResourceNode } from "../utils/canvas-resource-references";
@@ -823,6 +824,8 @@ function LeaferCanvasPage() {
     const openAssetPanel = useCanvasSidePanelStore((state) => state.openPanel);
     const toggleAssetPanel = useCanvasSidePanelStore((state) => state.togglePanel);
     const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false);
+    const [versionsOpen, setVersionsOpen] = useState(false);
+    const [versionHistory, setVersionHistory] = useState<CanvasProjectVersion[]>([]);
     const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
     const [materialLibraryTab, setMaterialLibraryTab] = useState<MaterialLibraryTab>("styles");
     const [assetPreviewNode, setAssetPreviewNode] = useState<CanvasNodeData | null>(null);
@@ -876,6 +879,8 @@ function LeaferCanvasPage() {
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
+    const versionHistoryRef = useRef(versionHistory);
+    versionHistoryRef.current = versionHistory;
     const nodeSequenceCountersRef = useRef<CanvasNodeSequenceCounters>({});
     const referenceOrderCounterRef = useRef(0);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
@@ -1199,6 +1204,7 @@ function LeaferCanvasPage() {
             setAlignmentGuidesEnabled(project.alignmentGuidesEnabled !== false);
             setShowImageInfo(project.showImageInfo || false);
             setShowConnections(project.showConnections !== false);
+            setVersionHistory(Array.isArray(project.versionHistory) ? project.versionHistory : []);
             setViewport({ ...project.viewport, k: clampCanvasZoom(project.viewport.k) });
             historyRef.current = { past: [], future: [] };
             if (historyCommitTimerRef.current) {
@@ -1296,7 +1302,7 @@ function LeaferCanvasPage() {
         if (projectSaveTimerRef.current) clearTimeout(projectSaveTimerRef.current);
         projectSaveTimerRef.current = setTimeout(() => {
             projectSaveTimerRef.current = null;
-            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
+            updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
             setSaveState("saved");
         }, 300);
         return () => {
@@ -1305,7 +1311,7 @@ function LeaferCanvasPage() {
                 projectSaveTimerRef.current = null;
             }
         };
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, projectLoaded, referenceOrderCounter, showConnections, showImageInfo, snapToGrid, updateProject, versionHistory]);
 
     // 后端工作区不可用时标记「离线」，恢复后回到已保存态。
     useEffect(() => {
@@ -1315,7 +1321,7 @@ function LeaferCanvasPage() {
 
     const retrySave = useCallback(async () => {
         setSaveState("saving");
-        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections });
+        updateProject(projectId, { nodes, connections, nodeSequenceCounters, referenceOrderCounter, chatSessions, activeChatId, backgroundMode, connectionStyle, inputPreference, snapToGrid, alignmentGuidesEnabled, showImageInfo, showConnections, versionHistory });
         if (saveMode === "backend" && token) {
             try {
                 const latest = useCanvasStore.getState();
@@ -1327,7 +1333,71 @@ function LeaferCanvasPage() {
         } else {
             setSaveState("saved");
         }
-    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject]);
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, connections, inputPreference, nodeSequenceCounters, nodes, projectId, referenceOrderCounter, saveMode, showConnections, showImageInfo, snapToGrid, token, updateProject, versionHistory]);
+
+    const saveCurrentVersion = useCallback(() => {
+        const version: CanvasProjectVersion = {
+            id: nanoid(),
+            createdAt: new Date().toISOString(),
+            label: `快照 ${new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`,
+            nodes: nodesRef.current,
+            connections: connectionsRef.current,
+            nodeSequenceCounters: nodeSequenceCountersRef.current,
+            referenceOrderCounter: referenceOrderCounterRef.current,
+            chatSessions,
+            activeChatId,
+            backgroundMode,
+            connectionStyle,
+            inputPreference,
+            snapToGrid,
+            alignmentGuidesEnabled,
+            showImageInfo,
+            showConnections,
+            viewport: viewportRef.current,
+        };
+        const next = [version, ...versionHistoryRef.current].slice(0, 5);
+        versionHistoryRef.current = next;
+        setVersionHistory(next);
+        message.success("已保存画布快照");
+    }, [activeChatId, alignmentGuidesEnabled, backgroundMode, chatSessions, connectionStyle, inputPreference, message, showConnections, showImageInfo, snapToGrid]);
+
+    const restoreVersion = useCallback(async (version: CanvasProjectVersion) => {
+        try {
+            const restoredNodes = await hydrateCanvasImages(version.nodes);
+            const restoredSessions = await hydrateAssistantImages(version.chatSessions || []);
+            nodesRef.current = restoredNodes;
+            connectionsRef.current = version.connections;
+            nodeSequenceCountersRef.current = { ...version.nodeSequenceCounters };
+            referenceOrderCounterRef.current = version.referenceOrderCounter;
+            setNodes(restoredNodes);
+            setConnections(version.connections);
+            setNodeSequenceCounters({ ...version.nodeSequenceCounters });
+            setReferenceOrderCounter(version.referenceOrderCounter);
+            setChatSessions(restoredSessions);
+            setActiveChatId(version.activeChatId || null);
+            setBackgroundMode(version.backgroundMode);
+            setConnectionStyle(version.connectionStyle || "curve");
+            setInputPreference(version.inputPreference || { wheelMode: "zoom", wheelDirection: "normal" });
+            setSnapToGrid(version.snapToGrid);
+            setAlignmentGuidesEnabled(version.alignmentGuidesEnabled !== false);
+            setShowImageInfo(version.showImageInfo);
+            setShowConnections(version.showConnections !== false);
+            setViewport(version.viewport || { x: 0, y: 0, k: 1 });
+            setSelectedNodeIds(new Set());
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+            message.success("已恢复画布快照");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "恢复快照失败");
+        }
+    }, [message]);
+
+    const deleteVersion = useCallback((versionId: string) => {
+        const next = versionHistoryRef.current.filter((version) => version.id !== versionId);
+        versionHistoryRef.current = next;
+        setVersionHistory(next);
+        message.success("已删除快照");
+    }, [message]);
 
     useEffect(() => {
         if (!projectLoaded) return;
@@ -1357,6 +1427,7 @@ function LeaferCanvasPage() {
                 connections: connectionsRef.current,
                 nodeSequenceCounters: nodeSequenceCountersRef.current,
                 referenceOrderCounter: referenceOrderCounterRef.current,
+                versionHistory: versionHistoryRef.current,
             });
             writeCanvasRecoveryMarker(markerKey, false);
         };
@@ -6661,6 +6732,7 @@ function LeaferCanvasPage() {
                     onDeleteProject={deleteCurrentProject}
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
+                    onOpenVersions={() => setVersionsOpen(true)}
                     saveState={saveState}
                     onRetrySave={() => void retrySave()}
                 />
@@ -7274,6 +7346,14 @@ function LeaferCanvasPage() {
                     onDelete={deleteWorkflowTemplate}
                 />
                 <CanvasGenerationHistoryModal open={generationHistoryOpen} nodes={nodes} onClose={() => setGenerationHistoryOpen(false)} onSelectNode={duplicateNode} />
+                <CanvasVersionHistoryModal
+                    open={versionsOpen}
+                    versions={versionHistory}
+                    onClose={() => setVersionsOpen(false)}
+                    onSave={saveCurrentVersion}
+                    onRestore={(version) => void restoreVersion(version)}
+                    onDelete={deleteVersion}
+                />
                     </>
                 ) : null}
             </section>
@@ -7845,6 +7925,7 @@ function CanvasTopBar({
     onDeleteProject,
     agentOpen,
     onToggleAgent,
+    onOpenVersions,
     saveState,
     onRetrySave,
 }: {
@@ -7863,6 +7944,7 @@ function CanvasTopBar({
     onDeleteProject: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
+    onOpenVersions: () => void;
     saveState: CanvasSaveState;
     onRetrySave: () => void;
 }) {
@@ -7928,6 +8010,9 @@ function CanvasTopBar({
             </div>
 
             <div className="pointer-events-auto flex items-center gap-1.5">
+                <button type="button" className="creative-os-icon-button" onClick={onOpenVersions} aria-label="打开版本历史" title="版本历史">
+                    <History className="size-[17px]" />
+                </button>
                 <Dropdown
                     trigger={["click"]}
                     menu={{
