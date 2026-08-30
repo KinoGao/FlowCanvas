@@ -273,6 +273,12 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 流式（SSE）与非流式响应解析均收集 `reasoning_content`；`toChatMessages` 转换 assistant / function_call 消息时带上该字段；Agent 工具循环、跨轮历史（最近 8 条）与「批准工具后继续」链路全部透传。
 - 需要确认：在线 Agent 选择 DeepSeek 思考模式模型（如 deepseek-v4-flash 开启思考）后连续多轮对话 / 工具调用不再报 reasoning_content 错误；普通模型（无思考模式）行为不变；本地 Agent（Codex）不受影响。
 
+## 画布 Agent 工具调用消息配对修复
+
+- 修复在线 Agent 工具执行完成后继续对话报错「An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'」：所有 `requestToolResponse` 调用在发送前经过统一工具消息清洗，连续 function_call 合并为单一 tool_calls 块，孤立的调用/结果与空/重复 ID 自动过滤；流式解析不再保留空 tool_calls sentinel。
+- 新增纯函数回归测试覆盖单调用、多调用、孤儿调用、孤儿结果、重复 ID 与预分组调用。
+- 需要确认：在线 Agent 读取画布后仍能继续回答同一轮问题；DeepSeek / 其他严格 OpenAI 兼容网关连续多轮工具调用不再出现 400；统一创作 Agent 页（/create）与任务规划模式不回归。
+
 
 
 

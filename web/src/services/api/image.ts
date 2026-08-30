@@ -36,7 +36,9 @@ export type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string; reasoningContent?: string } | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseFunctionCallMessage = { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string; reasoningContent?: string };
+export type ResponseFunctionCallsMessage = { type: "function_calls"; calls: ResponseToolCall[]; reasoningContent?: string };
+export type ResponseInputMessage = AiTextMessage | ResponseFunctionCallMessage | ResponseFunctionCallsMessage | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
@@ -94,6 +96,100 @@ type ChatCompletionPayload = {
 type ChatDeltaToolCall = { index?: number; id?: string; type?: "function"; function?: { name?: string; arguments?: string } };
 type ChatStreamState = { buffer: string; text: string; reasoningContent: string; toolCalls: ResponseToolCall[]; error?: string };
 type ResponseStreamState = { buffer: string; text: string; payload?: ResponseApiPayload; error?: string };
+
+function isValidToolCall(call: ResponseToolCall): call is ResponseToolCall {
+    return Boolean(call?.id?.trim() && call?.type === "function" && call?.function?.name?.trim());
+}
+
+/** 归一化模型返回的工具调用：去空、去重，保留第一个有效参数；严格网关会拒绝缺少 id/name 的调用。 */
+export function sanitizeToolCalls(toolCalls: ResponseToolCall[]): ResponseToolCall[] {
+    const calls = Array.isArray(toolCalls) ? toolCalls : [];
+    const byId = new Map<string, ResponseToolCall>();
+    for (const call of calls) {
+        const normalized = call && call.function ? { ...call, function: { ...call.function, arguments: call.function.arguments || "{}" } } : call;
+        if (!isValidToolCall(normalized)) continue;
+        if (byId.has(normalized.id)) continue;
+        byId.set(normalized.id, normalized);
+    }
+    return Array.from(byId.values());
+}
+
+/**
+ * 发送给模型前清理工具调用消息：
+ * - 把连续的 function_call 合并为单一 function_calls 块，避免严格网关把多个 assistant tool_calls 分开校验；
+ * - 只有 id 和 name 完整的调用会保留；
+ * - 没有对应结果的调用整块丢弃，没有来源的 tool 结果同样丢弃；
+ * - 重复结果只保留第一个，防止“工具消息不足”或重复 ID 触发 400。
+ */
+export function sanitizeToolMessages(messages: ResponseInputMessage[]): ResponseInputMessage[] {
+    const result: ResponseInputMessage[] = [];
+    let index = 0;
+    while (index < messages.length) {
+        const message = messages[index];
+        if (!("type" in message)) {
+            if (message.role === "tool") {
+                index += 1;
+                continue;
+            }
+            result.push(message);
+            index += 1;
+            continue;
+        }
+        if (message.type !== "function_call" && message.type !== "function_calls") {
+            result.push(message);
+            index += 1;
+            continue;
+        }
+
+        const calls: ResponseToolCall[] = [];
+        let reasoningContent: string | undefined;
+        let cursor = index;
+        while (cursor < messages.length) {
+            const current = messages[cursor];
+            if (!("type" in current)) break;
+            if (current.type === "function_calls") {
+                if (Array.isArray(current.calls)) calls.push(...current.calls);
+                reasoningContent ||= current.reasoningContent;
+            } else if (current.type === "function_call") {
+                calls.push({
+                    id: current.call_id,
+                    type: "function",
+                    function: { name: current.name, arguments: current.arguments || "{}" },
+                    ...(current.thoughtSignature ? { thoughtSignature: current.thoughtSignature } : {}),
+                });
+                reasoningContent ||= current.reasoningContent;
+            } else {
+                break;
+            }
+            cursor += 1;
+        }
+
+        const toolResults: Array<{ tool_call_id: string; content: string }> = [];
+        while (cursor < messages.length) {
+            const current = messages[cursor];
+            if (!("role" in current) || current.role !== "tool") break;
+            if (current.tool_call_id?.trim()) toolResults.push({ tool_call_id: current.tool_call_id, content: current.content });
+            cursor += 1;
+        }
+
+        const normalizedCalls = sanitizeToolCalls(calls);
+        const wantedIds = new Set(normalizedCalls.map((call) => call.id));
+        const resultById = new Map<string, string>();
+        for (const toolResult of toolResults) {
+            if (!wantedIds.has(toolResult.tool_call_id) || resultById.has(toolResult.tool_call_id)) continue;
+            resultById.set(toolResult.tool_call_id, toolResult.content);
+        }
+        const complete = normalizedCalls.every((call) => resultById.has(call.id));
+        if (complete && normalizedCalls.length) {
+            result.push({ type: "function_calls", calls: normalizedCalls, ...(reasoningContent ? { reasoningContent } : {}) });
+            for (const call of normalizedCalls) {
+                result.push({ role: "tool", tool_call_id: call.id, content: resultById.get(call.id) || "" });
+            }
+        }
+        index = cursor;
+    }
+    return result;
+}
 
 type ImageApiResponse = Record<string, unknown> & {
     data?: unknown;
@@ -446,7 +542,14 @@ function withSystemMessage<T extends ResponseInputMessage>(config: AiConfig, mes
 
 function toResponseInput(messages: ResponseInputMessage[]): ResponseInputItem[] {
     return messages.flatMap((message): ResponseInputItem[] => {
-        if ("type" in message) return [message];
+        if ("type" in message) {
+            if (message.type === "function_calls") {
+                return message.calls.flatMap((call): ResponseInputItem[] => [
+                    { type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments },
+                ]);
+            }
+            return [message];
+        }
         if (message.role === "tool") return [{ type: "function_call_output", call_id: message.tool_call_id, output: message.content }];
         return [{ role: message.role, content: toResponseContent(message.content || "") }];
     });
@@ -470,6 +573,16 @@ function toResponseTool(tool: ResponseFunctionTool): ResponseApiToolDefinition {
 function toChatMessages(messages: ResponseInputMessage[]): ChatMessage[] {
     return messages.flatMap((message): ChatMessage[] => {
         if ("type" in message) {
+            if (message.type === "function_calls") {
+                return [
+                    {
+                        role: "assistant",
+                        tool_calls: sanitizeToolCalls(message.calls),
+                        // DeepSeek 等思考模式模型要求 assistant 消息回传 reasoning_content。
+                        ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {}),
+                    },
+                ];
+            }
             return [
                 {
                     role: "assistant",
@@ -517,7 +630,7 @@ function parseChatToolResponse(payload: ChatCompletionPayload): ToolResponseResu
     if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
     if (payload.error?.message) throw new Error(payload.error.message);
     const message = payload.choices?.[0]?.message;
-    return { content: message?.content || "", toolCalls: message?.tool_calls || [], reasoningContent: message?.reasoning_content || undefined };
+    return { content: message?.content || "", toolCalls: sanitizeToolCalls(message?.tool_calls || []), reasoningContent: message?.reasoning_content || undefined };
 }
 
 function parseToolResponse(payload: ResponseApiPayload): ToolResponseResult {
@@ -536,7 +649,7 @@ function parseToolResponse(payload: ResponseApiPayload): ToolResponseResult {
             function: { name: item.name || "", arguments: item.arguments || "{}" },
         }))
         .filter((item) => item.id && item.function.name);
-    return { content, toolCalls };
+    return { content, toolCalls: sanitizeToolCalls(toolCalls) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -653,12 +766,17 @@ function consumeChatStreamText(state: ChatStreamState, text: string, onDelta?: (
 function mergeChatDeltaToolCall(toolCalls: ResponseToolCall[], delta: ChatDeltaToolCall) {
     const index = delta.index ?? toolCalls.length;
     const existing = toolCalls[index] || { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+    const id = delta.id || existing.id;
+    const name = delta.function?.name || existing.function.name;
+    const chunkArguments = delta.function?.arguments || "";
+    if (!id && !name && !chunkArguments) return;
+    if (!existing.id && !existing.function.name && !id && !name) return;
     toolCalls[index] = {
-        id: delta.id || existing.id,
+        id,
         type: "function",
         function: {
-            name: delta.function?.name || existing.function.name,
-            arguments: `${existing.function.arguments || ""}${delta.function?.arguments || ""}`,
+            name,
+            arguments: `${existing.function.arguments || ""}${chunkArguments}`,
         },
     };
 }
@@ -693,7 +811,7 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
             const state: ChatStreamState = { buffer: "", text: "", reasoningContent: "", toolCalls: [] };
             consumeChatStreamText(state, text, onDelta, true);
             if (state.error) throw new Error(state.error);
-            return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name), reasoningContent: state.reasoningContent || undefined };
+            return { content: state.text, toolCalls: sanitizeToolCalls(state.toolCalls), reasoningContent: state.reasoningContent || undefined };
         }
     }
     if (!response.body) {
@@ -711,7 +829,7 @@ async function requestStreamingChatCompletion(config: AiConfig, body: Record<str
     }
     consumeChatStreamText(state, decoder.decode(), onDelta, true);
     if (state.error) throw new Error(state.error);
-    return { content: state.text, toolCalls: state.toolCalls.filter((item) => item.id && item.function.name), reasoningContent: state.reasoningContent || undefined };
+    return { content: state.text, toolCalls: sanitizeToolCalls(state.toolCalls), reasoningContent: state.reasoningContent || undefined };
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {
@@ -728,8 +846,14 @@ function toGeminiContents(messages: ResponseInputMessage[]): GeminiContent[] {
     const callNameById = new Map<string, string>();
     return messages.flatMap((message): GeminiContent[] => {
         if ("type" in message) {
-            callNameById.set(message.call_id, message.name);
-            return [{ role: "model", parts: [{ functionCall: { id: message.call_id, name: message.name, args: jsonObject(message.arguments) }, ...(message.thoughtSignature ? { thoughtSignature: message.thoughtSignature } : {}) }] }];
+            const calls = message.type === "function_calls" ? message.calls : [{ id: message.call_id, type: "function" as const, function: { name: message.name, arguments: message.arguments }, ...(message.thoughtSignature ? { thoughtSignature: message.thoughtSignature } : {}) }];
+            calls.forEach((call) => callNameById.set(call.id, call.function.name));
+            return [
+                {
+                    role: "model",
+                    parts: calls.map((call) => ({ functionCall: { id: call.id, name: call.function.name, args: jsonObject(call.function.arguments) }, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) })),
+                },
+            ];
         }
         if (message.role === "tool") {
             const name = callNameById.get(message.tool_call_id) || "tool_result";
@@ -1157,13 +1281,14 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
+    const safeMessages = sanitizeToolMessages(messages);
     try {
         if (requestConfig.apiFormat === "gemini") {
-            return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
+            return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, safeMessages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
         }
         const body = (choice: ToolChoice) => ({
             model: requestConfig.model,
-            messages: toChatMessages(withSystemMessage(requestConfig, messages)),
+            messages: toChatMessages(withSystemMessage(requestConfig, safeMessages)),
             tools: tools.map(toChatTool),
             tool_choice: toChatToolChoice(choice),
             parallel_tool_calls: false,

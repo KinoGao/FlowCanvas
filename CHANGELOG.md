@@ -52,6 +52,8 @@
 
 - 修复在线 Agent 使用 DeepSeek 等思考模式模型时多轮对话报错「The `reasoning_content` in the thinking mode must be passed back to the API」：流式 / 非流式解析现在收集 `reasoning_content`，assistant 与 function_call 消息回传时带上该字段；工具循环、跨轮历史与「批准工具后继续」链路均透传思考内容。
 
+- 修复画布 Agent 工具执行后继续对话报错「An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'」：发送给模型前统一清洗工具消息，连续 function_call 合并为单一 tool_calls 块、孤立的调用/结果与空/重复 ID 自动过滤，流式解析同步丢弃空 tool_calls sentinel，避免严格网关因消息配对不完整返回 400。
+
 - 修复视频生成「下载环节超时」问题：Junli 等上游 CDN 下载速度慢（约 15KB/s，15 秒 720p 视频需 8-10 分钟），此前后端用 `ofByteArray` 等全部下载完才返回响应，前端 60 秒收不到任何字节即报「请求超时」（任务实际已生成成功）。现改为流式透传：GenericOpenAiAdapter / JunliOpenAiAdapter 的媒体下载端点（/content 等）响应头立即返回、body 边收边发；前端下载超时放宽到 10 分钟，节点在下载阶段显示「视频已生成，正在下载」提示，下载失败时保留任务 ID 供刷新后恢复。
 
 - 管理后台新增「请求日志」：新增 `model_request_logs` 表记录经模型代理发出的每一次上游请求（创建 / 轮询 / 下载，含耗时、状态码、脱敏错误原因、对应任务 key），`GET /api/admin/model-request-logs` 按模型 / 状态码 / 仅错误筛选分页查询，用于排查生成失败与超时；日志保留 7 天，写入失败不影响生成链路。

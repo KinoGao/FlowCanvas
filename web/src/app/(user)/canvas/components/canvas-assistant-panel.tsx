@@ -10,7 +10,7 @@ import { modelOptionName, normalizeModelOptionValue, resolveModelChannel, select
 import { useVideoModelCapability } from "@/hooks/use-video-model-capability";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
-import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
+import { requestToolResponse, sanitizeToolMessages, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import { getMediaBlob } from "@/services/file-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -1928,7 +1928,7 @@ async function buildOnlineSystemPrompt(artSkill?: string, storySkill?: string, d
 async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, options?: { artSkill?: string; storySkill?: string; directorSkill?: string }): Promise<ResponseInputMessage[]> {
     const refs = userMessage.references || [];
     const videoFrames = await Promise.all(refs.filter((item) => item.type === CanvasNodeType.Video).map(videoReferenceToFrames));
-    return [
+    return sanitizeToolMessages([
         { role: "system", content: await buildOnlineSystemPrompt(options?.artSkill, options?.storySkill, options?.directorSkill) },
         ...history
             .filter((message): message is CanvasAssistantMessage & { role: "user" | "assistant" | "system" } => message.role === "user" || message.role === "assistant" || message.role === "system")
@@ -1946,7 +1946,7 @@ async function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, history: Ca
                 ...(await Promise.all(refs.filter((item) => item.dataUrl).map(async (item) => ({ type: "image_url" as const, image_url: { url: await imageToDataUrl(item) } })))),
             ],
         },
-    ];
+    ]);
 }
 
 async function videoReferenceToFrames(reference: CanvasAssistantReference) {
