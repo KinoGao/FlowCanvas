@@ -421,7 +421,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                                 <span className="text-xs font-medium">停止</span>
                             </>
                         ) : (
-                            <ArrowUp className="size-4" />
+                            <>
+                                <ArrowUp className="size-4" />
+                                <span className="text-xs font-medium">生成</span>
+                            </>
                         )}
                     </span>
                 </Button>
@@ -608,12 +611,15 @@ function ImageComposer({
                     <Button
                         type="primary"
                         danger={isRunning}
-                        className="creative-os-primary-action !ml-1 !size-9 !min-w-9 shrink-0 !rounded-full !p-0"
+                        className="creative-os-primary-action !ml-1 !h-9 shrink-0 !rounded-full !px-3.5"
                         disabled={!isRunning && !prompt.trim()}
                         aria-label={isRunning ? "停止生成" : "生成图片"}
                         onClick={isRunning ? onStop : onGenerate}
                     >
-                        {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                        <span className="flex items-center gap-1.5">
+                            {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                            <span>{isRunning ? "停止" : "生成"}</span>
+                        </span>
                     </Button>
                 </Tooltip>
             </div>
@@ -921,12 +927,15 @@ function VideoComposer({
                     <Button
                         type="primary"
                         danger={isRunning}
-                        className="creative-os-primary-action !ml-1 !size-9 !min-w-9 shrink-0 !rounded-full !p-0"
+                        className="creative-os-primary-action !ml-1 !h-9 shrink-0 !rounded-full !px-3.5"
                         disabled={!isRunning && (!canGenerate || disabled || Boolean(validationMessage))}
                         aria-label={isRunning ? "停止生成" : "生成视频"}
                         onClick={isRunning ? onStop : onGenerate}
                     >
-                        {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                        <span className="flex items-center gap-1.5">
+                            {isRunning ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
+                            <span>{isRunning ? "停止" : "生成"}</span>
+                        </span>
                     </Button>
                 </Tooltip>
             </div>

@@ -57,7 +57,7 @@ export function CanvasReferenceStrip({ references = [], className = "", variant 
                 {onAddReference ? (
                     <button
                         type="button"
-                        className={variant === "media" ? "grid size-12 shrink-0 place-items-center rounded-lg border transition hover:opacity-75" : "grid size-8 shrink-0 place-items-center rounded-md border transition hover:opacity-75"}
+                        className={variant === "media" ? "grid size-12 shrink-0 place-items-center rounded-lg border border-dashed transition hover:opacity-75" : "grid size-8 shrink-0 place-items-center rounded-md border border-dashed transition hover:opacity-75"}
                         style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}
                         title="从画布添加引用"
                         aria-label="从画布添加引用"
@@ -68,7 +68,14 @@ export function CanvasReferenceStrip({ references = [], className = "", variant 
                             onAddReference();
                         }}
                     >
-                        <Plus className={variant === "media" ? "size-4" : "size-3.5"} />
+                        {variant === "media" ? (
+                            <span className="flex flex-col items-center gap-0.5">
+                                <Plus className="size-4" />
+                                <span className="text-[8px] leading-none opacity-70">添加</span>
+                            </span>
+                        ) : (
+                            <Plus className="size-3.5" />
+                        )}
                     </button>
                 ) : null}
             </div>
