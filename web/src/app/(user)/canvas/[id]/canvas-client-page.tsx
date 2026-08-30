@@ -3327,6 +3327,56 @@ function LeaferCanvasPage() {
         }
     }, [createCanvasConnection, createCanvasNode, message]);
 
+    const extractVideoKeyframesNode = useCallback(async (node: CanvasNodeData) => {
+        if (node.type !== CanvasNodeType.Video || !node.metadata?.content) {
+            message.warning("请先上传或生成视频");
+            return;
+        }
+        const loadingKey = `video-keyframes-${node.id}`;
+        message.loading({ content: "正在提取视频关键帧…", key: loadingKey, duration: 0 });
+        try {
+            const src = await resolveNodeContent(node);
+            const { frames } = await captureVideoFrames(src, { maxFrames: 6, maxWidth: 640 });
+            const children: CanvasNodeData[] = [];
+            const connections: CanvasConnection[] = [];
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const gap = 40;
+            const columns = 2;
+            const startX = node.position.x + node.width + 96;
+            for (let index = 0; index < frames.length; index += 1) {
+                const uploaded = await uploadImage(frames[index].dataUrl);
+                const size = fitNodeSize(uploaded.width, uploaded.height, spec.width, spec.height);
+                const position = {
+                    x: startX + (index % columns) * (spec.width + gap),
+                    y: node.position.y + Math.floor(index / columns) * (spec.height + gap),
+                };
+                const child: CanvasNodeData = {
+                    ...createCanvasNode(CanvasNodeType.Image, {
+                        x: position.x + size.width / 2,
+                        y: position.y + size.height / 2,
+                    }, { ...imageMetadata(uploaded), prompt: `关键帧 ${index + 1}` }),
+                    position,
+                    width: size.width,
+                    height: size.height,
+                };
+                children.push(child);
+                connections.push(createCanvasConnection(node.id, child.id));
+            }
+            const nextNodes = [...nodesRef.current, ...children];
+            const nextConnections = [...connectionsRef.current, ...connections];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([children[0]?.id].filter(Boolean)));
+            setSelectedConnectionId(null);
+            setDialogNodeId(children[0]?.id || null);
+            message.success({ content: `已提取 ${children.length} 个关键帧`, key: loadingKey });
+        } catch (error) {
+            message.error({ content: error instanceof Error ? error.message : "关键帧提取失败", key: loadingKey });
+        }
+    }, [createCanvasConnection, createCanvasNode, message]);
+
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text) {
@@ -6953,6 +7003,7 @@ function LeaferCanvasPage() {
                         onTrimVideo={(node) => void openVideoTrim(node)}
                         onReverseVideo={(node) => void reverseVideoNode(node)}
                         onExtractVideoAudio={(node) => void extractVideoAudioNode(node)}
+                        onExtractKeyframes={(node) => void extractVideoKeyframesNode(node)}
                         onRetry={handleRetryNodeAction}
                         onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                         onQuickStoryboard={(node, command) => createScriptGridStoryboard(node, command)}

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Download, Ellipsis, Clapperboard, FolderPlus, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Play, Plus, RefreshCw, ScanSearch, Scissors, Settings2, Sparkles, Trash2, Upload, Video, Workflow } from "lucide-react";
+import { Camera, Download, Ellipsis, Clapperboard, FolderPlus, Info, LayoutGrid, MessageSquare, Minus, Music2, Pencil, Play, Plus, RefreshCw, ScanSearch, Scissors, Settings2, Sparkles, Trash2, Upload, Video, Workflow } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
@@ -44,6 +44,7 @@ type CanvasNodeHoverToolbarProps = {
     onTrimVideo: (node: CanvasNodeData) => void;
     onReverseVideo: (node: CanvasNodeData) => void;
     onExtractVideoAudio: (node: CanvasNodeData) => void;
+    onExtractKeyframes: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onQuickStoryboard: (node: CanvasNodeData, command: CanvasSlashCommand) => void;
@@ -95,6 +96,7 @@ export function CanvasNodeHoverToolbar({
     onTrimVideo,
     onReverseVideo,
     onExtractVideoAudio,
+    onExtractKeyframes,
     onRetry,
     onToggleFreeResize,
     onQuickStoryboard,
@@ -197,6 +199,7 @@ export function CanvasNodeHoverToolbar({
         ...(hasVideo ? [{ id: "trimVideo", title: "剪辑视频（设置入点/出点导出片段）", label: "剪辑", icon: <Scissors className="size-4" />, onClick: () => onTrimVideo(currentNode) }] : []),
         ...(hasVideo ? [{ id: "reverseVideo", title: "本地倒放视频（无声导出）", label: "倒放", icon: <RefreshCw className="size-4" />, onClick: () => onReverseVideo(currentNode) }] : []),
         ...(hasVideo ? [{ id: "extractAudio", title: "提取视频音轨为音频节点", label: "提取音轨", icon: <Music2 className="size-4" />, onClick: () => onExtractVideoAudio(currentNode) }] : []),
+        ...(hasVideo ? [{ id: "keyframes", title: "批量提取视频关键帧", label: "关键帧", icon: <Camera className="size-4" />, onClick: () => onExtractKeyframes(currentNode) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
