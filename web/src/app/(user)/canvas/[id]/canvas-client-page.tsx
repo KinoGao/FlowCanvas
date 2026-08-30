@@ -370,7 +370,6 @@ const CanvasVideoCompositionDialog = lazy(() => import("../components/canvas-vid
 const CanvasNodeHoverToolbar = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeHoverToolbar })));
 const CanvasNodeInfoModal = lazy(() => import("../components/canvas-node-hover-toolbar").then((mod) => ({ default: mod.CanvasNodeInfoModal })));
 const CanvasNodePromptPanel = lazy(() => import("../components/canvas-node-prompt-panel").then((mod) => ({ default: mod.CanvasNodePromptPanel })));
-import { CanvasNodeInlineComposer } from "../components/canvas-node-inline-composer";
 const AssetPickerModal = lazy(() => import("../components/asset-picker-modal").then((mod) => ({ default: mod.AssetPickerModal })));
 const StoryAiDirectorDesk = lazy(() => import("../director/storyai/DirectorDesk").then((mod) => ({ default: mod.StoryAiDirectorDesk })));
 const LazyCanvasFallback = <CanvasRefreshShell />;
@@ -1982,8 +1981,7 @@ function LeaferCanvasPage() {
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
             // 自定义工具节点（脚本/剪辑/导演台等）拥有独立交互面板，不打开通用生成 Composer。
-            // P1 试点：Image 走节点内嵌编辑器，新建时不浮出下方 composer。
-            if (!options.metadata?.canvasTool && newNode.type !== CanvasNodeType.Image) setDialogNodeId(newNode.id);
+            if (!options.metadata?.canvasTool) setDialogNodeId(newNode.id);
         },
         [createCanvasNode, effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
     );
@@ -6045,38 +6043,6 @@ function LeaferCanvasPage() {
         [configInputSummaryById, configInputsById, confirmStopGeneration, handleConfigNodeChange, handleConfigNodeHeightChange, handleGenerateNode, mentionReferencesByNodeId, runningNodeId],
     );
 
-    // 生成节点「节点内嵌 composer」(P1 试点：仅 Image)。把生成编辑器 + 结果嵌进节点本体，节点随内容增高。
-    const renderCanvasGenerationNodeContent = useCallback(
-        (contentNode: CanvasNodeData) =>
-            contentNode.type === CanvasNodeType.Image && !contentNode.metadata?.canvasTool ? (
-                <CanvasNodeInlineComposer node={contentNode} editor={
-                    <Suspense fallback={<div className="p-3 text-xs opacity-60">正在加载节点面板…</div>}>
-                        <CanvasNodePromptPanel
-                            node={contentNode}
-                            isRunning={runningNodeId === contentNode.id}
-                            mentionReferences={mentionReferencesByNodeId.get(contentNode.id) || EMPTY_MENTION_REFERENCES}
-                            onPromptChange={handleNodePromptChange}
-                            onConfigChange={handleConfigNodeChange}
-                            onGenerate={handleGenerateNode}
-                            onStop={confirmStopGeneration}
-                            onRemoveReference={removeNodeReference}
-                            onStartReferenceSelection={startNodeReferenceSelection}
-                            onRetry={(nodeId) => {
-                                const retryNode = nodesRef.current.find((item) => item.id === nodeId);
-                                if (retryNode) void handleRetryNode(retryNode);
-                            }}
-                        />
-                    </Suspense>
-                } />
-            ) : null,
-        [confirmStopGeneration, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, handleRetryNode, mentionReferencesByNodeId, removeNodeReference, runningNodeId, startNodeReferenceSelection],
-    );
-
-    const renderNodeContent = useCallback(
-        (contentNode: CanvasNodeData) => renderCanvasConfigNodeContent(contentNode) ?? renderCanvasGenerationNodeContent(contentNode),
-        [renderCanvasConfigNodeContent, renderCanvasGenerationNodeContent],
-    );
-
     const pendingConnectionCreatePosition = pendingConnectionCreate ? canvasToScreen(pendingConnectionCreate.position) : null;
     const assistantOpen = assistantMounted && !assistantCollapsed;
 
@@ -6405,12 +6371,6 @@ function LeaferCanvasPage() {
             if (isCanvasScriptNode(node)) {
                 setDialogNodeId(null);
                 setScriptStudioNodeId(node.id);
-                setEditingNodeId(null);
-                return;
-            }
-            // P1 试点：生成节点（Image）改为节点内嵌编辑器，不再浮出下方 composer，避免双编辑器。
-            if (node.type === CanvasNodeType.Image) {
-                setDialogNodeId(null);
                 setEditingNodeId(null);
                 return;
             }
@@ -7000,7 +6960,7 @@ function LeaferCanvasPage() {
                                 inputCount={nodeRelationCounts.get(node.id)?.input || 0}
                                 outputCount={nodeRelationCounts.get(node.id)?.output || 0}
                                 renderPanel={renderCanvasNodePanel}
-                                renderNodeContent={renderNodeContent}
+                                renderNodeContent={renderCanvasConfigNodeContent}
                                 onHoverStart={handleNodeHoverStart}
                                 onHoverEnd={handleNodeHoverEnd}
                                 onConnectStart={handleLeaferConnectStart}
