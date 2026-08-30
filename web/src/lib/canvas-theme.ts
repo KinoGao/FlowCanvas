@@ -17,9 +17,9 @@ export const canvasThemes = {
         },
         node: {
             label: "#3a3a3c",
-            fill: "rgba(255,255,255,.72)",
-            panel: "rgba(255,255,255,.68)",
-            stroke: "rgba(255,255,255,.65)",
+            fill: "rgba(255,255,255,0.94)",
+            panel: "rgba(255,255,255,0.94)",
+            stroke: "rgba(0,0,0,0.08)",
             activeStroke: "#111113",
             placeholder: "#8e8e93",
             text: "#111113",
@@ -37,7 +37,7 @@ export const canvasThemes = {
         ui: {
             material: "rgba(255,255,255,.58)",
             materialElevated: "rgba(255,255,255,.78)",
-            hairline: "rgba(255,255,255,.70)",
+            hairline: "rgba(0,0,0,0.08)",
             shadow: "0 24px 60px rgba(0,0,0,.16), 0 2px 10px rgba(0,0,0,.06), inset 0 1px 0 rgba(255,255,255,.85)",
             accent: "#111113",
             accentSoft: "rgba(0,0,0,.08)",
@@ -63,9 +63,9 @@ export const canvasThemes = {
         },
         node: {
             label: "#d4d4d8",
-            fill: "rgba(18,18,20,.72)",
-            panel: "rgba(14,14,16,.66)",
-            stroke: "rgba(255,255,255,.14)",
+            fill: "rgba(255,255,255,0.05)",
+            panel: "rgba(255,255,255,0.05)",
+            stroke: "rgba(255,255,255,0.10)",
             activeStroke: "#fafafa",
             placeholder: "#71717a",
             text: "#fafafa",
@@ -83,7 +83,7 @@ export const canvasThemes = {
         ui: {
             material: "rgba(12,12,14,.55)",
             materialElevated: "rgba(28,28,30,.78)",
-            hairline: "rgba(255,255,255,.12)",
+            hairline: "rgba(255,255,255,0.10)",
             shadow: "0 28px 70px rgba(0,0,0,.55), 0 2px 12px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.16)",
             accent: "#fafafa",
             accentSoft: "rgba(255,255,255,.12)",

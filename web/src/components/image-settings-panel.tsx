@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ConfigProvider } from "antd";
 
 import { useImageModelCapability } from "@/hooks/use-image-model-capability";
@@ -61,7 +61,9 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const allowedCounts = imageCapability?.counts.filter((value) => value <= effectiveMaxCount) || [];
     const quickCounts = preferredImageCounts(allowedCounts, effectiveMaxCount);
     const rawCount = Math.max(1, Math.min(effectiveMaxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const count = nearestAllowedCount(rawCount, quickCounts, effectiveMaxCount);
+    // 吸附到模型真正允许的数量 set（allowedCounts），而不是被截断的快捷预设 quickCounts，
+    // 否则像 [1,2,4,8,12] 这类模型无法输入 8/12 等合法数量。
+    const count = nearestAllowedCount(rawCount, allowedCounts, effectiveMaxCount);
     const availableQualities = qualityOptions.filter((item) => !imageQualityDisabled(item.value, imageCapability));
     const selectedQuality = availableQualities.find((item) => item.value === quality) || availableQualities.find((item) => item.value === "medium") || availableQualities[0] || qualityOptions[1];
     const availableResolutions = resolutionOptions.filter((item) => !imageResolutionDisabled(item.value, imageCapability, seedreamCapabilities));
@@ -145,8 +147,14 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 {value} 张
                             </OptionPill>
                         ))}
-                        {quickCounts.length < 3 ? <CountInput value={count} max={effectiveMaxCount} theme={theme} onChange={(value) => onConfigChange("count", String(nearestAllowedCount(value || 1, quickCounts, effectiveMaxCount)))} /> : null}
+                        {/* 手动输入框：让用户输入模型允许的任意数量（吸附到 allowedCounts，而非截断的快捷预设）。模型上限=1 时隐去，避免“锁死=1 却误导可输入”。 */}
+                        {effectiveMaxCount > 1 ? (
+                            <CountInput value={count} max={effectiveMaxCount} allowedCounts={allowedCounts} theme={theme} onChange={(value) => onConfigChange("count", String(value))} />
+                        ) : null}
                     </div>
+                    {effectiveMaxCount === 1 ? (
+                        <div className="text-[11px] leading-4 opacity-60">当前模型单次仅支持生成 1 张，如需多张请切换到支持 1–15 张的模型</div>
+                    ) : null}
                 </div>
             </div>
         </ImageSettingsTheme>
@@ -240,7 +248,24 @@ function nearestAllowedCount(value: number, allowed: number[], max: number) {
     return allowed.reduce((best, current) => Math.abs(current - normalized) < Math.abs(best - normalized) ? current : best, allowed[0]);
 }
 
-function CountInput({ value, max, theme, onChange }: { value: number; max: number; theme: CanvasTheme; onChange: (value: number | null) => void }) {
+function CountInput({ value, max, theme, allowedCounts, onChange }: { value: number; max: number; theme: CanvasTheme; allowedCounts: number[]; onChange: (value: number) => void }) {
+    // 草稿态让用户自由输入；聚焦时不回写，避免打字被已提交值重置。
+    const [draft, setDraft] = useState(String(value || ""));
+    const [focused, setFocused] = useState(false);
+    useEffect(() => {
+        if (!focused) setDraft(String(value || ""));
+    }, [focused, value]);
+    // 提交：合法的数字吸附到模型允许集并提交；空/非法则回退到当前值（避免误跳成 1）。
+    const commit = (raw: string) => {
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            setDraft(String(value || ""));
+            return;
+        }
+        const next = nearestAllowedCount(parsed, allowedCounts, max);
+        setDraft(String(next));
+        onChange(next);
+    };
     return (
         <label className="flex h-9 w-full overflow-hidden rounded-[10px] border text-sm" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
             <input
@@ -249,8 +274,19 @@ function CountInput({ value, max, theme, onChange }: { value: number; max: numbe
                 max={max}
                 className="min-w-0 flex-1 bg-transparent px-3 text-center outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 style={{ color: theme.node.text, WebkitTextFillColor: theme.node.text }}
-                value={value || ""}
-                onChange={(event) => onChange(Number(event.target.value) || null)}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onFocus={() => setFocused(true)}
+                onBlur={(event) => {
+                    setFocused(false);
+                    commit(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                    }
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
             />
         </label>

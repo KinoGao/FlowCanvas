@@ -50,6 +50,10 @@ public class AiProxyController {
         if (!platformConfigService.isAllowedProxyTarget(target)) {
             return ResponseEntity.badRequest().body("代理目标不在允许列表中（必须使用后台配置的模型厂商地址）");
         }
+        // 说明：配置的模型厂商地址（如上表 whitelist）由操作员显式信任，且生成代理已能访问
+        // （生成请求走 ModelRuntimeProxy，不经本代理）。部署环境可能通过内网网关/隧道解析到私网 IP
+        // （如 img.junliai.org → 私网），故此处不再对白名单内的目标做「解析到私网即拒绝」的额外复核，
+        // 避免图片下载被误拦。非白名单目标已在上方拒绝。
 
         String method = request.getMethod().toUpperCase();
         byte[] body = ("GET".equals(method) || "HEAD".equals(method)) ? new byte[0] : request.getInputStream().readAllBytes();

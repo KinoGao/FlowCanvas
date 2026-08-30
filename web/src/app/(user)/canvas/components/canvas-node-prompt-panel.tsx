@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, AtSign, BadgePlus, Camera, Check, ChevronDown, CircleCheck, CircleX, Clock3, FileText, History, Languages, LoaderCircle, Maximize2, Minimize2, MoreHorizontal, Palette, Plus, RectangleHorizontal, RotateCcw, Sparkles, Square, Tag, TriangleAlert, Users, WandSparkles } from "lucide-react";
 import { App, Button, Input, InputNumber, Popover, Select, Switch, Tooltip } from "antd";
 
-import { ModelPicker } from "@/components/model-picker";
+import { CanvasModelPillSelector } from "./canvas-model-pill-selector";
 import { VideoSettingsPanel } from "@/components/video-settings-panel";
 import { defaultConfig, useConfigStore, useEffectiveConfig, modelOptionLabel, type AiConfig, type CanvasVideoSubject, type CustomImageStyle } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -395,13 +395,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     ) : mode === "audio" ? (
                         <>
                             <div className="w-[150px] shrink-0">
-                                <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                                <CanvasModelPillSelector className="w-full !justify-start" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="audio" onMissingConfig={() => openConfigDialog(true)} />
                             </div>
                             <CanvasAudioSettingsPopover config={config} buttonClassName="!h-8 !max-w-[150px] !justify-start !rounded-[8px] !border-transparent !px-2.5" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                         </>
                     ) : (
                         <div className="w-[150px] shrink-0">
-                            <ModelPicker className="!h-8" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                            <CanvasModelPillSelector className="w-full !justify-start" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" onMissingConfig={() => openConfigDialog(true)} />
                         </div>
                     )}
                 </div>
@@ -579,12 +579,11 @@ function ImageComposer({
                     </ComposerPopover>
 
                     <div className="w-[210px] shrink-0">
-                        <ModelPicker
+                        <CanvasModelPillSelector
                             config={config}
                             value={config.model}
                             capability="image"
-                            className="!h-8"
-                            fullWidth
+                            className="w-full !justify-start"
                             onChange={(model) => onConfigChange({ model })}
                             onMissingConfig={onMissingConfig}
                         />
@@ -744,12 +743,11 @@ function VideoComposer({
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
                     <CanvasPromptLibrary onSelect={onPromptChange} icon={<Plus className="size-4" />} tooltip="添加提示词" />
                     <div className="w-[190px] shrink-0">
-                        <ModelPicker
+                        <CanvasModelPillSelector
                             config={config}
                             value={config.model}
                             capability="video"
-                            className="!h-8"
-                            fullWidth
+                            className="w-full !justify-start"
                             onChange={(model) => onConfigChange({ model })}
                             onMissingConfig={onMissingConfig}
                         />

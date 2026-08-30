@@ -265,12 +265,31 @@ public class PlatformConfigService {
      */
     public boolean isAllowedProxyTarget(String baseUrl) {
         if (blank(baseUrl)) return false;
-        String normalized = baseUrl.trim().replaceAll("/+$", "");
-        return getAllowedProxyTargets().stream()
-                .anyMatch(allowed -> {
-                    String normalizedAllowed = allowed.trim().replaceAll("/+$", "");
-                    return normalized.equals(normalizedAllowed) || normalized.startsWith(normalizedAllowed + "/");
-                });
+        URI target = parsePublicUri(baseUrl);
+        if (target == null || target.getHost() == null) return false;
+        // 按「厂商主机」匹配：生成图片往往由同厂商主机下的其它路径（如 /media）返回，
+        // 不要求带厂商 base 的路径前缀。白名单本身就是操作员显式配置的厂商地址。
+        return getAllowedProxyTargets().stream().anyMatch(allowed -> sameProviderHost(target, allowed));
+    }
+
+    private static URI parsePublicUri(String value) {
+        try {
+            return URI.create(value.trim());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean sameProviderHost(URI target, String allowed) {
+        URI allowedUri = parsePublicUri(allowed);
+        if (allowedUri == null || allowedUri.getHost() == null) return false;
+        return target.getHost().equalsIgnoreCase(allowedUri.getHost())
+                && effectivePort(target) == effectivePort(allowedUri);
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) return uri.getPort();
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : "http".equalsIgnoreCase(uri.getScheme()) ? 80 : -1;
     }
 
     /**

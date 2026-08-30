@@ -73,6 +73,8 @@ import { buildAssetPrompt } from "../utils/canvas-script-ai";
 import { composeScriptBeatVideoReferenceIds, deriveScriptBeatVideoMode, resolveScriptBeatReferenceIds } from "../utils/canvas-script-references";
 import { stitchImagesToBlob } from "../utils/canvas-stitch";
 import { ScriptDeskStudio, type ScriptOutputState } from "../components/script-desk-studio";
+import { PanoramaStudio } from "../components/panorama/panorama-studio";
+import { usePanoramaStore } from "../stores/use-panorama-store";
 import { canvasSelectionCenter, cloneCanvasSelection, CANVAS_SLASH_COMMANDS, type CanvasSlashCommand, type CanvasWorkflowTemplate } from "../utils/canvas-workflow-template";
 import { buildImageQuickCommandPrompt, CANVAS_IMAGE_QUICK_COMMANDS, type CanvasImageQuickCommand } from "../utils/canvas-image-quick-commands";
 import { resolveVideoSubject, videoSubjectReferenceImages } from "../utils/canvas-video-subjects";
@@ -834,6 +836,7 @@ function LeaferCanvasPage() {
     const [assetPreviewNode, setAssetPreviewNode] = useState<CanvasNodeData | null>(null);
     const [directorStudioNodeId, setDirectorStudioNodeId] = useState<string | null>(null);
     const [scriptStudioNodeId, setScriptStudioNodeId] = useState<string | null>(null);
+    const [panoramaStudioNodeId, setPanoramaStudioNodeId] = useState<string | null>(null);
     const [scriptStudioInitialExportTarget, setScriptStudioInitialExportTarget] = useState<"image" | "video" | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [canvasVisualReady, setCanvasVisualReady] = useState(false);
@@ -5206,6 +5209,39 @@ function LeaferCanvasPage() {
                 case "annotation":
                     createNode(CanvasNodeType.Annotation, options);
                     break;
+                case "commentNote":
+                    createNode(CanvasNodeType.Annotation, {
+                        ...options,
+                        metadata: { fontSize: 14, commentNote: { resolved: false, label: "" } },
+                    });
+                    break;
+                case "storyboard":
+                    createNode(CanvasNodeType.Script, {
+                        ...options,
+                        metadata: { fontSize: 14, canvasTool: "storyboard" },
+                    });
+                    break;
+                case "personReplacement":
+                    createNode(CanvasNodeType.Image, {
+                        ...options,
+                        metadata: { canvasTool: "personReplacement" },
+                    });
+                    break;
+                case "videoReplication":
+                    createNode(CanvasNodeType.Video, {
+                        ...options,
+                        metadata: { canvasTool: "videoReplication" },
+                    });
+                    break;
+                case "voiceStudio":
+                    createNode(CanvasNodeType.Audio, {
+                        ...options,
+                        metadata: { canvasTool: "voiceStudio" },
+                    });
+                    break;
+                case "debug":
+                    createNode(CanvasNodeType.Debug, options);
+                    break;
                 case "whiteboard":
                     createNode(CanvasNodeType.Whiteboard, options);
                     break;
@@ -6325,6 +6361,13 @@ function LeaferCanvasPage() {
                 setEditingNodeId(null);
                 return;
             }
+            if (node.metadata?.canvasTool === "panorama360") {
+                setDialogNodeId(null);
+                setPanoramaStudioNodeId(node.id);
+                setEditingNodeId(null);
+                usePanoramaStore.getState().openForNode(node.id);
+                return;
+            }
             if (isCanvasScriptNode(node)) {
                 setDialogNodeId(null);
                 setScriptStudioNodeId(node.id);
@@ -6358,8 +6401,11 @@ function LeaferCanvasPage() {
                 const count = previous.count + 1;
                 previous.count = count;
                 previous.lastAt = now;
-                if (count < 3) {
-                    selectSingleNode(nodeId);
+                if (count === 2) {
+                    resetImageTapGesture();
+                    // 双击进入全景工作室（openNodeComposer 对此 tool-mode 路由到 PanoramaStudio）
+                    const targetNode = nodeByIdRef.current.get(nodeId);
+                    if (targetNode) openNodeComposer(targetNode);
                     return;
                 }
                 resetImageTapGesture();
@@ -6368,7 +6414,7 @@ function LeaferCanvasPage() {
             }
             selectSingleNode(nodeId);
         },
-        [handleViewNodeImage, referencePickerNodeId, resetImageTapGesture, selectSingleNode],
+        [handleViewNodeImage, openNodeComposer, referencePickerNodeId, resetImageTapGesture, selectSingleNode],
     );
     const createConnectedGenerationNode = useCallback(
         (sourceNode: CanvasNodeData, type: CanvasNodeType.Video | CanvasNodeType.Audio) => {
@@ -6534,6 +6580,7 @@ function LeaferCanvasPage() {
     );
     const directorStudioNode = useMemo(() => (directorStudioNodeId ? nodes.find((node) => node.id === directorStudioNodeId && node.metadata?.canvasTool === "director") || null : null), [directorStudioNodeId, nodes]);
     const scriptStudioNode = useMemo(() => (scriptStudioNodeId ? nodes.find((node) => node.id === scriptStudioNodeId && isCanvasScriptNode(node)) || null : null), [scriptStudioNodeId, nodes]);
+    const panoramaStudioNode = useMemo(() => (panoramaStudioNodeId ? nodes.find((node) => node.id === panoramaStudioNodeId && node.metadata?.canvasTool === "panorama360") || null : null), [panoramaStudioNodeId, nodes]);
     const scriptOutputStates = useMemo(() => {
         const result: Record<string, ScriptOutputState> = {};
         if (scriptStudioNode) {
@@ -6581,8 +6628,9 @@ function LeaferCanvasPage() {
         if (tool && tool !== "director") return dialogNode?.id ?? null;
         if (directorStudioNodeId) return directorStudioNodeId;
         if (scriptStudioNodeId) return scriptStudioNodeId;
+        if (panoramaStudioNodeId) return panoramaStudioNodeId;
         return null;
-    }, [dialogNode, directorStudioNodeId, scriptStudioNodeId]);
+    }, [dialogNode, directorStudioNodeId, scriptStudioNodeId, panoramaStudioNodeId]);
     const composerShellWidth = canvasShellRef.current?.clientWidth || containerRef.current?.clientWidth || size.width || 1280;
     const composerWidth = dialogNode
         ? Math.min(
@@ -7058,6 +7106,17 @@ function LeaferCanvasPage() {
                         outputStates={scriptOutputStates}
                         referenceOptions={scriptReferenceOptions}
                         initialExportTarget={scriptStudioInitialExportTarget}
+                    />
+                ) : null}
+
+                {panoramaStudioNode ? (
+                    <PanoramaStudio
+                        key={panoramaStudioNode.id}
+                        node={panoramaStudioNode}
+                        onClose={() => {
+                            setPanoramaStudioNodeId(null);
+                            usePanoramaStore.getState().close();
+                        }}
                     />
                 ) : null}
 

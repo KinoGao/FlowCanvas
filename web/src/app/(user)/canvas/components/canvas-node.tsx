@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Globe, Grid2x2, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { Bug, ChevronRight, Clapperboard, FileText, FolderOpen, Globe, Grid2x2, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, MessageCircle, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -720,6 +720,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Whiteboard]: WhiteboardContent,
     [CanvasNodeType.WebPreview]: WebPreviewContent,
     [CanvasNodeType.Collage]: CollageContent,
+    [CanvasNodeType.Debug]: DebugContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function WhiteboardContent(props: NodeContentRendererProps) {
@@ -760,6 +761,33 @@ function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererPr
     return <div className="relative h-full w-full rounded-[inherit]" />;
 }
 
+function DebugContent({ node }: NodeContentRendererProps) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const connections = node.metadata?.debugConnections?.length
+        ? node.metadata.debugConnections
+        : undefined;
+    return (
+        <div
+            className="flex h-full w-full flex-col gap-1.5 overflow-hidden px-3 py-2 font-mono leading-4"
+            style={{ background: theme.node.fill, color: theme.node.placeholder }}
+        >
+            <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: theme.node.text }}>
+                <Bug className="size-3" />
+                <span>调试节点</span>
+            </div>
+            <div className="min-w-0 truncate text-[10px]">{node.id}</div>
+            {node.metadata?.generationJobId ? (
+                <div className="truncate text-[10px]">job: {node.metadata.generationJobId}</div>
+            ) : null}
+            {node.metadata?.status ? (
+                <div className="truncate text-[10px]">status: {node.metadata.status}</div>
+            ) : null}
+            {connections ? <div className="truncate text-[10px]">conn: {connections.length}</div> : null}
+            <div className="mt-auto truncate text-[10px] opacity-60">检查节点数据与连线</div>
+        </div>
+    );
+}
+
 function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
     const downloading = node.metadata?.videoDownloading === true;
     return (
@@ -772,15 +800,17 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
                     "--canvas-generation-base": theme.canvas.background,
                     "--canvas-generation-glow": theme.node.text,
                     "--canvas-generation-dot": theme.node.placeholder,
+                    color: theme.node.text,
                 } as React.CSSProperties
             }
         >
-            <div aria-hidden className="canvas-generation-loading-dots absolute inset-0" />
-            <div aria-hidden className="canvas-generation-loading-dot-mask absolute inset-0" />
-            <div aria-hidden className="canvas-generation-loading-shimmer absolute inset-0" />
-            <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center" style={{ color: theme.node.text }}>
+            {/* 对齐 SHUO：底图模糊 + 白色充电扫描光带（非转圈） */}
+            <div aria-hidden className="canvas-generation-loading-blur absolute inset-0" />
+            <div aria-hidden className="canvas-generation-charge absolute inset-0" />
+            <div aria-hidden className="canvas-generation-beam absolute inset-0" />
+            <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-1.5 px-4 text-center">
                 <span className="text-xs font-medium tracking-wide">{downloading ? "视频已生成，正在下载" : "任务运行中"}</span>
-                {node.metadata?.generationJobId ? <span className="text-[10px] opacity-60">下载可能需要几分钟，请耐心等待</span> : null}
+                {node.metadata?.generationJobId ? <span className="text-[10px] opacity-60">生成需要一段时间，请耐心等待</span> : null}
             </div>
         </div>
     );
@@ -903,6 +933,30 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 
     return (
         <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
+            {node.metadata?.commentNote ? (
+                <div
+                    className="flex shrink-0 items-center gap-1.5 px-4 py-1.5"
+                    style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
+                    data-canvas-no-zoom
+                >
+                    <MessageCircle className="size-3 shrink-0 opacity-70" />
+                    <span className="min-w-0 flex-1 truncate text-[11px]">{node.metadata.commentNote.label || "评论"}</span>
+                    <span
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px]"
+                        style={{
+                            background: node.metadata.commentNote.resolved ? "rgba(0,170,100,.18)" : "rgba(230,160,0,.18)",
+                            color: node.metadata.commentNote.resolved ? "rgb(0,190,110)" : "rgb(230,170,0)",
+                        }}
+                    >
+                        {node.metadata.commentNote.resolved ? "已解决" : "待解决"}
+                    </span>
+                </div>
+            ) : null}
+            {node.metadata?.commentNote?.quoteText ? (
+                <div className="shrink-0 border-l-2 px-4 py-1 text-[11px] italic opacity-60" style={{ borderColor: theme.ui.accent, color: theme.node.muted }} data-canvas-no-zoom>
+                    “{node.metadata.commentNote.quoteText}”
+                </div>
+            ) : null}
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -1064,7 +1118,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : node.type === CanvasNodeType.WebPreview ? Globe : node.type === CanvasNodeType.Collage ? Grid2x2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : node.type === CanvasNodeType.WebPreview ? Globe : node.type === CanvasNodeType.Collage ? Grid2x2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : node.type === CanvasNodeType.Debug ? Bug : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

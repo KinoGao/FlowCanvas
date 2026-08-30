@@ -42,6 +42,8 @@ export enum CanvasNodeType {
     Whiteboard = "whiteboard",
     WebPreview = "webpreview",
     Collage = "collage",
+    /** 调试/开发节点：用于排查连线、数据流与渲染，不参与用户创作流。 */
+    Debug = "debug",
 }
 
 export type CanvasWhiteboardStroke = {
@@ -61,12 +63,36 @@ export type CanvasWhiteboardData = {
     items: CanvasWhiteboardStroke[];
 };
 
+export type CanvasWebPreviewTab = {
+    id: string;
+    url: string;
+    title?: string;
+};
+
+export type CanvasWebPreviewReadState = {
+    status?: "idle" | "loading" | "success" | "error";
+    /** 页面实际标题（读取得到） */
+    title?: string;
+    /** 页面描述 / 正文摘要 */
+    description?: string;
+    /** 页面提取到的图片 url */
+    images?: string[];
+    /** 页面提取到的视频 url */
+    videos?: string[];
+    errorDetails?: string;
+};
+
 export type CanvasWebPreviewData = {
     url: string;
     mode: "preview" | "reference";
     title: string;
     summary: string;
     image: string;
+    /** 多标签（无 iframe 时按 URL 管理多个待读/已读页面） */
+    tabs?: CanvasWebPreviewTab[];
+    activeTabId?: string;
+    /** 最近一次读取页面信息的状态 */
+    read?: CanvasWebPreviewReadState;
 };
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -111,7 +137,7 @@ export type CanvasBaseMetadata = {
     hidden?: boolean;
     content?: string;
     composerContent?: string;
-    canvasTool?: "script" | "videoComposition" | "director" | "panorama360";
+    canvasTool?: "script" | "videoComposition" | "director" | "panorama360" | "storyboard" | "personReplacement" | "videoReplication" | "voiceStudio";
     prompt?: string;
     requestPrompt?: string;
     status?: CanvasNodeStatus;
@@ -288,7 +314,57 @@ export type CanvasAgentRunMetadata = {
     agentTaskId?: string;
 };
 
-export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasWhiteboardMetadata & CanvasWebPreviewMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
+/**
+ * 注释便签（comment-note）语义增强：附着在 Annotation 节点上，
+ * 用于「引用某段文本 + 标记为讨论/待解决」的轻量评论，通常与画布上被引用的节点关联。
+ */
+export type CanvasCommentNoteMetadata = {
+    commentNote?: {
+        /** 被引用/讨论的原始文本片段（可选） */
+        quoteText?: string;
+        /** 被引用的上游节点 id（可选） */
+        anchorNodeId?: string;
+        /** 是否已解决/关闭 */
+        resolved?: boolean;
+        /** 便签标题/标签，如「镜头二待定」 */
+        label?: string;
+    };
+};
+
+/** 场景检测结果（scene-detection）：附着在视频 / 剪辑节点上，结构化存储检测到的分镜场景区间。 */
+export type CanvasSceneDetectionMetadata = {
+    sceneDetection?: {
+        status?: "idle" | "running" | "success" | "error";
+        /** 检测出的分镜场景，按时间排序 */
+        scenes?: {
+            id: string;
+            startMs: number;
+            endMs: number;
+            label?: string;
+            /** 场景缩略图存储 key（可选） */
+            thumbnail?: string;
+        }[];
+        errorDetails?: string;
+    };
+};
+
+/**
+ * 通用「创作工作室」存档：人物替换 / 视频复刻 / 声音工作室 / 故事板 等多用。
+ * 编辑器瞬态状态一律放独立 store（use-<feature>-store，按 nodeId 键），
+ * 这里仅保存可作为项目快照的 project 结构（进版本历史）。
+ */
+export type CanvasStudioMetadata = {
+    studioProject?: unknown;
+    studioOutputIds?: string[];
+};
+
+/** 调试节点元数据：用于排查节点数据、连线与生成任务状态。 */
+export type CanvasDebugMetadata = {
+    /** 该节点当前上游/下游连线的引用（调试视图展示用途，不参与真实拓扑） */
+    debugConnections?: { id: string; from: string; to: string }[];
+};
+
+export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasWhiteboardMetadata & CanvasWebPreviewMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata & CanvasCommentNoteMetadata & CanvasSceneDetectionMetadata & CanvasStudioMetadata & CanvasDebugMetadata;
 
 export type CanvasNodeData = {
     id: string;

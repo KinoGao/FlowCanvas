@@ -3,6 +3,7 @@ package com.infinitecanvas.backend.service.modelruntime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.infinitecanvas.backend.dto.PlatformConfigDocument;
 import com.infinitecanvas.backend.service.PlatformConfigService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,6 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -116,6 +118,12 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
             return ResponseEntity.badRequest().body(error.getMessage());
         }
 
+        // 非顺序图片模型（如 gpt-image / nano-banana）上游会忽略 `n`，恒只返回 1 张。
+        // 前端请求 n>1 时由后端拆成 n 次 n=1 调用并合并，真实产出多张。
+        if (shouldBatchImageCreate(request, suffix, runtime, body, contentType)) {
+            return batchImageCreate(request, target, runtime, body);
+        }
+
         boolean videoCreate = "POST".equalsIgnoreCase(request.getMethod()) && "/videos".equals(suffix);
         boolean mediaDownload = "GET".equalsIgnoreCase(request.getMethod()) && isDownloadEndpoint(suffix);
         HttpRequest.Builder builder = HttpRequest.newBuilder(target).timeout(videoCreate ? CREATE_TIMEOUT : TIMEOUT);
@@ -178,6 +186,84 @@ public class GenericOpenAiAdapter implements ModelRequestAdapter {
         return suffix.endsWith("/content")
                 || suffix.matches("/images/[^/]+/(file|bytes)$")
                 || suffix.matches("/audio/[^/]+/(file|bytes)$");
+    }
+
+    /**
+     * 是否需要把一次图片创建请求拆成多次 n=1 调用：
+     * 仅当「POST + 图片分类 + 非顺序 + JSON 请求体 + n>1」时成立。
+     * 顺序模型（如 Seedream 走 sequential_image_generation_options）、multipart 编辑、
+     * n=1、以及其他分类一律走原有单请求透传。
+     */
+    private boolean shouldBatchImageCreate(HttpServletRequest request, String suffix,
+                                           PlatformConfigService.RuntimeModel runtime, byte[] body, String contentType) {
+        if (!"POST".equalsIgnoreCase(request.getMethod())) return false;
+        if (!"image".equals(runtime.model().getCategory())) return false;
+        PlatformConfigDocument.ImageCapabilities caps = runtime.model().getImageCapabilities();
+        if (caps == null || caps.isSequentialImageGeneration()) return false;
+        if (contentType == null || !contentType.toLowerCase(Locale.ROOT).contains("application/json")) return false;
+        if (!suffix.toLowerCase(Locale.ROOT).contains("/images/")) return false;
+        try {
+            JsonNode parsed = objectMapper.readTree(body);
+            if (!(parsed instanceof ObjectNode json)) return false;
+            return requestedImageOutputCount(json) > 1;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * 把 n>1 的图片创建请求拆成 n 次 n=1 调用并合并返回（保留最后一个响应的外框与 data）。
+     * 任一单次失败即回吐该次上游错误，避免静默丢图。
+     */
+    private ResponseEntity<?> batchImageCreate(HttpServletRequest request, URI target,
+                                               PlatformConfigService.RuntimeModel runtime, byte[] body)
+            throws IOException, InterruptedException {
+        ObjectNode json = (ObjectNode) objectMapper.readTree(body);
+        int n = requestedImageOutputCount(json);
+        ObjectNode single = json.deepCopy();
+        single.put("n", 1);
+        single.remove("sequential_image_generation");
+        single.remove("sequential_image_generation_options");
+        byte[] singleBody = objectMapper.writeValueAsBytes(single);
+        boolean gemini = "gemini".equalsIgnoreCase(runtime.provider().getApiFormat());
+        String method = request.getMethod();
+
+        List<ObjectNode> items = new ArrayList<>();
+        ObjectNode lastOuter = null;
+        int lastStatus = 200;
+        HttpHeaders lastHeaders = new HttpHeaders();
+        for (int i = 0; i < n; i++) {
+            HttpRequest.Builder rb = HttpRequest.newBuilder(target).timeout(TIMEOUT);
+            if (gemini) rb.header("x-goog-api-key", runtime.provider().getApiKey());
+            else rb.header("Authorization", "Bearer " + runtime.provider().getApiKey());
+            rb.header("Content-Type", "application/json");
+            copyHeader(request, rb, "Accept");
+            rb.method(method, HttpRequest.BodyPublishers.ofByteArray(singleBody));
+            HttpResponse<byte[]> upstream = httpClient.send(rb.build(), HttpResponse.BodyHandlers.ofByteArray());
+            if (upstream.statusCode() < 200 || upstream.statusCode() >= 300) {
+                HttpHeaders headers = new HttpHeaders();
+                forwardResponseHeaders(upstream, headers);
+                return new ResponseEntity<>(upstream.body(), headers, HttpStatus.valueOf(upstream.statusCode()));
+            }
+            lastStatus = upstream.statusCode();
+            forwardResponseHeaders(upstream, lastHeaders);
+            ObjectNode parsed = (ObjectNode) objectMapper.readTree(upstream.body());
+            JsonNode data = parsed.path("data");
+            if (data.isArray() && data.size() > 0) items.add((ObjectNode) data.get(0));
+            lastOuter = parsed;
+        }
+        ObjectNode merged = lastOuter == null ? objectMapper.createObjectNode() : lastOuter.deepCopy();
+        ArrayNode all = merged.putArray("data");
+        items.forEach(all::add);
+        return new ResponseEntity<>(objectMapper.writeValueAsBytes(merged), lastHeaders, HttpStatus.valueOf(lastStatus));
+    }
+
+    private void forwardResponseHeaders(HttpResponse<?> upstream, HttpHeaders headers) {
+        upstream.headers().map().forEach((name, values) -> {
+            if (!HOP_HEADERS.contains(name.toLowerCase(Locale.ROOT)) && !name.startsWith(":")) {
+                values.forEach(value -> headers.set(name, value));
+            }
+        });
     }
 
     // ---------- request validation & rewrite ----------

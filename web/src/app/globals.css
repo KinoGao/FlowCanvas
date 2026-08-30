@@ -915,7 +915,7 @@
     }
 
     .node-element {
-        --canvas-node-radius: 24px;
+        --canvas-node-radius: 18px;
     }
 
     /* 聚焦模式（对齐 SHUO Canvas）：打开工具型工作台时虚化非目标节点，聚焦当前任务 */
@@ -933,8 +933,14 @@
     .creative-os-node {
         border-radius: var(--canvas-node-radius) !important;
         isolation: isolate;
+        /* 对齐 SHUO：静止节点带一层软阴影（选中/激活时由 inline box-shadow 覆盖） */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         animation: canvas-node-card-in 240ms cubic-bezier(.2, .8, .2, 1) backwards;
         transition: border-color 160ms ease, box-shadow 200ms ease, filter 180ms ease;
+    }
+
+    .dark .creative-os-node {
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
 
     .canvas-node-render-surface {
@@ -1460,7 +1466,73 @@
 
 .canvas-generation-loading {
     isolation: isolate;
-    background: color-mix(in srgb, var(--canvas-generation-base) 62%, black);
+    background: color-mix(in srgb, var(--canvas-generation-base) 62%, transparent);
+}
+
+/* 对齐 SHUO：底图模糊（加载中的占位内容被模糊） */
+.canvas-generation-loading-blur {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--canvas-generation-base) 92%, black), var(--canvas-generation-base));
+    filter: blur(10px);
+}
+
+/* 对齐 SHUO .img-loading-overlay：白色半透明光带从左向右充电填充 */
+.canvas-generation-charge {
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.42);
+    transform: scaleX(0);
+    transform-origin: left center;
+    animation: canvas-charge-fill 30s linear forwards;
+    pointer-events: none;
+    z-index: 4;
+    will-change: transform;
+}
+
+/* 对齐 SHUO tyndall：一道斜向扫过的高光光带 */
+.canvas-generation-beam {
+    z-index: 5;
+    background: linear-gradient(
+        100deg,
+        transparent 0%,
+        color-mix(in srgb, var(--canvas-generation-glow) 6%, transparent) 42%,
+        color-mix(in srgb, var(--canvas-generation-glow) 22%, transparent) 50%,
+        color-mix(in srgb, var(--canvas-generation-glow) 6%, transparent) 58%,
+        transparent 100%
+    );
+    transform: translateX(-140%);
+    mix-blend-mode: screen;
+    animation: canvas-beam-sweep 2.4s ease-in-out infinite;
+    pointer-events: none;
+    will-change: transform;
+}
+
+@keyframes canvas-charge-fill {
+    0% {
+        transform: scaleX(0);
+    }
+    100% {
+        transform: scaleX(1);
+    }
+}
+
+@keyframes canvas-beam-sweep {
+    0%,
+    100% {
+        opacity: 0;
+        transform: translateX(-140%) rotate(0deg);
+    }
+    50% {
+        opacity: 1;
+    }
+    60% {
+        transform: translateX(120%) rotate(0deg);
+    }
+    61% {
+        transform: translateX(-140%) rotate(0deg);
+    }
 }
 
 .canvas-generation-loading-dots,
@@ -1581,7 +1653,9 @@
     }
 
     .canvas-generation-loading-shimmer,
-    .canvas-generation-loading-dot-mask {
+    .canvas-generation-loading-dot-mask,
+    .canvas-generation-charge,
+    .canvas-generation-beam {
         animation: none;
         opacity: 0;
     }

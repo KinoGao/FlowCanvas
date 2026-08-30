@@ -1,13 +1,14 @@
 "use client";
 
 import { App, Alert, Button, Form, Input, Modal, Segmented, Select, Tabs } from "antd";
-import { LogIn, LogOut, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { FlaskConical, LogIn, LogOut, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { loginUser, logoutUser, registerUser } from "@/services/api/auth";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { useConfigStore, type ImageResponseFormatPolicy } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { CanvasFeatureFlagsPane } from "./canvas-feature-flags-pane";
 
 const imageResponseFormatOptions: Array<{ label: string; value: ImageResponseFormatPolicy }> = [
     { label: "自动", value: "auto" },
@@ -146,7 +147,7 @@ export function AppConfigModal() {
                         children: (
                             <Form layout="vertical" className="grid gap-2 md:grid-cols-2">
                                 <Form.Item label="画布批量生图数量" className="mb-2">
-                                    <Input type="number" min={1} max={15} value={config.canvasImageCount} onChange={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))} />
+                                    <CountNumberField value={config.canvasImageCount} max={15} onCommit={(value) => updateConfig("canvasImageCount", value)} />
                                 </Form.Item>
                                 <Form.Item label="生图响应格式" className="mb-2">
                                     <Select value={config.imageResponseFormat} options={imageResponseFormatOptions} onChange={(value) => updateConfig("imageResponseFormat", value)} />
@@ -179,7 +180,7 @@ export function AppConfigModal() {
                                     <Input type="number" min={0.25} max={4} step={0.05} value={config.audioSpeed} onChange={(event) => updateConfig("audioSpeed", normalizeAudioSpeedValue(event.target.value))} />
                                 </Form.Item>
                                 <Form.Item label="生成张数" className="mb-2">
-                                    <Input type="number" min={1} max={15} value={config.count} onChange={(event) => updateConfig("count", normalizeImageCount(event.target.value))} />
+                                    <CountNumberField value={config.count} max={15} onCommit={(value) => updateConfig("count", value)} />
                                 </Form.Item>
                                 <Form.Item label="音频指令" className="mb-2 md:col-span-2">
                                     <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} value={config.audioInstructions} onChange={(event) => updateConfig("audioInstructions", event.target.value)} />
@@ -190,6 +191,11 @@ export function AppConfigModal() {
                             </Form>
                         ),
                     },
+                    {
+                        key: "capabilities",
+                        label: <span className="inline-flex items-center gap-2"><FlaskConical className="size-4" />模型接入 / 功能开关</span>,
+                        children: <CanvasFeatureFlagsPane />,
+                    },
                 ]}
             />
         </Modal>
@@ -198,4 +204,38 @@ export function AppConfigModal() {
 
 function normalizeImageCount(value: string) {
     return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 1))));
+}
+
+/** 可自由输入的数量字段：聚焦保留草稿、合法值即时提交、失焦吸附，避免「无法清空重新输入」。 */
+function CountNumberField({ value, max, onCommit }: { value: string | number | undefined; max: number; onCommit: (value: string) => void }) {
+    const [draft, setDraft] = useState(String(value ?? ""));
+    const [focused, setFocused] = useState(false);
+    useEffect(() => {
+        if (!focused) setDraft(String(value ?? ""));
+    }, [focused, value]);
+    const commit = (raw: string) => {
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            setDraft(String(value ?? ""));
+            return;
+        }
+        const next = normalizeImageCount(raw);
+        setDraft(next);
+        onCommit(next);
+    };
+    return (
+        <Input
+            type="number"
+            min={1}
+            max={max}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={(event) => {
+                setFocused(false);
+                commit(event.target.value);
+            }}
+            onPressEnter={(event) => (event.target as HTMLInputElement).blur()}
+        />
+    );
 }
