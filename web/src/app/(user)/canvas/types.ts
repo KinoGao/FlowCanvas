@@ -8,6 +8,13 @@ export type Position = {
 
 export type CanvasConnectionStyle = "curve" | "orthogonal" | "straight";
 
+export type CanvasInputPreference = {
+    /** 普通滚轮 / 双指手势：缩放画布，或像 Figma 一样平移画布。 */
+    wheelMode: "zoom" | "pan";
+    /** 缩放方向：默认滚轮向下缩小，反向则向下放大。 */
+    wheelDirection: "normal" | "inverted";
+};
+
 export type ViewportTransform = {
     x: number;
     y: number;

@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { normalizeCanvasConnectionOrders, normalizeCanvasNodeIdentities, type CanvasNodeSequenceCounters } from "../utils/canvas-node-identity";
-import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
+import type { CanvasAssistantSession, CanvasConnection, CanvasConnectionStyle, CanvasInputPreference, CanvasNodeData, CanvasNodeType, ViewportTransform } from "../types";
 
 export type CanvasProject = {
     id: string;
@@ -18,6 +18,7 @@ export type CanvasProject = {
     activeChatId: string | null;
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
+    inputPreference: CanvasInputPreference;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -25,7 +26,7 @@ export type CanvasProject = {
     viewport: ViewportTransform;
 };
 
-type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
+type CanvasProjectDetail = Pick<CanvasProject, "nodes" | "connections" | "nodeSequenceCounters" | "referenceOrderCounter" | "chatSessions" | "activeChatId" | "backgroundMode" | "connectionStyle" | "inputPreference" | "snapToGrid" | "alignmentGuidesEnabled" | "showImageInfo" | "showConnections" | "viewport">;
 
 type CanvasStore = {
     hydrated: boolean;
@@ -41,6 +42,7 @@ type CanvasStore = {
 };
 
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
+const defaultInputPreference: CanvasInputPreference = { wheelMode: "zoom", wheelDirection: "normal" };
 
 function emptyProjectDetail(): CanvasProjectDetail {
     return {
@@ -52,6 +54,7 @@ function emptyProjectDetail(): CanvasProjectDetail {
         activeChatId: null,
         backgroundMode: "dots",
         connectionStyle: "curve",
+        inputPreference: defaultInputPreference,
         snapToGrid: false,
         alignmentGuidesEnabled: true,
         showImageInfo: false,
@@ -78,6 +81,7 @@ function normalizeProjectDetail(source: Partial<CanvasProjectDetail> = {}): Canv
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "dots",
         connectionStyle: source.connectionStyle || "curve",
+        inputPreference: source.inputPreference || defaultInputPreference,
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),

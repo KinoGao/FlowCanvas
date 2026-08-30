@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 import { canvasThemes, type CanvasBackgroundMode, type CanvasColorTheme, type CanvasTheme } from "@/lib/canvas-theme";
-import type { CanvasConnectionStyle } from "../types";
+import type { CanvasConnectionStyle, CanvasInputPreference } from "../types";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { CanvasCreateNodeMenu, type CanvasCreateMenuAction } from "./canvas-create-node-menu";
@@ -40,6 +40,7 @@ export function CanvasToolbar({
     canRedo,
     backgroundMode,
     connectionStyle,
+    inputPreference,
     snapToGrid,
     alignmentGuidesEnabled,
     showImageInfo,
@@ -54,6 +55,7 @@ export function CanvasToolbar({
     onClear,
     onBackgroundModeChange,
     onConnectionStyleChange,
+    onInputPreferenceChange,
     onSnapToGridChange,
     onAlignmentGuidesEnabledChange,
     onShowImageInfoChange,
@@ -68,6 +70,7 @@ export function CanvasToolbar({
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
     connectionStyle: CanvasConnectionStyle;
+    inputPreference: CanvasInputPreference;
     snapToGrid: boolean;
     alignmentGuidesEnabled: boolean;
     showImageInfo: boolean;
@@ -83,6 +86,7 @@ export function CanvasToolbar({
     onDeselect: () => void;
     onBackgroundModeChange: (mode: CanvasBackgroundMode) => void;
     onConnectionStyleChange: (style: CanvasConnectionStyle) => void;
+    onInputPreferenceChange: (preference: CanvasInputPreference) => void;
     onSnapToGridChange: (enabled: boolean) => void;
     onAlignmentGuidesEnabledChange: (enabled: boolean) => void;
     onShowImageInfoChange: (show: boolean) => void;
@@ -271,6 +275,26 @@ export function CanvasToolbar({
                             { value: "curve", label: "曲线" },
                             { value: "orthogonal", label: "直角" },
                             { value: "straight", label: "直线" },
+                        ]}
+                    />
+                    <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">滚轮行为</div>
+                    <Segmented
+                        className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"
+                        value={inputPreference.wheelMode}
+                        onChange={(value) => onInputPreferenceChange({ ...inputPreference, wheelMode: value as "zoom" | "pan" })}
+                        options={[
+                            { value: "zoom", label: "滚轮缩放" },
+                            { value: "pan", label: "Figma 平移" },
+                        ]}
+                    />
+                    <div className="mt-3 px-1 pb-1.5 text-[11px] font-medium opacity-50">缩放方向</div>
+                    <Segmented
+                        className="w-full !p-1 [&_.ant-segmented-group]:!flex [&_.ant-segmented-item]:!min-h-8 [&_.ant-segmented-item]:!flex-1 [&_.ant-segmented-item-label]:!min-h-8 [&_.ant-segmented-item-label]:!leading-8"
+                        value={inputPreference.wheelDirection}
+                        onChange={(value) => onInputPreferenceChange({ ...inputPreference, wheelDirection: value as "normal" | "inverted" })}
+                        options={[
+                            { value: "normal", label: "常规" },
+                            { value: "inverted", label: "反向" },
                         ]}
                     />
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">

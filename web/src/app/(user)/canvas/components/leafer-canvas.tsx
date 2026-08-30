@@ -9,7 +9,7 @@ import "@leafer-in/viewport";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasConnectionStyle, type CanvasNodeData, type ViewportTransform } from "../types";
+import { CanvasNodeType, type CanvasAlignmentGuides, type CanvasConnection, type CanvasConnectionStyle, type CanvasInputPreference, type CanvasNodeData, type ViewportTransform } from "../types";
 import { CanvasScaleCtx } from "./canvas-scale-context";
 import { buildSpatialIndex, querySpatialIndex } from "../utils/canvas-spatial-index";
 import { buildConnectionPathFromPoints, getConnectionPoints, getNodeConnectionPoint } from "../utils/canvas-connection-geometry";
@@ -22,6 +22,7 @@ type LeaferCanvasProps = {
     connections: CanvasConnection[];
     backgroundMode?: CanvasBackgroundMode;
     connectionStyle?: CanvasConnectionStyle;
+    inputPreference?: CanvasInputPreference;
     alignmentGuides?: CanvasAlignmentGuides | null;
     selectedNodeIds: Set<string>;
     selectedConnectionId: string | null;
@@ -84,6 +85,7 @@ export function LeaferCanvas({
     connections = EMPTY_CONNECTIONS,
     backgroundMode = "dots",
     connectionStyle = "curve",
+    inputPreference = { wheelMode: "zoom", wheelDirection: "normal" },
     alignmentGuides,
     selectedNodeIds,
     selectedConnectionId,
@@ -125,6 +127,8 @@ export function LeaferCanvas({
     backgroundModeRef.current = backgroundMode;
     const connectionStyleRef = useRef(connectionStyle);
     connectionStyleRef.current = connectionStyle;
+    const inputPreferenceRef = useRef(inputPreference);
+    inputPreferenceRef.current = inputPreference;
     const alignmentGuidesRef = useRef(alignmentGuides);
     alignmentGuidesRef.current = alignmentGuides;
     const scaleRef = useRef(viewport.k);
@@ -654,6 +658,51 @@ export function LeaferCanvas({
         applyViewportPresentation(next, false);
         scheduleViewportCommit();
     }, [applyViewportPresentation, scheduleViewportCommit]);
+
+    // 输入偏好：默认交给 Leafer 处理；Figma 平移 / 反向缩放由容器捕获层接管，
+    // 覆盖节点 DOM 等会让 Leafer 收不到 wheel 的浮层，避免“时灵时不灵”。
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        const handleWheel = (event: WheelEvent) => {
+            const preference = inputPreferenceRef.current;
+            if (preference.wheelMode === "zoom" && preference.wheelDirection === "normal") return;
+            if (preference.wheelMode === "pan" && preference.wheelDirection === "normal" && (event.ctrlKey || event.metaKey)) return;
+            const target = event.target;
+            if (target instanceof HTMLElement && target.closest("[data-canvas-no-zoom],[data-node-text-editable],textarea,input,[contenteditable='true']")) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const rect = container.getBoundingClientRect();
+            const current = viewportRef.current;
+            const pointerX = event.clientX - rect.left;
+            const pointerY = event.clientY - rect.top;
+            const modifierZoom = event.ctrlKey || event.metaKey;
+            if (preference.wheelMode === "pan" && !modifierZoom) {
+                const horizontalDelta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
+                const verticalDelta = event.shiftKey && !event.deltaX ? 0 : event.deltaY;
+                applyViewportPresentation({
+                    ...current,
+                    x: current.x - horizontalDelta,
+                    y: current.y - verticalDelta,
+                });
+                scheduleViewportCommit();
+                return;
+            }
+            const delta = event.deltaY || event.deltaX;
+            if (!delta) return;
+            const direction = preference.wheelDirection === "inverted" ? 1 : -1;
+            const nextScale = clampCanvasZoom(current.k * Math.pow(1.1, direction * delta / 100));
+            const ratio = nextScale / current.k;
+            applyViewportPresentation({
+                x: pointerX - (pointerX - current.x) * ratio,
+                y: pointerY - (pointerY - current.y) * ratio,
+                k: nextScale,
+            });
+            scheduleViewportCommit();
+        };
+        container.addEventListener("wheel", handleWheel, { capture: true, passive: false });
+        return () => container.removeEventListener("wheel", handleWheel, { capture: true });
+    }, [applyViewportPresentation, containerRef, scheduleViewportCommit]);
 
     // Init LeaferJS
     useEffect(() => {

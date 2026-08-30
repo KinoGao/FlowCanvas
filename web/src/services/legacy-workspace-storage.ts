@@ -101,6 +101,7 @@ function normalizeLegacyProject(source: Partial<CanvasProject>): CanvasProject {
         activeChatId: source.activeChatId || null,
         backgroundMode: source.backgroundMode || "lines",
         connectionStyle: source.connectionStyle || "curve",
+        inputPreference: source.inputPreference || { wheelMode: "zoom" as const, wheelDirection: "normal" as const },
         snapToGrid: Boolean(source.snapToGrid),
         alignmentGuidesEnabled: source.alignmentGuidesEnabled !== false,
         showImageInfo: Boolean(source.showImageInfo),
