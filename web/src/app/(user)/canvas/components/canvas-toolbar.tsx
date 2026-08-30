@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Modal, Segmented, Switch } from "antd";
 import {
     Boxes,
@@ -407,48 +407,94 @@ function CanvasThemeButton({ colorTheme, targetTheme, onThemeChange, children }:
     );
 }
 
+type ShortcutItem = {
+    id: string;
+    label: string;
+    shortcut: string;
+    description?: string;
+    combos: string[];
+};
+
+type ShortcutGroup = {
+    title: string;
+    items: ShortcutItem[];
+};
+
+const ShortcutGroups: ShortcutGroup[] = [
+    {
+        title: "创作",
+        items: [
+            { id: "select-all", label: "全选节点", shortcut: "Ctrl/Cmd + A", description: "选中画布全部节点", combos: ["ctrl+a", "meta+a"] },
+            { id: "copy", label: "复制", shortcut: "Ctrl/Cmd + C", description: "复制选中的节点与连线", combos: ["ctrl+c", "meta+c"] },
+            { id: "paste", label: "粘贴", shortcut: "Ctrl/Cmd + V", description: "粘贴当前剪贴板内容", combos: ["ctrl+v", "meta+v"] },
+            { id: "group", label: "成组", shortcut: "Ctrl/Alt + G", description: "把选中节点组成普通组", combos: ["ctrl+g", "meta+g", "alt+g"] },
+            { id: "storyboard-group", label: "合并分镜组", shortcut: "Ctrl + Alt + G", description: "把选中节点组成分镜组", combos: ["ctrl+alt+g", "meta+alt+g"] },
+            { id: "ungroup", label: "解组", shortcut: "Ctrl/Alt + Shift + G", description: "解散选中分组", combos: ["ctrl+shift+g", "meta+shift+g", "alt+shift+g"] },
+            { id: "duplicate", label: "复制节点和连线", shortcut: "Ctrl/Cmd + D", description: "创建选中节点副本", combos: ["ctrl+d", "meta+d"] },
+            { id: "run", label: "生成", shortcut: "Ctrl/Cmd + Enter", description: "运行选中的生成任务", combos: ["ctrl+enter", "meta+enter"] },
+            { id: "create", label: "新建节点", shortcut: "Tab", description: "打开统一创建菜单", combos: ["tab"] },
+        ],
+    },
+    {
+        title: "缩放",
+        items: [
+            { id: "zoom-in", label: "放大", shortcut: "Ctrl/Cmd + +", description: "步进放大画布", combos: ["ctrl++", "meta++", "ctrl+=", "meta+="] },
+            { id: "zoom-out", label: "缩小", shortcut: "Ctrl/Cmd + -", description: "步进缩小画布", combos: ["ctrl+-", "meta+-"] },
+            { id: "fit", label: "适应画布", shortcut: "Ctrl/Cmd + 0", description: "重置到适合画布视图", combos: ["ctrl+0", "meta+0"] },
+            { id: "pinch", label: "触控板", shortcut: "捏合缩放", description: "触控板双指捏合", combos: [] },
+            { id: "wheel-zoom", label: "鼠标", shortcut: "Ctrl/Cmd + 滚轮", description: "指针锚点缩放", combos: [] },
+        ],
+    },
+    {
+        title: "移动画布",
+        items: [
+            { id: "space-drag", label: "键盘", shortcut: "Space + 拖动", description: "按住空格平移画布", combos: [] },
+            { id: "drag-pan", label: "鼠标", shortcut: "滚轮 / 中键 / 右键拖拽", description: "滚轮或按住中键/右键平移", combos: [] },
+            { id: "touch-pan", label: "触控板", shortcut: "双指滑动", description: "触控板双指滚动平移", combos: [] },
+        ],
+    },
+    {
+        title: "其他",
+        items: [
+            { id: "undo", label: "撤销", shortcut: "Ctrl/Cmd + Z", description: "撤销上一步画布操作", combos: ["ctrl+z", "meta+z"] },
+            { id: "redo", label: "重做", shortcut: "Ctrl/Cmd + Shift + Z", description: "恢复已撤销操作", combos: ["ctrl+shift+z", "meta+shift+z", "ctrl+y", "meta+y"] },
+            { id: "delete", label: "删除", shortcut: "Delete / Backspace", description: "删除选中节点或连线", combos: ["delete", "backspace"] },
+            { id: "search", label: "搜索节点", shortcut: "Ctrl/Cmd + F", description: "打开节点搜索面板", combos: ["ctrl+f", "meta+f"] },
+            { id: "agent", label: "创作 Agent", shortcut: "Ctrl/Cmd + J", description: "打开或收起创作 Agent", combos: ["ctrl+j", "meta+j"] },
+            { id: "escape", label: "取消 / 清空选择", shortcut: "Escape", description: "关闭浮层并取消当前选择", combos: ["escape"] },
+            { id: "block-browser", label: "阻止浏览器保存 / 打印", shortcut: "Ctrl/Cmd + S / P", description: "避免触发浏览器原生保存打印", combos: ["ctrl+s", "meta+s", "ctrl+p", "meta+p"] },
+        ],
+    },
+];
+
 function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: CanvasTheme; onClose: () => void }) {
-    const groups = [
-        {
-            title: "创作",
-            items: [
-                ["成组", "Ctrl/Alt + G"],
-                ["合并分镜组", "Ctrl + Alt + G"],
-                ["解组", "Ctrl/Alt + Shift + G"],
-                ["复制节点和连线", "Ctrl + D"],
-                ["生成", "Ctrl + Enter"],
-                ["新建节点", "Tab"],
-            ],
-        },
-        {
-            title: "缩放",
-            items: [
-                ["放大", "Ctrl + +"],
-                ["缩小", "Ctrl + -"],
-                ["适应画布", "Ctrl + 0"],
-                ["触控板", "捏合缩放"],
-                ["鼠标", "Ctrl + 滚轮"],
-            ],
-        },
-        {
-            title: "移动画布",
-            items: [
-                ["键盘", "Space + 拖动"],
-                ["鼠标", "滚轮 / 中键 / 右键拖拽"],
-                ["触控板", "双指滑动"],
-            ],
-        },
-        {
-            title: "其他",
-            items: [
-                ["撤销", "Ctrl + Z"],
-                ["重做", "Ctrl + Shift + Z"],
-                ["删除", "Delete"],
-                ["搜索节点", "Ctrl + F"],
-                ["创作 Agent", "Ctrl + J"],
-            ],
-        },
-    ];
+    const [query, setQuery] = useState("");
+    useEffect(() => {
+        if (open) setQuery("");
+    }, [open]);
+    const filteredGroups = useMemo(() => {
+        const keyword = query.trim().toLowerCase();
+        if (!keyword) return ShortcutGroups;
+        return ShortcutGroups.map((group) => ({
+            ...group,
+            items: group.items.filter((item) =>
+                [item.label, item.shortcut, item.description || "", ...item.combos].join(" ").toLowerCase().includes(keyword),
+            ),
+        })).filter((group) => group.items.length);
+    }, [query]);
+    const conflicts = useMemo(() => {
+        const owners = new Map<string, Set<string>>();
+        ShortcutGroups.flatMap((group) => group.items).forEach((item) => {
+            item.combos.forEach((combo) => {
+                const set = owners.get(combo) || new Set<string>();
+                set.add(item.id);
+                owners.set(combo, set);
+            });
+        });
+        return [...owners.entries()]
+            .filter(([, ids]) => ids.size > 1)
+            .map(([combo, ids]) => ({ combo, labels: [...ids].map((id) => ShortcutGroups.flatMap((group) => group.items).find((item) => item.id === id)?.label).filter(Boolean) }));
+    }, []);
 
     if (!open) return null;
 
@@ -457,27 +503,55 @@ function CanvasShortcutsModal({ open, theme, onClose }: { open: boolean; theme: 
             <button type="button" className="creative-os-icon-button absolute right-3 top-3 !size-8 opacity-70 hover:opacity-100" onClick={onClose} aria-label="关闭快捷键">
                 <X className="size-4" />
             </button>
+            <div className="mb-3 flex items-center gap-2 pr-10">
+                <input
+                    autoFocus
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="搜索功能或快捷键，如 G / Ctrl+D"
+                    className="h-9 min-w-0 flex-1 rounded-lg border bg-transparent px-3 text-sm outline-none placeholder:opacity-40"
+                    style={{ borderColor: theme.toolbar.border, color: theme.node.text }}
+                />
+                <span className="shrink-0 text-xs" style={{ color: conflicts.length ? theme.ui.danger : theme.node.muted }}>
+                    {conflicts.length ? `检测到 ${conflicts.length} 组键位冲突` : "未发现键位冲突"}
+                </span>
+            </div>
+            {conflicts.length ? (
+                <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.ui.danger, color: theme.ui.danger }}>
+                    {conflicts.map((item) => (
+                        <div key={item.combo} className="flex flex-wrap items-center gap-2">
+                            <code>{item.combo}</code>
+                            <span className="opacity-65">被 {item.labels.join(" / ")} 同时使用</span>
+                        </div>
+                    ))}
+                </div>
+            ) : null}
             <div className="grid grid-cols-1 gap-5 pr-8 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                {groups.map((group) => (
+                {filteredGroups.length ? filteredGroups.map((group) => (
                     <div key={group.title} className="min-w-0 border-r last:border-r-0" style={{ borderColor: theme.toolbar.border }}>
                         <div className="mb-4 text-sm font-semibold" style={{ color: theme.ui.accent }}>{group.title}</div>
                         <div className="space-y-3 pr-4">
-                            {group.items.map(([label, value]) => (
-                                <ShortcutLine key={label} label={label} value={value} />
+                            {group.items.map((item) => (
+                                <ShortcutLine key={item.id} label={item.label} value={item.shortcut} description={item.description} />
                             ))}
                         </div>
                     </div>
-                ))}
+                )) : (
+                    <div className="col-span-full py-10 text-center text-sm opacity-55">没有匹配的快捷键</div>
+                )}
             </div>
         </div>
     );
 }
 
-function ShortcutLine({ label, value }: { label: string; value: string }) {
+function ShortcutLine({ label, value, description }: { label: string; value: string; description?: string }) {
     const keys = value.split(" + ");
     return (
         <div className="flex min-w-0 items-center justify-between gap-3">
-            <span className="min-w-0 text-xs opacity-65">{label}</span>
+            <span className="min-w-0 text-xs" title={description}>
+                {label}
+                {description ? <span className="block truncate text-[10px] opacity-50">{description}</span> : null}
+            </span>
             <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-xs" style={{ color: "var(--creative-text)" }}>
                 {keys.map((key, index) => (
                     <span key={`${label}-${key}-${index}`} className="inline-flex items-center gap-1.5">
