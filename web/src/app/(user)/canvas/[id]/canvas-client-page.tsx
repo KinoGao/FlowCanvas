@@ -2663,6 +2663,30 @@ function LeaferCanvasPage() {
         setDialogNodeId(newNode.id);
     }, [createCanvasNode]);
 
+    /** 语音工作台：把合成/克隆的音色试听音频插入画布为音频节点。 */
+    const handleInsertVoiceToCanvas = useCallback(
+        async (blob: Blob, name: string) => {
+            try {
+                const audio = await uploadMediaFile(blob, "audio");
+                const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
+                const center = getCanvasCenter();
+                const newNode: CanvasNodeData = {
+                    ...createCanvasNode(CanvasNodeType.Audio, center, audioMetadata(audio)),
+                    position: { x: center.x - spec.width / 2, y: center.y - spec.height / 2 },
+                    width: spec.width,
+                    height: spec.height,
+                };
+                setNodes((prev) => [...prev, newNode]);
+                setSelectedNodeIds(new Set([newNode.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(newNode.id);
+            } catch (error) {
+                message.error(`插入音色到画布失败：${error instanceof Error ? error.message : String(error)}`);
+            }
+        },
+        [createCanvasNode, getCanvasCenter, message],
+    );
+
     const createTextFileNode = useCallback(
         async (file: File, position: Position) => {
             const content = await file.text();
@@ -6768,6 +6792,7 @@ function LeaferCanvasPage() {
                     onPreviewNode={openAssetPreview}
                     onToggleVisibility={toggleNodeVisibility}
                     onInsertDigitalHuman={insertDigitalHuman}
+                    onInsertVoiceToCanvas={(blob, name) => void handleInsertVoiceToCanvas(blob, name)}
                     onOpenAssetPicker={() => openAssetPicker()}
                     onUpload={() => handleUploadRequest()}
                 />
@@ -7398,6 +7423,7 @@ function LeaferCanvasPage() {
                     onClose={() => setMaterialLibraryOpen(false)}
                     onUsePreset={insertMaterialPreset}
                     onInsertDigitalHuman={insertDigitalHuman}
+                    onInsertVoiceToCanvas={(blob, name) => void handleInsertVoiceToCanvas(blob, name)}
                     onOpenAssetPicker={() => {
                         setMaterialLibraryOpen(false);
                         openAssetPicker();
@@ -7487,6 +7513,7 @@ function CanvasMaterialLibraryModal({
     onOpenAssetPicker,
     onUpload,
     onInsertDigitalHuman,
+    onInsertVoiceToCanvas,
 }: {
     open: boolean;
     initialTab: MaterialLibraryTab;
@@ -7495,6 +7522,7 @@ function CanvasMaterialLibraryModal({
     onOpenAssetPicker: () => void;
     onUpload: () => void;
     onInsertDigitalHuman: (persona: CanvasDigitalHuman) => void;
+    onInsertVoiceToCanvas?: (blob: Blob, name: string) => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -7532,7 +7560,7 @@ function CanvasMaterialLibraryModal({
                 <DigitalHumanPanel theme={theme} onInsert={onInsertDigitalHuman} />
             ) : tab === "voices" ? (
                 <div className="max-h-[420px] overflow-y-auto pr-1">
-                    <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} />
+                    <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} onInsertVoiceToCanvas={onInsertVoiceToCanvas} />
                 </div>
             ) : tab === "assets" ? (
                 <div className="grid min-h-[260px] place-items-center rounded-xl border p-8 text-center" style={{ borderColor: theme.toolbar.border, background: theme.node.fill }}>
@@ -7744,6 +7772,7 @@ function CanvasAssetManagerPanel({
     onPreviewNode,
     onToggleVisibility,
     onInsertDigitalHuman,
+    onInsertVoiceToCanvas,
     onOpenAssetPicker,
     onUpload,
 }: {
@@ -7757,6 +7786,7 @@ function CanvasAssetManagerPanel({
     onPreviewNode: (nodeId: string) => void;
     onToggleVisibility: (nodeId: string) => void;
     onInsertDigitalHuman: (persona: CanvasDigitalHuman) => void;
+    onInsertVoiceToCanvas?: (blob: Blob, name: string) => void;
     onOpenAssetPicker: () => void;
     onUpload: () => void;
 }) {
@@ -7875,7 +7905,7 @@ function CanvasAssetManagerPanel({
                             <DigitalHumanPanel theme={theme} compact onInsert={onInsertDigitalHuman} />
                         </section>
                         <section className="mt-4 border-t pt-3" style={{ borderColor: theme.toolbar.border }}>
-                            <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} />
+                            <VoiceManagerSection voice={config.audioVoice} onSelectVoice={(value) => updateConfig("audioVoice", value)} onInsertVoiceToCanvas={onInsertVoiceToCanvas} />
                         </section>
                         <section className="mt-4 border-t pt-3" style={{ borderColor: theme.toolbar.border }}>
                             <div className="mb-3 grid grid-cols-2 gap-2">

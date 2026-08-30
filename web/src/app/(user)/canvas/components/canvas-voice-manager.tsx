@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Mic, Play, Square, Trash2, Wand2 } from "lucide-react";
+import { Download, Loader2, Mic, Play, Square, Trash2, Wand2 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -27,6 +27,8 @@ export type VoiceManagerSectionProps = {
     voice: string;
     /** 选择音色 */
     onSelectVoice: (voice: string) => void;
+    /** 将音色合成一段音频并插入画布（blob + 音色名） */
+    onInsertVoiceToCanvas?: (blob: Blob, name: string) => void;
 };
 
 type DesignState = { name: string; instructions: string; refLine: string; audioUrl: string | null; wavBlob: Blob | null };
@@ -36,7 +38,7 @@ type CloneState = { name: string; file: File | null; transcript: string };
  * 音色管理：列表 / 语音设计（文字描述 → 新音色）/ 克隆（上传参考录音）。
  * 直连本地 TTS 服务（127.0.0.1:8880 主服务 + 8881 设计服务，CORS 已开放）。
  */
-export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectionProps) {
+export function VoiceManagerSection({ voice, onSelectVoice, onInsertVoiceToCanvas }: VoiceManagerSectionProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [voices, setVoices] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
@@ -196,6 +198,34 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
         [playingVoice, stopPreview],
     );
 
+    /** 用指定音色合成一句音频并回调给宿主（插入画布为音频节点）。 */
+    const insertVoiceToCanvas = useCallback(
+        async (name: string) => {
+            if (!onInsertVoiceToCanvas) return;
+            setBusy(`insert-${name}`);
+            setNotice(null);
+            try {
+                const resp = await fetch(`${TTS_MAIN}/audio/speech`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ model: "qwen3-tts", voice: name, input: "你好，这是我在画布上生成的一段语音。", response_format: "wav" }),
+                });
+                if (!resp.ok) {
+                    const body = await resp.json().catch(() => ({}));
+                    throw new Error(body.detail || `HTTP ${resp.status}`);
+                }
+                const blob = await resp.blob();
+                onInsertVoiceToCanvas(blob, name);
+                setNotice({ type: "ok", text: `已将音色「${name}」插入画布` });
+            } catch (error) {
+                setNotice({ type: "err", text: `插入失败：${error instanceof Error ? error.message : error}` });
+            } finally {
+                setBusy(null);
+            }
+        },
+        [onInsertVoiceToCanvas],
+    );
+
     useEffect(() => () => stopPreview(), [stopPreview]);
 
     const inputStyle = { background: theme.ui.controlFill, borderColor: theme.ui.hairline, color: theme.node.text };
@@ -243,6 +273,17 @@ export function VoiceManagerSection({ voice, onSelectVoice }: VoiceManagerSectio
                                 {name}
                                 {voice === name ? " ✓" : ""}
                             </button>
+                            {onInsertVoiceToCanvas ? (
+                                <button
+                                    type="button"
+                                    title="插入画布"
+                                    className="opacity-40 transition hover:opacity-100"
+                                    disabled={busy === `insert-${name}`}
+                                    onClick={() => void insertVoiceToCanvas(name)}
+                                >
+                                    {busy === `insert-${name}` ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+                                </button>
+                            ) : null}
                             <button
                                 type="button"
                                 title="删除"
