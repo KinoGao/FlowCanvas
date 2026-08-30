@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { Button, Image } from "antd";
-import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Music2, Plus, Video, X } from "lucide-react";
 
 import { resolveImageUrl } from "@/services/image-storage";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -11,10 +11,12 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 
 type CanvasConfigComposerProps = {
+    nodeId: string;
     value: string;
     inputs: NodeGenerationInput[];
     onChange: (value: string) => void;
     onClose: () => void;
+    onStartReferenceSelection?: (targetNodeId: string) => void;
 };
 
 type Token = { type: "text"; value: string } | { type: "reference"; nodeId: string };
@@ -25,7 +27,7 @@ type MentionState = {
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
-export function CanvasConfigComposer({ value, inputs, onChange, onClose }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ nodeId, value, inputs, onChange, onClose, onStartReferenceSelection }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -142,7 +144,26 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     <div className="shrink-0 text-xs font-semibold">组装提示词</div>
                     <div className="truncate text-[11px] opacity-55">@ 引用已连接素材，发送前按当前连接重新编号</div>
                 </div>
-                <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                <div className="flex shrink-0 items-center gap-1">
+                    {onStartReferenceSelection ? (
+                        <button
+                            type="button"
+                            className="grid size-7 shrink-0 place-items-center rounded-lg border transition hover:opacity-75"
+                            style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}
+                            title="从画布添加引用"
+                            aria-label="从画布添加引用"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onStartReferenceSelection(nodeId);
+                            }}
+                        >
+                            <Plus className="size-3.5" />
+                        </button>
+                    ) : null}
+                    <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
+                </div>
             </div>
             <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
                 {!value.trim() ? (

@@ -73,6 +73,8 @@ export type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     connectionTargetSide?: "source" | "target" | null;
+    referenceSelectionState?: "target" | "disabled" | "available";
+    onSelectReference?: (nodeId: string) => void;
     editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
@@ -154,6 +156,7 @@ function canvasNodePropsEqual(prev: CanvasNodeProps, next: CanvasNodeProps) {
     if (prev.isFocusRelated !== next.isFocusRelated) return false;
     if (prev.isConnectionTarget !== next.isConnectionTarget) return false;
     if (prev.connectionTargetSide !== next.connectionTargetSide) return false;
+    if (prev.referenceSelectionState !== next.referenceSelectionState) return false;
     if (prev.showPanel !== next.showPanel) return false;
     if (prev.showImageInfo !== next.showImageInfo) return false;
     if (prev.isOverview !== next.isOverview) return false;
@@ -180,6 +183,8 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     connectionTargetSide = null,
+    referenceSelectionState,
+    onSelectReference,
     editRequestNonce = 0,
     showPanel,
     showImageInfo,
@@ -485,7 +490,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-node-empty-media={isEmptyMediaNode ? "true" : undefined}
             data-node-batch-root={isBatchRoot ? "true" : undefined}
             data-node-batch-child={isBatchChild ? "true" : undefined}
-            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"} ${isFocusNode ? "is-focus-node" : ""}`}
+            className={`node-element ${editorManaged ? "is-leafer-managed" : ""} ${positioned ? "absolute" : "relative"} flex select-none flex-col ${isGroup ? "z-0" : isSelected ? "z-50" : "z-10"} ${isFocusNode ? "is-focus-node" : ""} ${referenceSelectionState === "available" ? "cursor-pointer" : referenceSelectionState ? "cursor-not-allowed" : ""}`}
             style={{
                 transform: positioned ? `translate(${data.position.x}px, ${data.position.y}px)` : undefined,
                 width: data.width,
@@ -506,6 +511,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                 setNodeHovered(false);
                 if (shouldUseOverview) return;
                 onHoverEnd(data.id);
+            }}
+            onPointerDown={(event) => {
+                if (!referenceSelectionState || event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (referenceSelectionState === "available") onSelectReference?.(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
@@ -623,12 +634,12 @@ export const CanvasNode = React.memo(function CanvasNode({
                 ) : null}
 
                 {/* 所有节点（含打组）统一用右下角角标缩放 */}
-                {!shouldUseOverview ? (
+                {!shouldUseOverview && !referenceSelectionState ? (
                     <ResizeBadge visible={isSelected} onPointerDown={(event) => handleResizeMouseDown(event, "bottom-right")} />
                 ) : null}
             </Card>
 
-            {!shouldUseOverview && isSelected && isEmptyMediaNode ? (
+            {!shouldUseOverview && !referenceSelectionState && isSelected && isEmptyMediaNode ? (
                 <MediaNodeQuickActions
                     kind={data.type as CanvasNodeType.Image | CanvasNodeType.Video | CanvasNodeType.Audio}
                     theme={theme}
@@ -637,10 +648,26 @@ export const CanvasNode = React.memo(function CanvasNode({
                 />
             ) : null}
 
+            {referenceSelectionState && (referenceSelectionState !== "available" || nodeHovered) ? (
+                <div
+                    className="pointer-events-none absolute inset-0 z-[60] grid place-items-center rounded-2xl"
+                    style={{
+                        background: `color-mix(in srgb, ${theme.canvas.background} ${referenceSelectionState === "target" ? 78 : referenceSelectionState === "disabled" ? 60 : 34}%, transparent)`,
+                        boxShadow: referenceSelectionState === "available" ? `inset 0 0 0 2px ${theme.ui.accent}` : undefined,
+                    }}
+                >
+                    {referenceSelectionState !== "disabled" ? (
+                        <span className="rounded-lg px-3 py-2 text-sm font-medium shadow-sm" style={{ background: theme.toolbar.panel, color: theme.node.text }}>
+                            {referenceSelectionState === "target" ? "正在选择引用" : "选择此节点作为引用"}
+                        </span>
+                    ) : null}
+                </div>
+            ) : null}
+
             {/* 拉线时只显示当前吸附目标的圆球（active），不再把所有节点的端口全部点亮；
                 未参与连线的节点保持 hover 磁吸区才显示。 */}
-            {!isGroup ? <ConnectionHandleDot side="left" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
-            {!isGroup && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
+            {!referenceSelectionState && !isGroup ? <ConnectionHandleDot side="left" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "target"} /> : null}
+            {!referenceSelectionState && !isGroup && !isGenerationConfigNode(data.type) ? <ConnectionHandleDot side="right" visible={isSelected} active={isConnectionTarget && connectionTargetSide === "source"} onClickCreate={onClickCreate ? () => onClickCreate(data) : undefined} /> : null}
 
             {showPanel && renderPanel ? (
                 <div

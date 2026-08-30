@@ -58,7 +58,7 @@ import { MIN_CANVAS_ZOOM, clampCanvasZoom, stepCanvasZoom } from "../components/
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, CANVAS_AGENT_SIDE_EFFECT_OP_TYPES, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildBatchVisibilityIndex, buildConnectionAdjacency, buildNodeById, normalizeConnectionWithNodeMap, setsEqual } from "../utils/canvas-derived-indexes";
-import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph } from "../utils/canvas-resource-references";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, createCanvasResourceGraph, getMentionResourceNodes, isCanvasResourceNode } from "../utils/canvas-resource-references";
 import { resolveComposerOverlayPosition } from "../utils/canvas-composer-position";
 import { generationRunSettlementKey, settleFinishedGenerationRuns, updateCanvasGenerationRun, upsertCanvasGenerationRun } from "../utils/canvas-generation-runs";
 import { isGroupExecutableNode } from "../utils/canvas-group-execution";
@@ -703,6 +703,8 @@ function LeaferCanvasPage() {
     const didInitialCenterRef = useRef(false);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nodeDraggingRef = useRef(false);
+    const suppressNextNodeTapRef = useRef(false);
+    const nodeTapSuppressionTimerRef = useRef<number | null>(null);
     const imageTapGestureRef = useRef<{ nodeId: string | null; count: number; lastAt: number; composerTimer: number | null }>({
         nodeId: null,
         count: 0,
@@ -853,6 +855,7 @@ function LeaferCanvasPage() {
     const [alignPanelOpen, setAlignPanelOpen] = useState(false);
     const [nodeSequenceCounters, setNodeSequenceCounters] = useState<CanvasNodeSequenceCounters>({});
     const [referenceOrderCounter, setReferenceOrderCounter] = useState(0);
+    const [referencePickerNodeId, setReferencePickerNodeId] = useState<string | null>(null);
     const [composerContentHeight, setComposerContentHeight] = useState(360);
 
     const nodesRef = useRef(nodes);
@@ -1453,6 +1456,7 @@ function LeaferCanvasPage() {
 
     useEffect(() => () => {
         if (toolbarHideTimerRef.current) clearTimeout(toolbarHideTimerRef.current);
+        if (nodeTapSuppressionTimerRef.current) clearTimeout(nodeTapSuppressionTimerRef.current);
     }, []);
 
     const nodeById = useMemo(() => buildNodeById(nodes), [nodes]);
@@ -1467,6 +1471,13 @@ function LeaferCanvasPage() {
         () => new Map(nodes.map((node) => [node.id, { input: canvasGraph.incomingByNodeId.get(node.id)?.length || 0, output: canvasGraph.outgoingByNodeId.get(node.id)?.length || 0 }])),
         [canvasGraph, nodes],
     );
+    const referenceConnectedNodeIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (!referencePickerNodeId) return ids;
+        ids.add(referencePickerNodeId);
+        getMentionResourceNodes(referencePickerNodeId, canvasGraph).forEach((node) => ids.add(node.id));
+        return ids;
+    }, [canvasGraph, referencePickerNodeId]);
 
     useLayoutEffect(() => {
         nodeByIdRef.current = nodeById;
@@ -1989,6 +2000,7 @@ function LeaferCanvasPage() {
             setHoveredNodeId((current) => (current && allIds.has(current) ? null : current));
             setToolbarNodeId((current) => (current && allIds.has(current) ? null : current));
             setDialogNodeId((current) => (current && allIds.has(current) ? null : current));
+            setReferencePickerNodeId((current) => (current && allIds.has(current) ? null : current));
             setEditingNodeId((current) => (current && allIds.has(current) ? null : current));
             setInfoNodeId((current) => (current && allIds.has(current) ? null : current));
             setCropNodeId((current) => (current && allIds.has(current) ? null : current));
@@ -2013,8 +2025,77 @@ function LeaferCanvasPage() {
     }, []);
 
     const removeNodeReference = useCallback((targetNodeId: string, sourceNodeId: string) => {
-        setConnections((previous) => previous.filter((connection) => !(connection.fromNodeId === sourceNodeId && connection.toNodeId === targetNodeId)));
+        setConnections((previous) => {
+            const next = previous.filter((connection) => !(connection.fromNodeId === sourceNodeId && connection.toNodeId === targetNodeId));
+            connectionsRef.current = next;
+            return next;
+        });
     }, []);
+
+    const startNodeReferenceSelection = useCallback((targetNodeId: string) => {
+        setReferencePickerNodeId(targetNodeId);
+        const nextSelected = new Set([targetNodeId]);
+        selectedNodeIdsRef.current = nextSelected;
+        setSelectedNodeIds(nextSelected);
+        selectedConnectionIdRef.current = null;
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+        setContextMenu(null);
+        setToolbarNodeId(null);
+        setHoveredNodeId(null);
+    }, []);
+
+    const exitNodeReferenceSelection = useCallback(() => {
+        if (!referencePickerNodeId) return;
+        const targetNodeId = referencePickerNodeId;
+        const targetNode = nodeByIdRef.current.get(targetNodeId);
+        setReferencePickerNodeId(null);
+        if (!targetNode) return;
+        const nextSelected = new Set([targetNodeId]);
+        selectedNodeIdsRef.current = nextSelected;
+        setSelectedNodeIds(nextSelected);
+        setContextMenu(null);
+        if (targetNode.metadata?.canvasTool === "director") {
+            setDialogNodeId(null);
+            setDirectorStudioNodeId(targetNodeId);
+            setEditingNodeId(null);
+            return;
+        }
+        if (isCanvasScriptNode(targetNode)) {
+            setDialogNodeId(null);
+            setScriptStudioNodeId(targetNodeId);
+            setEditingNodeId(null);
+            return;
+        }
+        setDialogNodeId(targetNodeId);
+    }, [referencePickerNodeId]);
+
+    const selectNodeReference = useCallback((sourceNodeId: string) => {
+        if (!referencePickerNodeId) return;
+        const source = nodesRef.current.find((node) => node.id === sourceNodeId);
+        if (!source || !isCanvasResourceNode(source)) return;
+        const normalized = normalizeConnectionWithNodeMap(sourceNodeId, referencePickerNodeId, nodeByIdRef.current, "source");
+        if (!normalized) return;
+        const { fromNodeId, toNodeId } = normalized;
+        if (referenceConnectedNodeIds.has(fromNodeId) && referenceConnectedNodeIds.has(toNodeId)) return;
+        const exists = connectionsRef.current.some((connection) => connection.fromNodeId === fromNodeId && connection.toNodeId === toNodeId);
+        if (exists) return;
+        const connection = createCanvasConnection(fromNodeId, toNodeId);
+        connectionsRef.current = [...connectionsRef.current, connection];
+        setConnections((current) => (current.some((item) => item.id === connection.id) ? current : [...current, connection]));
+    }, [createCanvasConnection, referenceConnectedNodeIds, referencePickerNodeId]);
+
+    useEffect(() => {
+        if (!referencePickerNodeId) return;
+        const handleReferenceKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            exitNodeReferenceSelection();
+        };
+        window.addEventListener("keydown", handleReferenceKeyDown, true);
+        return () => window.removeEventListener("keydown", handleReferenceKeyDown, true);
+    }, [exitNodeReferenceSelection, referencePickerNodeId]);
 
     const selectConnection = useCallback((connectionId: string) => {
         resetImageTapGesture();
@@ -2710,6 +2791,22 @@ function LeaferCanvasPage() {
     );
 
     const handleLeaferNodePointerDown = useCallback((nodeId: string, modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
+        if (nodeTapSuppressionTimerRef.current) {
+            clearTimeout(nodeTapSuppressionTimerRef.current);
+            nodeTapSuppressionTimerRef.current = null;
+        }
+        suppressNextNodeTapRef.current = false;
+        if (referencePickerNodeId) {
+            const node = nodeByIdRef.current.get(nodeId);
+            const available = Boolean(
+                node
+                && nodeId !== referencePickerNodeId
+                && isCanvasResourceNode(node)
+                && !referenceConnectedNodeIds.has(nodeId),
+            );
+            if (available) selectNodeReference(nodeId);
+            return false;
+        }
         const activeElement = document.activeElement;
         if (activeElement instanceof HTMLElement && activeElement.closest("[data-canvas-composer]")) {
             activeElement.blur();
@@ -2743,13 +2840,11 @@ function LeaferCanvasPage() {
             node?.type === CanvasNodeType.Image &&
             Boolean(node.metadata?.content || node.metadata?.storageKey);
         if (!isMediaPreviewNode || isToggle || imageTapGestureRef.current.nodeId !== nodeId) resetImageTapGesture();
-        if (!isToggle && nextSelected.size === 1 && node?.type !== CanvasNodeType.Group && node?.metadata?.canvasTool !== "director") {
-            setDialogNodeId(nodeId);
-        } else {
-            setDialogNodeId(null);
-        }
+        // 移动节点只负责选中与拖拽；Composer 统一等 PointerEvent.TAP 确认点击后再打开，
+        // 避免拖拽结束后面板重新弹出。
+        setDialogNodeId(null);
         return !isToggle;
-    }, [resetImageTapGesture]);
+    }, [referenceConnectedNodeIds, referencePickerNodeId, resetImageTapGesture, selectNodeReference]);
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: Position) => {
         setNodes((prev) => {
@@ -2771,6 +2866,8 @@ function LeaferCanvasPage() {
     // - 函数外再用当前 ref 立即同步一次（React 批处理尚未 flush 时），
     //   保证 pagehide/blur 等同步事件流能立即读到最终坐标。
     const handleLeaferNodesTransform = useCallback((updates: Array<{ id: string; position: Position; width: number; height: number }>) => {
+        if (!updates.length) return;
+        suppressNextNodeTapRef.current = true;
         const updatesById = new Map(updates.map((update) => [update.id, update]));
         const applyUpdates = (nodes: CanvasNodeData[]) => {
             let changed = false;
@@ -2801,6 +2898,13 @@ function LeaferCanvasPage() {
     }, []);
 
     const handleLeaferNodesTransformEnd = useCallback(() => {
+        if (suppressNextNodeTapRef.current) {
+            if (nodeTapSuppressionTimerRef.current) clearTimeout(nodeTapSuppressionTimerRef.current);
+            nodeTapSuppressionTimerRef.current = window.setTimeout(() => {
+                suppressNextNodeTapRef.current = false;
+                nodeTapSuppressionTimerRef.current = null;
+            }, 120);
+        }
         setNodes((prev) => {
             const next = reconcileGroupMembership(prev);
             nodesRef.current = next;
@@ -5435,10 +5539,12 @@ function LeaferCanvasPage() {
         (panelNode: CanvasNodeData) =>
             panelNode.type === CanvasNodeType.Config ? (
                 <CanvasConfigComposer
+                    nodeId={panelNode.id}
                     value={panelNode.metadata?.composerContent ?? panelNode.metadata?.prompt ?? ""}
                     inputs={configInputsById.get(panelNode.id) || EMPTY_NODE_INPUTS}
                     onChange={(composerContent) => handleConfigNodeChange(panelNode.id, { composerContent })}
                     onClose={() => setDialogNodeId(null)}
+                    onStartReferenceSelection={startNodeReferenceSelection}
                 />
             ) : (
                 <CanvasNodePromptPanel
@@ -5450,6 +5556,7 @@ function LeaferCanvasPage() {
                     onGenerate={handleGenerateNode}
                     onStop={confirmStopGeneration}
                     onRemoveReference={removeNodeReference}
+                    onStartReferenceSelection={startNodeReferenceSelection}
                     onImageSettingsOpenChange={(open) => {
                         setNodeImageSettingsOpen(open);
                         if (open) setToolbarNodeId(null);
@@ -5472,6 +5579,7 @@ function LeaferCanvasPage() {
             mentionReferencesByNodeId,
             removeNodeReference,
             runningNodeId,
+            startNodeReferenceSelection,
             theme,
         ],
     );
@@ -5801,6 +5909,7 @@ function LeaferCanvasPage() {
     );
     const openNodeComposer = useCallback(
         (node: CanvasNodeData) => {
+            setReferencePickerNodeId(null);
             selectOnlyNode(node.id);
             selectedConnectionIdRef.current = null;
             setSelectedConnectionId(null);
@@ -5825,39 +5934,36 @@ function LeaferCanvasPage() {
 
     const handleLeaferNodeTap = useCallback(
         (nodeId: string) => {
+            if (suppressNextNodeTapRef.current) {
+                suppressNextNodeTapRef.current = false;
+                return;
+            }
+            if (referencePickerNodeId || nodeDraggingRef.current) return;
             const node = nodeByIdRef.current.get(nodeId);
-            const isPopulatedImage =
-                node?.type === CanvasNodeType.Image &&
-                Boolean(node.metadata?.content || node.metadata?.storageKey);
-            if (!node || !isPopulatedImage) return;
-
-            const now = Date.now();
-            const previous = imageTapGestureRef.current;
-            if (previous.nodeId !== nodeId || now - previous.lastAt > 750) {
-                resetImageTapGesture();
-                imageTapGestureRef.current = { nodeId, count: 1, lastAt: now, composerTimer: null };
-                return;
-            }
-
-            const count = previous.count + 1;
-            previous.count = count;
-            previous.lastAt = now;
-            if (count === 2) {
-                if (previous.composerTimer) window.clearTimeout(previous.composerTimer);
-                previous.composerTimer = window.setTimeout(() => {
-                    const currentGesture = imageTapGestureRef.current;
-                    if (currentGesture.nodeId !== nodeId || currentGesture.count !== 2) return;
-                    const currentNode = nodeByIdRef.current.get(nodeId);
+            if (!node || node.type === CanvasNodeType.Group) return;
+            if (node.metadata?.canvasTool === "panorama360") {
+                const now = Date.now();
+                const previous = imageTapGestureRef.current;
+                if (previous.nodeId !== nodeId || now - previous.lastAt > 750) {
                     resetImageTapGesture();
-                    if (currentNode) openNodeComposer(currentNode);
-                }, 760);
+                    imageTapGestureRef.current = { nodeId, count: 1, lastAt: now, composerTimer: null };
+                    selectSingleNode(nodeId);
+                    return;
+                }
+                const count = previous.count + 1;
+                previous.count = count;
+                previous.lastAt = now;
+                if (count < 3) {
+                    selectSingleNode(nodeId);
+                    return;
+                }
+                resetImageTapGesture();
+                handleViewNodeImage(node);
                 return;
             }
-
-            resetImageTapGesture();
-            handleViewNodeImage(node);
+            selectSingleNode(nodeId);
         },
-        [handleViewNodeImage, openNodeComposer, resetImageTapGesture],
+        [handleViewNodeImage, referencePickerNodeId, resetImageTapGesture, selectSingleNode],
     );
     const createConnectedGenerationNode = useCallback(
         (sourceNode: CanvasNodeData, type: CanvasNodeType.Video | CanvasNodeType.Audio) => {
@@ -6228,32 +6334,51 @@ function LeaferCanvasPage() {
                     onNodesTransform={handleLeaferNodesTransform}
                     onNodesTransformEnd={handleLeaferNodesTransformEnd}
                     onNodeHoverChange={(nodeId) => {
+                        if (referencePickerNodeId) {
+                            handleNodeHoverEnd();
+                            return;
+                        }
                         if (nodeId) handleNodeHoverStart(nodeId);
                         else handleNodeHoverEnd();
                     }}
                     onNodeContextMenu={(nodeId, clientX, clientY) => {
+                        if (referencePickerNodeId) return;
                         setContextMenu({ type: "node", x: clientX, y: clientY, nodeId });
                     }}
-                    onCanvasMouseDown={handleCanvasMouseDown}
-                    onCanvasDeselect={deselectCanvas}
+                    onCanvasMouseDown={(event, canvasPos) => {
+                        if (!referencePickerNodeId) handleCanvasMouseDown(event, canvasPos);
+                    }}
+                    onCanvasDeselect={() => {
+                        if (!referencePickerNodeId) deselectCanvas();
+                    }}
                     onContextMenu={(event, canvasPos) => {
+                        if (referencePickerNodeId) {
+                            event.preventDefault();
+                            return;
+                        }
                         event.preventDefault();
                         lastCanvasPositionRef.current = canvasPos;
                         setContextMenu({ type: "canvas", x: event.clientX, y: event.clientY, canvasPosition: canvasPos });
                     }}
                     onCanvasDoubleClick={(event, canvasPos) => {
+                        if (referencePickerNodeId) return;
                         lastCanvasPositionRef.current = canvasPos;
                         setContextMenu(null);
                         setCreateMenu({ x: event.clientX, y: event.clientY, canvasPosition: canvasPos });
                     }}
-                    onConnectStart={handleLeaferConnectStart}
+                    onConnectStart={(nodeId, handleType) => {
+                        if (!referencePickerNodeId) handleLeaferConnectStart(nodeId, handleType);
+                    }}
                     onConnectEnd={handleLeaferConnectEnd}
                     onConnect={handleLeaferConnect}
-                    onEdgeClick={selectConnection}
+                    onEdgeClick={(connectionId) => {
+                        if (!referencePickerNodeId) selectConnection(connectionId);
+                    }}
                     onDrop={(files, canvasPos) => {
                         handleDropFiles(files, canvasPos);
                     }}
                     onSelectionBox={(nodeIds, mode) => {
+                        if (referencePickerNodeId) return;
                         const next = mode === 'replace' ? new Set<string>() : new Set(selectedNodeIdsRef.current);
                         for (const nodeId of nodeIds) {
                             if (mode === 'toggle' && next.has(nodeId)) next.delete(nodeId);
@@ -6292,6 +6417,14 @@ function LeaferCanvasPage() {
                                 isFocusRelated={activeNodeId === node.id}
                                 isConnectionTarget={connectionTargetNodeId === node.id}
                                 connectionTargetSide={connectionTargetNodeId === node.id ? (connectingParams?.handleType === "source" ? "target" : "source") : null}
+                                referenceSelectionState={!referencePickerNodeId
+                                    ? undefined
+                                    : node.id === referencePickerNodeId
+                                      ? "target"
+                                      : referenceConnectedNodeIds.has(node.id) || !isCanvasResourceNode(node)
+                                        ? "disabled"
+                                        : "available"}
+                                onSelectReference={selectNodeReference}
                                 editRequestNonce={editingNodeId === node.id ? editRequestNonce : 0}
                                 showPanel={false}
                                 batchCount={batchChildCountById.get(node.id) || 0}
@@ -6333,6 +6466,17 @@ function LeaferCanvasPage() {
                         );
                     })}
                 </LeaferCanvas>
+
+                {referencePickerNodeId ? (
+                    <button
+                        type="button"
+                        className="absolute left-1/2 top-4 z-[90] -translate-x-1/2 whitespace-nowrap rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur"
+                        style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+                        onClick={exitNodeReferenceSelection}
+                    >
+                        点击画布中可引用的素材节点，Esc 或点击此处完成
+                    </button>
+                ) : null}
 
                 {projectLoaded && canvasVisualReady && nodes.length === 0 ? (
                     <CanvasEmptyState
@@ -6452,7 +6596,7 @@ function LeaferCanvasPage() {
                     <ConnectionCreateMenu pending={pendingConnectionCreate} position={pendingConnectionCreatePosition} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} />
                 ) : null}
 
-                {!isNodeDragging && !nodeImageSettingsOpen && viewport.k >= 0.3 && toolbarNode && !selectedNodeOwnsToolbar ? (
+                {!isNodeDragging && !nodeImageSettingsOpen && !referencePickerNodeId && viewport.k >= 0.3 && toolbarNode && !selectedNodeOwnsToolbar ? (
                     <CanvasNodeHoverToolbar
                         node={toolbarNode}
                         viewport={viewport}

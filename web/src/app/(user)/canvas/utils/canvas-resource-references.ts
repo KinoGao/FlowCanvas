@@ -47,6 +47,10 @@ export function buildCanvasResourceReferences(source: CanvasResourceGraph | Canv
     return globalReferences.map((reference) => activeByNodeId.get(reference.nodeId) || reference);
 }
 
+export function isCanvasResourceNode(node: CanvasNodeData) {
+    return Boolean(resourceKind(node));
+}
+
 export function buildNodeMentionReferences(node: CanvasNodeData, graph: CanvasResourceGraph): CanvasResourceReference[];
 export function buildNodeMentionReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasResourceReference[];
 export function buildNodeMentionReferences(node: CanvasNodeData, source: CanvasResourceGraph | CanvasNodeData[], connections?: CanvasConnection[]) {

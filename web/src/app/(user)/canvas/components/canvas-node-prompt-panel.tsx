@@ -41,6 +41,7 @@ type CanvasNodePromptPanelProps = {
     onStop: (nodeId: string) => void;
     mentionReferences?: CanvasResourceReference[];
     onRemoveReference?: (nodeId: string, referenceNodeId: string) => void;
+    onStartReferenceSelection?: (targetNodeId: string) => void;
     onImageSettingsOpenChange?: (open: boolean) => void;
     onRetry?: (nodeId: string) => void;
 };
@@ -80,7 +81,7 @@ function ComposerQuickPrompts({ items, theme, onSelect }: { items: readonly stri
     );
 }
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onImageSettingsOpenChange, onRetry }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onRemoveReference, onStartReferenceSelection, onImageSettingsOpenChange, onRetry }: CanvasNodePromptPanelProps) {
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
@@ -274,6 +275,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 mentionRequestNonce={mentionRequestNonce}
                 onMenuChange={setVideoMenuOpen}
                 onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
+                onAddReference={onStartReferenceSelection ? () => onStartReferenceSelection(node.id) : undefined}
                 onPromptChange={updatePrompt}
                 onConfigChange={(patch) => onConfigChange(node.id, patch)}
                 onRemoveReference={onRemoveReference ? (reference) => onRemoveReference(node.id, reference.nodeId) : undefined}
@@ -303,6 +305,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 mentionRequestNonce={mentionRequestNonce}
                 onMenuChange={setImageMenuOpen}
                 onMentionRequest={() => setMentionRequestNonce((value) => value + 1)}
+                onAddReference={onStartReferenceSelection ? () => onStartReferenceSelection(node.id) : undefined}
                 onPromptChange={updatePrompt}
                 onConfigChange={(patch) => onConfigChange(node.id, patch)}
                 onRemoveReference={onRemoveReference ? (reference) => onRemoveReference(node.id, reference.nodeId) : undefined}
@@ -331,6 +334,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onWheel={(event) => { if (!event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
         >
             <GenerationRunStrip runs={generationRuns} theme={theme} onRetry={onRetry ? () => onRetry(node.id) : undefined} />
+            {mode === "comfyui" ? (
+                <CanvasReferenceStrip
+                    references={stableMentionReferences}
+                    className="mb-2"
+                    onAddReference={onStartReferenceSelection ? () => onStartReferenceSelection(node.id) : undefined}
+                />
+            ) : null}
             {mode === "comfyui" && selectedComfyWorkflow?.fields.length ? (
                 <ComfyWorkflowComposerFields
                     fields={selectedComfyWorkflow.fields}
@@ -370,7 +380,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onSelect={updatePrompt}
                 />
             ) : null}
-            {mode !== "comfyui" ? <CanvasReferenceStrip references={stableMentionReferences} className="mb-2" /> : null}
+            {mode !== "comfyui" ? (
+                <CanvasReferenceStrip
+                    references={stableMentionReferences}
+                    className="mb-2"
+                    onAddReference={onStartReferenceSelection ? () => onStartReferenceSelection(node.id) : undefined}
+                />
+            ) : null}
 
             <div className="creative-os-composer-actions flex min-w-0 items-center gap-2 border-t pt-2" style={{ borderColor: theme.ui.hairline }}>
                 <div className="canvas-composer-tools flex min-w-0 flex-1 items-center gap-2">
@@ -429,6 +445,7 @@ type ImageComposerProps = {
     mentionRequestNonce: number;
     onMenuChange: (menu: ImageComposerMenu) => void;
     onMentionRequest: () => void;
+    onAddReference?: () => void;
     onPromptChange: (value: string) => void;
     onConfigChange: (patch: Partial<CanvasNodeData["metadata"]>) => void;
     onRemoveReference?: (reference: CanvasResourceReference) => void;
@@ -452,6 +469,7 @@ function ImageComposer({
     mentionRequestNonce,
     onMenuChange,
     onMentionRequest,
+    onAddReference,
     onPromptChange,
     onConfigChange,
     onRemoveReference,
@@ -484,6 +502,7 @@ function ImageComposer({
                 variant="media"
                 className={activeReferences.length ? "mb-2" : ""}
                 onRemove={onRemoveReference}
+                onAddReference={onAddReference}
             />
 
             <div className="relative">
@@ -621,6 +640,7 @@ type VideoComposerProps = {
     mentionRequestNonce: number;
     onMenuChange: (menu: VideoComposerMenu) => void;
     onMentionRequest: () => void;
+    onAddReference?: () => void;
     onPromptChange: (value: string) => void;
     onConfigChange: (patch: Partial<CanvasNodeData["metadata"]>) => void;
     onRemoveReference?: (reference: CanvasResourceReference) => void;
@@ -647,6 +667,7 @@ function VideoComposer({
     mentionRequestNonce,
     onMenuChange,
     onMentionRequest,
+    onAddReference,
     onPromptChange,
     onConfigChange,
     onRemoveReference,
@@ -691,6 +712,7 @@ function VideoComposer({
                 variant="media"
                 className={activeReferences.length ? "mb-2" : ""}
                 onRemove={onRemoveReference}
+                onAddReference={onAddReference}
             />
 
             <div className="relative">

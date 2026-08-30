@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FocusEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Music2, Plus, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -15,6 +15,7 @@ type CanvasReferenceStripProps = {
     className?: string;
     variant?: "default" | "media";
     onRemove?: (reference: CanvasResourceReference) => void;
+    onAddReference?: () => void;
 };
 
 type HoveredReference = {
@@ -22,12 +23,12 @@ type HoveredReference = {
     rect: DOMRect;
 };
 
-export function CanvasReferenceStrip({ references = [], className = "", variant = "default", onRemove }: CanvasReferenceStripProps) {
+export function CanvasReferenceStrip({ references = [], className = "", variant = "default", onRemove, onAddReference }: CanvasReferenceStripProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const activeReferences = references.filter((reference) => reference.active);
     const [hoveredReference, setHoveredReference] = useState<HoveredReference | null>(null);
 
-    if (!activeReferences.length) return null;
+    if (!activeReferences.length && !onAddReference) return null;
 
     return (
         <>
@@ -53,6 +54,23 @@ export function CanvasReferenceStrip({ references = [], className = "", variant 
                         onHidePreview={() => setHoveredReference(null)}
                     />
                 ))}
+                {onAddReference ? (
+                    <button
+                        type="button"
+                        className={variant === "media" ? "grid size-12 shrink-0 place-items-center rounded-lg border transition hover:opacity-75" : "grid size-8 shrink-0 place-items-center rounded-md border transition hover:opacity-75"}
+                        style={{ borderColor: theme.toolbar.border, color: theme.node.muted }}
+                        title="从画布添加引用"
+                        aria-label="从画布添加引用"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onAddReference();
+                        }}
+                    >
+                        <Plus className={variant === "media" ? "size-4" : "size-3.5"} />
+                    </button>
+                ) : null}
             </div>
             {hoveredReference ? <ReferenceHoverPreview {...hoveredReference} /> : null}
         </>
