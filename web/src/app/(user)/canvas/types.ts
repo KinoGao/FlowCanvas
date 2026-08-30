@@ -29,6 +29,7 @@ export enum CanvasNodeType {
     Video = "video",
     Audio = "audio",
     Group = "group",
+    Annotation = "annotation",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";

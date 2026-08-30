@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -286,7 +286,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [isEditingContent]);
 
     useEffect(() => {
-        if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
+        if (!editRequestNonce || (data.type !== CanvasNodeType.Text && data.type !== CanvasNodeType.Annotation)) return;
         setIsEditingContent(true);
     }, [data.type, editRequestNonce]);
 
@@ -455,7 +455,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         && shouldUseOverview
         && !isSelected
         && (
-            (data.type === CanvasNodeType.Text && Boolean(data.metadata?.content?.trim()))
+            ((data.type === CanvasNodeType.Text || data.type === CanvasNodeType.Annotation) && Boolean(data.metadata?.content?.trim()))
             || data.type === CanvasNodeType.Clip
             || data.type === CanvasNodeType.Config
             || data.type === CanvasNodeType.ComfyUI
@@ -563,7 +563,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onOpenComposer?.(data);
                         return;
                     }
-                    if (data.type !== CanvasNodeType.Text) return;
+                    if (data.type !== CanvasNodeType.Text && data.type !== CanvasNodeType.Annotation) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
                 }}
@@ -625,7 +625,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
-                {!shouldUseOverview && data.type === CanvasNodeType.Text && isSelected ? (
+                {!shouldUseOverview && (data.type === CanvasNodeType.Text || data.type === CanvasNodeType.Annotation) && isSelected ? (
                     <TextFormatToolbar
                         node={data}
                         theme={theme}
@@ -714,6 +714,7 @@ const nodeContentRenderers = {
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupContent,
+    [CanvasNodeType.Annotation]: TextContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
@@ -1026,7 +1027,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

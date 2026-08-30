@@ -4,6 +4,7 @@ export function createDefaultCanvasNodeMetadata(type: CanvasNodeType): CanvasNod
     const base: CanvasNodeMetadata = { content: "", status: "idle" };
 
     if (type === CanvasNodeType.Text) return { ...base, fontSize: 14 };
+    if (type === CanvasNodeType.Annotation) return { ...base, fontSize: 14 };
     if (type === CanvasNodeType.Script) return { ...base, fontSize: 14, canvasTool: "script" };
     if (type === CanvasNodeType.Image) return { ...base, size: "16:9" };
     if (type === CanvasNodeType.Config) return { ...base, generationMode: "image" };

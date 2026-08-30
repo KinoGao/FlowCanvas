@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type UIEvent } from "react";
 import { App, Spin } from "antd";
-import { Check, ChevronRight, Clapperboard, Download, Eye, FileText, Image as ImageIcon, Layers3, ListChecks, Music2, Search, SlidersHorizontal, Type, Video, Workflow } from "lucide-react";
+import { Check, ChevronRight, Clapperboard, Download, Eye, FileText, Image as ImageIcon, Layers3, ListChecks, Music2, Search, SlidersHorizontal, StickyNote, Type, Video, Workflow } from "lucide-react";
 
 import type { canvasThemes, CanvasTheme } from "@/lib/canvas-theme";
 import { peekCachedImageUrl } from "@/services/image-storage";
@@ -15,6 +15,7 @@ type Theme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Text]: "文本",
+    [CanvasNodeType.Annotation]: "注释",
     [CanvasNodeType.Image]: "图片",
     [CanvasNodeType.Video]: "视频",
     [CanvasNodeType.Audio]: "音频",
@@ -25,12 +26,14 @@ const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Config]: "生成配置",
 };
 
-const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
+const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Annotation, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
 
 function nodeTypeIcon(node: CanvasNodeData) {
     switch (node.type) {
         case CanvasNodeType.Text:
             return <Type className="size-4" />;
+        case CanvasNodeType.Annotation:
+            return <StickyNote className="size-4" />;
         case CanvasNodeType.Image:
             return <ImageIcon className="size-4" />;
         case CanvasNodeType.Video:
@@ -60,7 +63,7 @@ function nodeStatusColor(node: CanvasNodeData): string | null {
 
 /** 行内第二行预览：文本/脚本显示正文片段，其余显示类型名 */
 function nodePreviewText(node: CanvasNodeData) {
-    if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Script) {
+    if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Annotation || node.type === CanvasNodeType.Script) {
         const text = node.metadata?.content || node.metadata?.scriptBody || node.metadata?.prompt || "";
         return text.slice(0, 36);
     }

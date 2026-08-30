@@ -11,6 +11,7 @@ import {
     Layers3,
     Music2,
     PackagePlus,
+    StickyNote,
     Type,
     Upload,
     Video,
@@ -32,7 +33,8 @@ export type CanvasCreateMenuAction =
     | "script"
     | "materialLibrary"
     | "upload"
-    | "generationHistory";
+    | "generationHistory"
+    | "annotation";
 
 const MENU_WIDTH = 424;
 
@@ -126,6 +128,7 @@ export function CanvasCreateNodeMenu({
             <div className="grid grid-cols-2 gap-1">
             <CreateMenuOption theme={theme} icon={<FileText className="size-4" />} label="脚本" description="脚本、分镜与逐 beat 生成" onClick={() => onAction("script")} />
             <CreateMenuOption theme={theme} icon={<Workflow className="size-4" />} label="ComfyUI" description="连接自定义工作流" onClick={() => onAction("comfyui")} />
+            <CreateMenuOption theme={theme} icon={<StickyNote className="size-4" />} label="注释" description="画布便签、批注与灵感" onClick={() => onAction("annotation")} />
             <CreateMenuOption theme={theme} icon={<Clapperboard className="size-4" />} label="剪辑时间线" description="时间轴串联多段素材" tag="Beta" onClick={() => onAction("videoComposition")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" description="在 3D 空间搭建场景" tag="NEW" onClick={() => onAction("director")} />
             <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" description="生成沉浸式全景素材" tag="NEW" onClick={() => onAction("panorama360")} />

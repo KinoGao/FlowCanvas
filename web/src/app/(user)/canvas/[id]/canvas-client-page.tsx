@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, Plus, Search, Share2, Sparkles, StickyNote, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -1594,7 +1594,12 @@ function LeaferCanvasPage() {
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.ComfyUI | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
             const spec = NODE_DEFAULT_SIZE[type];
-            const newNode = createCanvasNode(type, findAvailableCanvasPosition(pending.position, spec, nodesRef.current));
+            const requestedTopLeft = { x: pending.position.x - spec.width / 2, y: pending.position.y - spec.height / 2 };
+            const placementTopLeft = findAvailableCanvasPosition(requestedTopLeft, spec, nodesRef.current);
+            const newNode = createCanvasNode(type, {
+                x: placementTopLeft.x + spec.width / 2,
+                y: placementTopLeft.y + spec.height / 2,
+            });
             const connection = normalizeConnectionWithNodeMap(pending.connection.nodeId, newNode.id, buildNodeById([...nodesRef.current, newNode]), pending.connection.handleType);
             if (!connection) {
                 message.warning("配置节点之间不能连接");
@@ -1664,7 +1669,7 @@ function LeaferCanvasPage() {
         toolbarNode
         && selectedNodeIds.has(toolbarNode.id)
         && (
-            toolbarNode.type === CanvasNodeType.Text
+            (toolbarNode.type === CanvasNodeType.Text || toolbarNode.type === CanvasNodeType.Annotation)
             || (
                 (toolbarNode.type === CanvasNodeType.Image || toolbarNode.type === CanvasNodeType.Video || toolbarNode.type === CanvasNodeType.Audio)
                 && !toolbarNode.metadata?.content
@@ -1771,16 +1776,20 @@ function LeaferCanvasPage() {
                         const height = typeof op.height === "number" ? op.height : spec.height;
                         const requested = op.position || { x: op.x ?? 0, y: op.y ?? 0 };
                         const hasExplicitPosition = Boolean(op.position || typeof op.x === "number" || typeof op.y === "number");
-                        const placement = hasExplicitPosition
+                        const requestedTopLeft = hasExplicitPosition
                             ? requested
                             : findAvailableCanvasPosition(
                                   currentNodes.length ? canvasRightmostGridPosition(currentNodes) : requested,
                                   { width, height },
                                   currentNodes,
                               );
+                        const placementCenter = {
+                            x: requestedTopLeft.x + width / 2,
+                            y: requestedTopLeft.y + height / 2,
+                        };
                         const node = createCanvasNode(
                             type,
-                            placement,
+                            placementCenter,
                             op.metadata,
                         );
                         return {
@@ -1840,12 +1849,13 @@ function LeaferCanvasPage() {
                 metadata?: CanvasNodeMetadata;
             } = {},
         ) => {
-            const targetPosition = options.position || lastCanvasPositionRef.current || getCanvasCenter();
+            const requestedCenter = options.position || lastCanvasPositionRef.current || getCanvasCenter();
             const fallbackSize = NODE_DEFAULT_SIZE[type];
-            const placement = findAvailableCanvasPosition(targetPosition, {
-                width: options.width || fallbackSize.width,
-                height: options.height || fallbackSize.height,
-            }, nodesRef.current);
+            const width = options.width || fallbackSize.width;
+            const height = options.height || fallbackSize.height;
+            const requestedTopLeft = { x: requestedCenter.x - width / 2, y: requestedCenter.y - height / 2 };
+            const placementTopLeft = findAvailableCanvasPosition(requestedTopLeft, { width, height }, nodesRef.current);
+            const placementCenter = { x: placementTopLeft.x + width / 2, y: placementTopLeft.y + height / 2 };
             const configMetadata =
                 type === CanvasNodeType.Config
                     ? {
@@ -1855,7 +1865,7 @@ function LeaferCanvasPage() {
                       }
                     : undefined;
             const newNode = {
-                ...createCanvasNode(type, placement, { ...configMetadata, ...options.metadata }),
+                ...createCanvasNode(type, placementCenter, { ...configMetadata, ...options.metadata }),
                 ...(options.width ? { width: options.width } : null),
                 ...(options.height ? { height: options.height } : null),
             };
@@ -1941,10 +1951,14 @@ function LeaferCanvasPage() {
     );
 
     const createScriptNode = useCallback(() => {
-        const targetPosition = lastCanvasPositionRef.current || getCanvasCenter();
-        const placement = findAvailableCanvasPosition(targetPosition, NODE_DEFAULT_SIZE[CanvasNodeType.Script], nodesRef.current);
+        const requestedCenter = lastCanvasPositionRef.current || getCanvasCenter();
+        const width = 220;
+        const height = 160;
+        const requestedTopLeft = { x: requestedCenter.x - width / 2, y: requestedCenter.y - height / 2 };
+        const placementTopLeft = findAvailableCanvasPosition(requestedTopLeft, { width, height }, nodesRef.current);
+        const placementCenter = { x: placementTopLeft.x + width / 2, y: placementTopLeft.y + height / 2 };
         const newNode = {
-            ...createCanvasNode(CanvasNodeType.Script, placement, {
+            ...createCanvasNode(CanvasNodeType.Script, placementCenter, {
                 canvasTool: "script",
                 content: DEFAULT_SCRIPT_BODY,
                 scriptTitle: "未命名脚本",
@@ -1954,8 +1968,8 @@ function LeaferCanvasPage() {
                 fontSize: 13,
                 generationMode: "text",
             }),
-            width: 220,
-            height: 160,
+            width,
+            height,
         };
         nodesRef.current = [...nodesRef.current, newNode];
         setNodes(nodesRef.current);
@@ -2566,8 +2580,14 @@ function LeaferCanvasPage() {
             const trimmed = text.trim();
             if (!trimmed) return false;
 
-            const position = findAvailableCanvasPosition(getCanvasCenter(), NODE_DEFAULT_SIZE[CanvasNodeType.Text], nodesRef.current);
-            const node = createCanvasNode(CanvasNodeType.Text, position, { content: trimmed, status: NODE_STATUS_SUCCESS });
+            const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+            const requestedCenter = getCanvasCenter();
+            const requestedTopLeft = { x: requestedCenter.x - spec.width / 2, y: requestedCenter.y - spec.height / 2 };
+            const placementTopLeft = findAvailableCanvasPosition(requestedTopLeft, spec, nodesRef.current);
+            const node = createCanvasNode(CanvasNodeType.Text, {
+                x: placementTopLeft.x + spec.width / 2,
+                y: placementTopLeft.y + spec.height / 2,
+            }, { content: trimmed, status: NODE_STATUS_SUCCESS });
 
             nodesRef.current = [...nodesRef.current, node];
             setNodes(nodesRef.current);
@@ -3058,7 +3078,7 @@ function LeaferCanvasPage() {
     }, []);
 
     const openTextEditor = useCallback((node: CanvasNodeData) => {
-        if (node.type !== CanvasNodeType.Text) return;
+        if (node.type !== CanvasNodeType.Text && node.type !== CanvasNodeType.Annotation) return;
         const next = new Set([node.id]);
         selectedNodeIdsRef.current = next;
         setSelectedNodeIds(next);
@@ -4850,6 +4870,9 @@ function LeaferCanvasPage() {
                 case "audio":
                     createNode(CanvasNodeType.Audio, options);
                     break;
+                case "annotation":
+                    createNode(CanvasNodeType.Annotation, options);
+                    break;
                 case "comfyui":
                     createNode(CanvasNodeType.ComfyUI, options);
                     break;
@@ -5721,7 +5744,8 @@ function LeaferCanvasPage() {
             // 脚本/导演台节点单击只选中（可移动），不自动打开面板；双击或点节点内按钮再进入
             const studioNode = nodesRef.current.find((item) => item.id === nodeId);
             const isStudioKind = isCanvasScriptNode(studioNode) || studioNode?.metadata?.canvasTool === "director";
-            if (!isStudioKind) setDialogNodeId(nodeId);
+            const isAnnotation = studioNode?.type === CanvasNodeType.Annotation;
+            if (!isStudioKind && !isAnnotation) setDialogNodeId(nodeId);
         },
         [selectOnlyNode],
     );
@@ -7376,6 +7400,7 @@ function CanvasAssetManagerPanel({
 
 function nodeIcon(type: CanvasNodeType) {
     if (type === CanvasNodeType.Text) return <FileText className="size-4" />;
+    if (type === CanvasNodeType.Annotation) return <StickyNote className="size-4" />;
     if (type === CanvasNodeType.Image) return <ImageIcon className="size-4" />;
     if (type === CanvasNodeType.Video) return <Video className="size-4" />;
     if (type === CanvasNodeType.Audio) return <Music2 className="size-4" />;
