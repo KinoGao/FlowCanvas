@@ -7532,7 +7532,9 @@ function CanvasAssetManagerPanel({
     const panelWidth = useCanvasSidePanelStore((state) => state.width);
     const panelMounted = useCanvasSidePanelStore((state) => state.panelMounted);
     const panelClosing = useCanvasSidePanelStore((state) => state.panelClosing);
+    const panelSide = useCanvasSidePanelStore((state) => state.side);
     const setPanelWidth = useCanvasSidePanelStore((state) => state.setWidth);
+    const setPanelSide = useCanvasSidePanelStore((state) => state.setSide);
     const [tab, setTab] = useState<"canvas" | "assets" | "prompts">("canvas");
     const [query, setQuery] = useState("");
     const [resizing, setResizing] = useState(false);
@@ -7569,7 +7571,7 @@ function CanvasAssetManagerPanel({
 
     return (
         <motion.div
-            className="relative z-[60] flex h-full shrink-0"
+            className={`relative z-[60] flex h-full shrink-0 ${panelSide === "right" ? "order-2" : ""}`}
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: open ? panelWidth + 1 : 0, opacity: open ? 1 : 0 }}
             transition={{ duration: resizing ? 0 : panelMotionSeconds, ease: [0.22, 1, 0.36, 1] }}
@@ -7577,9 +7579,9 @@ function CanvasAssetManagerPanel({
             data-canvas-composer
         >
             <motion.aside
-                className="relative flex h-full shrink-0 flex-col overflow-hidden border-r backdrop-blur-xl"
-                initial={{ x: -48 }}
-                animate={{ x: panelClosing ? -28 : 0 }}
+                className={`relative flex h-full shrink-0 flex-col overflow-hidden backdrop-blur-xl ${panelSide === "right" ? "border-l" : "border-r"}`}
+                initial={{ x: panelSide === "right" ? 48 : -48 }}
+                animate={{ x: panelClosing ? (panelSide === "right" ? 28 : -28) : 0 }}
                 transition={{ duration: resizing ? 0 : panelMotionSeconds, ease: [0.22, 1, 0.36, 1] }}
                 style={{ width: panelWidth, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onWheelCapture={(event) => event.stopPropagation()}
@@ -7611,6 +7613,15 @@ function CanvasAssetManagerPanel({
                     ))}
                     <button type="button" className="ml-auto mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label="关闭节点管理">
                         <X className="size-4" />
+                    </button>
+                    <button
+                        type="button"
+                        className="mb-1 grid size-7 place-items-center rounded-lg opacity-55 transition hover:bg-white/10 hover:opacity-100"
+                        title={panelSide === "left" ? "移到画布右侧" : "移到画布左侧"}
+                        aria-label={panelSide === "left" ? "移到画布右侧" : "移到画布左侧"}
+                        onClick={() => setPanelSide(panelSide === "left" ? "right" : "left")}
+                    >
+                        {panelSide === "left" ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
                     </button>
                 </div>
 
@@ -7663,7 +7674,7 @@ function CanvasAssetManagerPanel({
                 )}
             </div>
             {/* 宽度拖拽热区 */}
-            <button type="button" className="absolute inset-y-0 right-0 z-40 w-4 translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label="调整侧栏宽度" />
+            <button type="button" className={`absolute inset-y-0 z-40 w-4 cursor-col-resize ${panelSide === "right" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"}`} onPointerDown={startResize} aria-label="调整侧栏宽度" />
             </motion.aside>
         </motion.div>
     );

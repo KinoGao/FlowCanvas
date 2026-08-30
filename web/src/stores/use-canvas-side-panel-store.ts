@@ -7,6 +7,7 @@ export const CANVAS_SIDE_PANEL_DEFAULT_WIDTH = 280;
 
 const WIDTH_KEY = "canvas-side-panel-width";
 const OPEN_KEY = "canvas-side-panel-open";
+const SIDE_KEY = "canvas-side-panel-side";
 
 function initialWidth() {
     if (typeof window === "undefined") return CANVAS_SIDE_PANEL_DEFAULT_WIDTH;
@@ -20,12 +21,19 @@ function initialOpen() {
     return localStorage.getItem(OPEN_KEY) !== "0";
 }
 
+function initialSide(): "left" | "right" {
+    if (typeof window === "undefined") return "left";
+    return localStorage.getItem(SIDE_KEY) === "right" ? "right" : "left";
+}
+
 type CanvasSidePanelStore = {
     width: number;
     panelOpen: boolean;
     panelMounted: boolean;
     panelClosing: boolean;
+    side: "left" | "right";
     setWidth: (width: number) => void;
+    setSide: (side: "left" | "right") => void;
     openPanel: () => void;
     closePanel: () => void;
     togglePanel: () => void;
@@ -37,7 +45,12 @@ export const useCanvasSidePanelStore = create<CanvasSidePanelStore>((set, get) =
     panelOpen: initialOpen(),
     panelMounted: initialOpen(),
     panelClosing: false,
+    side: initialSide(),
     setWidth: (width) => set({ width }),
+    setSide: (side) => {
+        if (typeof window !== "undefined") localStorage.setItem(SIDE_KEY, side);
+        set({ side });
+    },
     openPanel: () => {
         if (typeof window !== "undefined") localStorage.setItem(OPEN_KEY, "1");
         set({ panelOpen: true, panelMounted: true, panelClosing: false });
