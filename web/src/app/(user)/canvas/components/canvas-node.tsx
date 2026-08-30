@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -14,6 +14,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { CanvasNodeWhiteboardContent } from "./canvas-whiteboard-content";
 import { CanvasNodeType, isCanvasScriptNode, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { getPinColor, getPinColorLabel, getPinColorValue } from "../utils/canvas-pin-utils";
@@ -715,7 +716,12 @@ const nodeContentRenderers = {
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupContent,
     [CanvasNodeType.Annotation]: TextContent,
+    [CanvasNodeType.Whiteboard]: WhiteboardContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
+
+function WhiteboardContent(props: NodeContentRendererProps) {
+    return <CanvasNodeWhiteboardContent node={props.node} theme={props.theme} onContentChange={props.onContentChange} />;
+}
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -1027,7 +1033,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

@@ -29,6 +29,7 @@ export function filterNodesByQuery(nodes: CanvasNodeData[], query: string): Canv
 const NODE_TYPE_LABELS: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Text]: "文字",
     [CanvasNodeType.Annotation]: "注释",
+    [CanvasNodeType.Whiteboard]: "白板",
     [CanvasNodeType.Image]: "图片",
     [CanvasNodeType.Video]: "视频",
     [CanvasNodeType.Audio]: "音频",

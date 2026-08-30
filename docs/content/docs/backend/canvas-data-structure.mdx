@@ -71,7 +71,7 @@ type CanvasProject = {
 ```ts
 type CanvasNodeData = {
   id: string;
-  type: "image" | "text" | "annotation" | "video" | "audio" | "comfyui" | "group" | "config";
+  type: "image" | "text" | "annotation" | "whiteboard" | "video" | "audio" | "comfyui" | "group" | "config";
   title: string;
   position: { x: number; y: number };
   width: number;
@@ -84,7 +84,7 @@ type CanvasNodeData = {
 通用字段：
 
 - `id`：节点 ID。
-- `type`：节点类型，当前包括图片、文本、注释、视频、音频、ComfyUI、分组；`config` 仅用于兼容历史画布。
+- `type`：节点类型，当前包括图片、文本、注释、白板、视频、音频、ComfyUI、分组；`config` 仅用于兼容历史画布。
 - `title`：节点标题。新节点按类型独立编号，用户可重命名。
 - `position`：画布世界坐标，不是屏幕坐标。
 - `width` / `height`：画布世界坐标下的节点尺寸。

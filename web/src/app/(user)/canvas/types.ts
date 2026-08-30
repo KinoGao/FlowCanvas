@@ -37,7 +37,25 @@ export enum CanvasNodeType {
     Audio = "audio",
     Group = "group",
     Annotation = "annotation",
+    Whiteboard = "whiteboard",
 }
+
+export type CanvasWhiteboardStroke = {
+    id: string;
+    kind: "pen" | "rect" | "eraser" | "fill";
+    color: string;
+    size: number;
+    points?: { x: number; y: number }[];
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+};
+
+export type CanvasWhiteboardData = {
+    background: string;
+    items: CanvasWhiteboardStroke[];
+};
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
 
@@ -234,6 +252,10 @@ export type CanvasGroupMetadata = {
     groupVariant?: "normal" | "storyboard";
 };
 
+export type CanvasWhiteboardMetadata = {
+    whiteboardData?: CanvasWhiteboardData;
+};
+
 export type CanvasMediaMetadata = {
     naturalWidth?: number;
     naturalHeight?: number;
@@ -249,7 +271,7 @@ export type CanvasAgentRunMetadata = {
     agentTaskId?: string;
 };
 
-export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
+export type CanvasNodeMetadata = CanvasBaseMetadata & CanvasScriptMetadata & CanvasDirectorMetadata & CanvasGenerationMetadata & CanvasBatchMetadata & CanvasGroupMetadata & CanvasWhiteboardMetadata & CanvasMediaMetadata & CanvasAgentRunMetadata;
 
 export type CanvasNodeData = {
     id: string;

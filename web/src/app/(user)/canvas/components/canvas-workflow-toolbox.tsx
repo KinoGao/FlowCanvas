@@ -15,6 +15,7 @@ const TYPE_FILTERS = [
     { type: CanvasNodeType.Audio, label: "音频" },
     { type: CanvasNodeType.Text, label: "文本" },
     { type: CanvasNodeType.Annotation, label: "注释" },
+    { type: CanvasNodeType.Whiteboard, label: "白板" },
     { type: CanvasNodeType.ComfyUI, label: "工作流" },
     { type: CanvasNodeType.Group, label: "分组" },
 ] as const;
