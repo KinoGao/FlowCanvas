@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type UIEvent } from "react";
 import { App, Spin } from "antd";
-import { Check, ChevronRight, Clapperboard, Download, Eye, EyeOff, FileText, Image as ImageIcon, Layers3, ListChecks, Maximize2, Music2, Search, SlidersHorizontal, Type, Video, Workflow } from "lucide-react";
+import { Check, ChevronRight, Clapperboard, Download, Eye, EyeOff, FileText, Grid2x2, Image as ImageIcon, Layers3, ListChecks, Maximize2, Music2, Search, SlidersHorizontal, Type, Video, Workflow } from "lucide-react";
 
 import type { canvasThemes, CanvasTheme } from "@/lib/canvas-theme";
 import { peekCachedImageUrl } from "@/services/image-storage";
@@ -15,6 +15,7 @@ type Theme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Text]: "文本",
+    [CanvasNodeType.Collage]: "拼图",
     [CanvasNodeType.Image]: "图片",
     [CanvasNodeType.Video]: "视频",
     [CanvasNodeType.Audio]: "音频",
@@ -25,12 +26,14 @@ const NODE_TYPE_LABEL: Partial<Record<CanvasNodeType, string>> = {
     [CanvasNodeType.Config]: "生成配置",
 };
 
-const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
+const NODE_FILTER_VALUES: string[] = ["all", CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Text, CanvasNodeType.Collage, CanvasNodeType.Audio, CanvasNodeType.Script, CanvasNodeType.Clip, CanvasNodeType.ComfyUI, CanvasNodeType.Config, CanvasNodeType.Group];
 
 function nodeTypeIcon(node: CanvasNodeData) {
     switch (node.type) {
         case CanvasNodeType.Text:
             return <Type className="size-4" />;
+        case CanvasNodeType.Collage:
+            return <Grid2x2 className="size-4" />;
         case CanvasNodeType.Image:
             return <ImageIcon className="size-4" />;
         case CanvasNodeType.Video:

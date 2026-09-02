@@ -19,6 +19,7 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Video]: { width: 384, height: 216, title: "Video" },
     [CanvasNodeType.Audio]: { width: 220, height: 96, title: "Audio" },
     [CanvasNodeType.Group]: { width: 360, height: 260, title: "分组" },
+    [CanvasNodeType.Collage]: { width: 480, height: 360, title: "拼图" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export function getConfigNodeHeight(mode?: CanvasGenerationMode) {
@@ -62,6 +63,10 @@ export const NODE_SPECS = {
     [CanvasNodeType.Group]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Group],
         metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Group),
+    },
+    [CanvasNodeType.Collage]: {
+        ...NODE_DEFAULT_SIZE[CanvasNodeType.Collage],
+        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Collage),
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 

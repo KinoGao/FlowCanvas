@@ -14,6 +14,7 @@ const TITLE_STEM_BY_TYPE: Record<CanvasNodeData["type"], string> = {
     comfyui: "ComfyUI",
     config: "生成",
     group: "分组",
+    collage: "拼图",
 };
 
 const LEGACY_DEFAULT_TITLES: Partial<Record<CanvasNodeData["type"], string[]>> = {
@@ -26,6 +27,7 @@ const LEGACY_DEFAULT_TITLES: Partial<Record<CanvasNodeData["type"], string[]>> =
     comfyui: ["ComfyUI"],
     config: ["生成配置", "配置节点", "Config"],
     group: ["分组", "分镜组"],
+    collage: ["拼图", "Collage", "Puzzle"],
 };
 
 export function getDefaultCanvasNodeTitle(type: CanvasNodeData["type"], sequence: number) {

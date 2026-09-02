@@ -38,6 +38,7 @@ export enum CanvasNodeType {
     Video = "video",
     Audio = "audio",
     Group = "group",
+    Collage = "collage",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -74,7 +75,8 @@ export type CanvasNodeActionIntent =
     | "script-to-storyboard"
     | "script-to-video"
     | "script-to-audio"
-    | "composition-timeline";
+    | "composition-timeline"
+    | "image-collage";
 export type CanvasBaseMetadata = {
     typeSequence?: number;
     /** 节点管理面板隐藏节点：仅影响画布显示与连接线，不影响保存和引用计算。 */

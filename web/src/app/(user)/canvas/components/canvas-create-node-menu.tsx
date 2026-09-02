@@ -7,6 +7,7 @@ import {
     Clapperboard,
     Clock3,
     FileText,
+    Grid2x2,
     Image as ImageIcon,
     Layers3,
     Mic,
@@ -36,6 +37,7 @@ export type CanvasCreateMenuAction =
     | "upload"
     | "generationHistory"
     | "storyboard"
+    | "collage"
     | "voiceStudio"
     | "digitalHumans";
 
@@ -135,6 +137,7 @@ export function CanvasCreateNodeMenu({
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="导演台" description="3D 场景、人物、机位" tag="NEW" onClick={() => onAction("director")} />
             <CreateMenuOption theme={theme} icon={<CircleDot className="size-4" />} label="360场景" description="全景画面与空间关系" tag="NEW" onClick={() => onAction("panorama360")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="故事板" description="电影感分镜成片网格" tag="NEW" onClick={() => onAction("storyboard")} />
+            <CreateMenuOption theme={theme} icon={<Grid2x2 className="size-4" />} label="拼图" description="图片排版与导出" tag="NEW" onClick={() => onAction("collage")} />
             <CreateMenuOption theme={theme} icon={<Mic className="size-4" />} label="语音工作台" description="音色管理、语音设计与克隆" onClick={() => onAction("voiceStudio")} />
             <CreateMenuOption theme={theme} icon={<Layers3 className="size-4" />} label="3D 世界" description="空间创作能力即将开放" tag="Beta" disabled />
             </div>

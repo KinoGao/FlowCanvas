@@ -14,6 +14,7 @@ const TYPE_FILTERS = [
     { type: CanvasNodeType.Video, label: "视频" },
     { type: CanvasNodeType.Audio, label: "音频" },
     { type: CanvasNodeType.Text, label: "文本" },
+    { type: CanvasNodeType.Collage, label: "拼图" },
     { type: CanvasNodeType.ComfyUI, label: "工作流" },
     { type: CanvasNodeType.Group, label: "分组" },
 ] as const;

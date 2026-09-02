@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, History, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
+import { Bot, Box, Check, Clapperboard, CloudOff, FileText, FolderOpen, Grid2x2, History, Home, ImageIcon, Images, Layers3, Link2, List, LoaderCircle, Menu, Music2, PanelLeftClose, PanelLeftOpen, Plus, Search, Share2, Sparkles, Trash2, Upload, Video, Workflow, X } from "lucide-react";
 
 import { saveAs } from "file-saver";
 
@@ -5236,6 +5236,9 @@ function LeaferCanvasPage() {
                         metadata: { fontSize: 14, canvasTool: "storyboard" },
                     });
                     break;
+                case "collage":
+                    createNode(CanvasNodeType.Collage, options);
+                    break;
                 case "voiceStudio":
                     // 语音工作台 = 素材库「音色」页签（音色管理/语音设计/克隆，直连本地 Qwen3-TTS）
                     openMaterialLibrary("voices");
@@ -6114,7 +6117,8 @@ function LeaferCanvasPage() {
             // 脚本/导演台节点单击只选中（可移动），不自动打开面板；双击或点节点内按钮再进入
             const studioNode = nodesRef.current.find((item) => item.id === nodeId);
             const isStudioKind = isCanvasScriptNode(studioNode) || studioNode?.metadata?.canvasTool === "director";
-            if (!isStudioKind) setDialogNodeId(nodeId);
+            const isCollage = studioNode?.type === CanvasNodeType.Collage;
+            if (!isStudioKind && !isCollage) setDialogNodeId(nodeId);
         },
         [selectOnlyNode],
     );
@@ -6446,9 +6450,62 @@ function LeaferCanvasPage() {
         [createCanvasConnection, createCanvasNode, effectiveConfig.audioModel, effectiveConfig.model, effectiveConfig.videoModel],
     );
 
+    const collageConnectedImages = useCallback(async (node: CanvasNodeData) => {
+        const images = connectionsRef.current
+            .filter((connection) => connection.toNodeId === node.id)
+            .map((connection) => nodeByIdRef.current.get(connection.fromNodeId))
+            .filter((source): source is CanvasNodeData =>
+                Boolean(source?.type === CanvasNodeType.Image && (source.metadata?.content || source.metadata?.storageKey)),
+            );
+        if (images.length < 2) {
+            message.warning("请先连接至少两张图片节点");
+            return;
+        }
+        try {
+            const inputs = await Promise.all(
+                images.map(async (image) => ({ title: image.title, url: await resolveNodeContent(image) })),
+            );
+            const blob = await stitchImagesToBlob(inputs);
+            const uploaded = await uploadImage(blob);
+            const size = fitNodeSize(uploaded.width, uploaded.height, NODE_DEFAULT_SIZE[CanvasNodeType.Image].width, NODE_DEFAULT_SIZE[CanvasNodeType.Image].height);
+            const position = {
+                x: node.position.x + node.width + 96,
+                y: node.position.y + node.height / 2 - size.height / 2,
+            };
+            const child: CanvasNodeData = {
+                ...createCanvasNode(CanvasNodeType.Image, {
+                    x: position.x + size.width / 2,
+                    y: position.y + size.height / 2,
+                }, imageMetadata(uploaded)),
+                position,
+                width: size.width,
+                height: size.height,
+            };
+            const nextNodes = [...nodesRef.current, child];
+            const nextConnections = [
+                ...connectionsRef.current,
+                createCanvasConnection(node.id, child.id),
+                ...images.map((image) => createCanvasConnection(image.id, child.id)),
+            ];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([child.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(child.id);
+            message.success(`已拼合 ${images.length} 张图片`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "拼图失败");
+        }
+    }, [createCanvasConnection, createCanvasNode, message]);
+
     const handleNodeAction = useCallback(
         (node: CanvasNodeData, intent: CanvasNodeActionIntent) => {
             switch (intent) {
+                case "image-collage":
+                    void collageConnectedImages(node);
+                    return;
                 case "text-to-video":
                     createConnectedGenerationNode(node, CanvasNodeType.Video);
                     return;
@@ -6499,7 +6556,7 @@ function LeaferCanvasPage() {
                 }
             }
         },
-        [createConnectedGenerationNode, createScriptNarrationNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
+        [collageConnectedImages, createConnectedGenerationNode, createScriptNarrationNode, effectiveConfig.imageModel, effectiveConfig.model, openCompositionTimeline, openNodeComposer],
     );
     const visibleConnections = useMemo(
         () =>
@@ -7858,6 +7915,7 @@ function CanvasAssetManagerPanel({
 
 function nodeIcon(type: CanvasNodeType) {
     if (type === CanvasNodeType.Text) return <FileText className="size-4" />;
+    if (type === CanvasNodeType.Collage) return <Grid2x2 className="size-4" />;
     if (type === CanvasNodeType.Image) return <ImageIcon className="size-4" />;
     if (type === CanvasNodeType.Video) return <Video className="size-4" />;
     if (type === CanvasNodeType.Audio) return <Music2 className="size-4" />;
