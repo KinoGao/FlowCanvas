@@ -19,11 +19,6 @@ export const NODE_DEFAULT_SIZE = {
     [CanvasNodeType.Video]: { width: 384, height: 216, title: "Video" },
     [CanvasNodeType.Audio]: { width: 220, height: 96, title: "Audio" },
     [CanvasNodeType.Group]: { width: 360, height: 260, title: "分组" },
-    [CanvasNodeType.Annotation]: { width: 320, height: 200, title: "注释" },
-    [CanvasNodeType.Whiteboard]: { width: 640, height: 480, title: "白板" },
-    [CanvasNodeType.WebPreview]: { width: 560, height: 380, title: "网页预览" },
-    [CanvasNodeType.Collage]: { width: 480, height: 360, title: "拼图" },
-    [CanvasNodeType.Debug]: { width: 280, height: 160, title: "调试" },
 } satisfies Record<CanvasNodeType, { width: number; height: number; title: string }>;
 
 export function getConfigNodeHeight(mode?: CanvasGenerationMode) {
@@ -67,26 +62,6 @@ export const NODE_SPECS = {
     [CanvasNodeType.Group]: {
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Group],
         metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Group),
-    },
-    [CanvasNodeType.Annotation]: {
-        ...NODE_DEFAULT_SIZE[CanvasNodeType.Annotation],
-        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Annotation),
-    },
-    [CanvasNodeType.Whiteboard]: {
-        ...NODE_DEFAULT_SIZE[CanvasNodeType.Whiteboard],
-        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Whiteboard),
-    },
-    [CanvasNodeType.WebPreview]: {
-        ...NODE_DEFAULT_SIZE[CanvasNodeType.WebPreview],
-        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.WebPreview),
-    },
-    [CanvasNodeType.Collage]: {
-        ...NODE_DEFAULT_SIZE[CanvasNodeType.Collage],
-        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Collage),
-    },
-    [CanvasNodeType.Debug]: {
-        ...NODE_DEFAULT_SIZE[CanvasNodeType.Debug],
-        metadata: createDefaultCanvasNodeMetadata(CanvasNodeType.Debug),
     },
 } satisfies Record<CanvasNodeType, CanvasNodeSpec>;
 

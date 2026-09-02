@@ -85,24 +85,3 @@ test("migrates generated placeholder titles to the type sequence default", () =>
         ],
     );
 });
-
-test("allocates and normalizes the debug node type identity", () => {
-    const allocated = allocateCanvasNodeIdentity(CanvasNodeType.Debug, { debug: 2 });
-    assert.deepEqual(allocated, {
-        title: "调试节点 3",
-        typeSequence: 3,
-        nodeSequenceCounters: { debug: 3 },
-    });
-
-    const normalized = normalizeCanvasNodeIdentities([
-        node("debug-legacy", CanvasNodeType.Debug, "调试"),
-        node("debug-custom", CanvasNodeType.Debug, "自检"),
-    ]);
-    assert.deepEqual(
-        normalized.nodes.map((item) => [item.title, item.metadata?.typeSequence]),
-        [
-            ["调试节点 1", 1],
-            ["自检", 2],
-        ],
-    );
-});

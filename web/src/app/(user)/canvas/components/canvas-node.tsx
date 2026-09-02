@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Bug, ChevronRight, Clapperboard, FileText, FolderOpen, Globe, Grid2x2, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, MessageCircle, Music2, Pause, Play, PenTool, RefreshCw, Sparkles, Star, StickyNote, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
+import { ChevronRight, Clapperboard, FileText, FolderOpen, Group, Image as ImageIcon, Layers3, Link, List, ListOrdered, Maximize2, Music2, Pause, Play, RefreshCw, Sparkles, Star, Upload, Video, Volume2, VolumeX, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes } from "@/lib/image-utils";
@@ -14,8 +14,6 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { peekImageThumbnailUrl, resolveImageThumbnailUrl } from "@/services/image-storage";
 import { getMediaBlob, peekCachedMediaUrl, resolveMediaUrl } from "@/services/file-storage";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
-import { CanvasNodeWhiteboardContent } from "./canvas-whiteboard-content";
-import { CanvasNodeWebPreviewContent } from "./canvas-web-preview-content";
 import { CanvasNodeType, isCanvasScriptNode, type CanvasNodeActionIntent, type CanvasNodeData, type Position as CanvasPosition } from "../types";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { getPinColor, getPinColorLabel, getPinColorValue } from "../utils/canvas-pin-utils";
@@ -288,7 +286,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     }, [isEditingContent]);
 
     useEffect(() => {
-        if (!editRequestNonce || (data.type !== CanvasNodeType.Text && data.type !== CanvasNodeType.Annotation)) return;
+        if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
         setIsEditingContent(true);
     }, [data.type, editRequestNonce]);
 
@@ -457,7 +455,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         && shouldUseOverview
         && !isSelected
         && (
-            ((data.type === CanvasNodeType.Text || data.type === CanvasNodeType.Annotation) && Boolean(data.metadata?.content?.trim()))
+            (data.type === CanvasNodeType.Text && Boolean(data.metadata?.content?.trim()))
             || data.type === CanvasNodeType.Clip
             || data.type === CanvasNodeType.Config
             || data.type === CanvasNodeType.ComfyUI
@@ -565,7 +563,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onOpenComposer?.(data);
                         return;
                     }
-                    if (data.type !== CanvasNodeType.Text && data.type !== CanvasNodeType.Annotation) return;
+                    if (data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
                 }}
@@ -627,7 +625,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {!shouldUseOverview && !isGroup ? <NodePinIndicator node={data} theme={theme} /> : null}
                 {!shouldUseOverview && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} /> : null}
 
-                {!shouldUseOverview && (data.type === CanvasNodeType.Text || data.type === CanvasNodeType.Annotation) && isSelected ? (
+                {!shouldUseOverview && data.type === CanvasNodeType.Text && isSelected ? (
                     <TextFormatToolbar
                         node={data}
                         theme={theme}
@@ -716,76 +714,12 @@ const nodeContentRenderers = {
     [CanvasNodeType.Video]: VideoNodeContent,
     [CanvasNodeType.Audio]: AudioNodeContent,
     [CanvasNodeType.Group]: GroupContent,
-    [CanvasNodeType.Annotation]: TextContent,
-    [CanvasNodeType.Whiteboard]: WhiteboardContent,
-    [CanvasNodeType.WebPreview]: WebPreviewContent,
-    [CanvasNodeType.Collage]: CollageContent,
-    [CanvasNodeType.Debug]: DebugContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
-
-function WhiteboardContent(props: NodeContentRendererProps) {
-    return <CanvasNodeWhiteboardContent node={props.node} theme={props.theme} onContentChange={props.onContentChange} />;
-}
-
-function WebPreviewContent(props: NodeContentRendererProps) {
-    return <CanvasNodeWebPreviewContent node={props.node} theme={props.theme} onContentChange={props.onContentChange} />;
-}
-
-function CollageContent({ theme, onNodeAction }: NodeContentRendererProps) {
-    return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-5 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
-            <span className="grid size-11 place-items-center rounded-xl" style={{ background: theme.toolbar.activeBg, color: theme.node.placeholder }}>
-                <Grid2x2 className="size-5" />
-            </span>
-            <div className="text-xs leading-5 opacity-70">连接至少两张图片节点后，按宫格拼成一张新图片</div>
-            <button
-                type="button"
-                className="rounded-lg px-3 py-1.5 text-xs transition"
-                style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onNodeAction?.("image-collage");
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-            >
-                拼接上游图片
-            </button>
-        </div>
-    );
-}
 
 function GroupContent({ node, isSelected, onGroupAction }: NodeContentRendererProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     // 对齐上游：组内仅显示左上角标题（由 GroupTitleEditor 渲染），无操作浮条（避免与标题重叠）
     return <div className="relative h-full w-full rounded-[inherit]" />;
-}
-
-function DebugContent({ node }: NodeContentRendererProps) {
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const connections = node.metadata?.debugConnections?.length
-        ? node.metadata.debugConnections
-        : undefined;
-    return (
-        <div
-            className="flex h-full w-full flex-col gap-1.5 overflow-hidden px-3 py-2 font-mono leading-4"
-            style={{ background: theme.node.fill, color: theme.node.placeholder }}
-        >
-            <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: theme.node.text }}>
-                <Bug className="size-3" />
-                <span>调试节点</span>
-            </div>
-            <div className="min-w-0 truncate text-[10px]">{node.id}</div>
-            {node.metadata?.generationJobId ? (
-                <div className="truncate text-[10px]">job: {node.metadata.generationJobId}</div>
-            ) : null}
-            {node.metadata?.status ? (
-                <div className="truncate text-[10px]">status: {node.metadata.status}</div>
-            ) : null}
-            {connections ? <div className="truncate text-[10px]">conn: {connections.length}</div> : null}
-            <div className="mt-auto truncate text-[10px] opacity-60">检查节点数据与连线</div>
-        </div>
-    );
 }
 
 function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
@@ -933,30 +867,6 @@ function TextContent({ node, theme, isEditingContent, textareaRef, mentionRefere
 
     return (
         <div data-node-text-editable={isEditingContent ? "true" : undefined} className="flex h-full w-full flex-col overflow-hidden pt-8">
-            {node.metadata?.commentNote ? (
-                <div
-                    className="flex shrink-0 items-center gap-1.5 px-4 py-1.5"
-                    style={{ background: theme.toolbar.itemHover, color: theme.node.text }}
-                    data-canvas-no-zoom
-                >
-                    <MessageCircle className="size-3 shrink-0 opacity-70" />
-                    <span className="min-w-0 flex-1 truncate text-[11px]">{node.metadata.commentNote.label || "评论"}</span>
-                    <span
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px]"
-                        style={{
-                            background: node.metadata.commentNote.resolved ? "rgba(0,170,100,.18)" : "rgba(230,160,0,.18)",
-                            color: node.metadata.commentNote.resolved ? "rgb(0,190,110)" : "rgb(230,170,0)",
-                        }}
-                    >
-                        {node.metadata.commentNote.resolved ? "已解决" : "待解决"}
-                    </span>
-                </div>
-            ) : null}
-            {node.metadata?.commentNote?.quoteText ? (
-                <div className="shrink-0 border-l-2 px-4 py-1 text-[11px] italic opacity-60" style={{ borderColor: theme.ui.accent, color: theme.node.muted }} data-canvas-no-zoom>
-                    “{node.metadata.commentNote.quoteText}”
-                </div>
-            ) : null}
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -1118,7 +1028,7 @@ function NodeTitleBadge({
     outputCount: number;
     onTitleChange: (nodeId: string, title: string) => void;
 }) {
-    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : node.type === CanvasNodeType.Annotation ? StickyNote : node.type === CanvasNodeType.Whiteboard ? PenTool : node.type === CanvasNodeType.WebPreview ? Globe : node.type === CanvasNodeType.Collage ? Grid2x2 : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : node.type === CanvasNodeType.Debug ? Bug : FileText;
+    const Icon = node.type === CanvasNodeType.Image ? ImageIcon : node.type === CanvasNodeType.Video ? Video : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Clip ? Clapperboard : isGenerationConfigNode(node.type) ? Workflow : node.type === CanvasNodeType.Group ? Layers3 : FileText;
     const fallbackTitle = "未命名节点";
     const imageResolution = node.type === CanvasNodeType.Image && node.metadata?.naturalWidth && node.metadata?.naturalHeight
         ? `${Math.round(node.metadata.naturalWidth)} × ${Math.round(node.metadata.naturalHeight)}`

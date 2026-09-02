@@ -2,13 +2,11 @@
  * 画布「Model Gate」纯逻辑：把后端返回的模型能力标记、前端覆盖开关与默认值
  * 合并成一个每功能可判定是否可用的结果集。纯函数，便于单测。
  *
- * 背景：本轮不接入后端新 AI 模型适配器，因此依赖新模型的功能（人物替换/视频复刻/
- * 声音工作室/绿幕抠像/补帧+高清/RunningHub）先做成结构完整的前端，并在此判定可用性；
+ * 背景：本轮不接入后端新 AI 模型适配器，因此依赖新模型的功能（声音工作室/
+ * 绿幕抠像/补帧+高清/RunningHub）先做成结构完整的前端，并在此判定可用性；
  * 后端能力缺失时显示「模型未接入 · 请联系管理员」占位。
  */
 export type CapabilityKey =
-    | "person_replace"
-    | "video_replicate"
     | "asr"
     | "voice_clone"
     | "video_keying"
@@ -22,8 +20,6 @@ export type FeatureCapabilityFlags = Partial<Record<CapabilityKey, boolean>>;
 
 /** 每个功能 key 的 UI 文案（描述用于创建菜单 / 悬浮工具栏 / 占位提示）。 */
 export const FEATURE_CAPABILITY_META: Record<CapabilityKey, { label: string; description: string }> = {
-    person_replace: { label: "人物替换", description: "人脸/身体替换工作室（先导帧/角色参考、语音库、分镜）" },
-    video_replicate: { label: "视频复刻", description: "参考视频的提示词分析与生成" },
     asr: { label: "语音识别 (ASR)", description: "音频转录文字" },
     voice_clone: { label: "声音克隆", description: "克隆/合成语音，用于配音与旁白" },
     video_keying: { label: "绿幕抠像", description: "视频绿幕/色键抠像" },
@@ -35,8 +31,6 @@ export const FEATURE_CAPABILITY_META: Record<CapabilityKey, { label: string; des
 };
 
 export const CAPABILITY_KEYS: CapabilityKey[] = [
-    "person_replace",
-    "video_replicate",
     "asr",
     "voice_clone",
     "video_keying",
@@ -49,8 +43,6 @@ export const CAPABILITY_KEYS: CapabilityKey[] = [
 
 /** 默认：本轮均未接入后端模型，全部不可用。 */
 export const DEFAULT_FEATURE_CAPABILITY_FLAGS: Record<CapabilityKey, boolean> = {
-    person_replace: false,
-    video_replicate: false,
     asr: false,
     voice_clone: false,
     video_keying: false,

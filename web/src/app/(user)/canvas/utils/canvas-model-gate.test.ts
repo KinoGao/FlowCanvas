@@ -9,17 +9,17 @@ import {
 } from "./canvas-model-gate";
 
 test("resolves to default (unavailable) when neither backend nor frontend provides a flag", () => {
-    const result = resolveFeatureAvailability(undefined, undefined, "person_replace");
+    const result = resolveFeatureAvailability(undefined, undefined, "asr");
     assert.deepEqual(result, { available: false, source: "default" });
 });
 
 test("backend flag takes effect when no frontend override exists", () => {
-    const result = resolveFeatureAvailability({ person_replace: true }, undefined, "person_replace");
+    const result = resolveFeatureAvailability({ asr: true }, undefined, "asr");
     assert.deepEqual(result, { available: true, source: "backend" });
 });
 
 test("frontend override wins over backend flag", () => {
-    const result = resolveFeatureAvailability({ person_replace: true }, { person_replace: false }, "person_replace");
+    const result = resolveFeatureAvailability({ asr: true }, { asr: false }, "asr");
     assert.deepEqual(result, { available: false, source: "frontend" });
 });
 
@@ -34,5 +34,5 @@ test("merge combines backend and frontend per-key", () => {
     const merged = mergeFeatureCapabilities({ asr: true }, { asr: false, video_keying: true });
     assert.equal(merged["asr"], false); // frontend overrides
     assert.equal(merged["video_keying"], true); // frontend only
-    assert.equal(merged["person_replace"], false); // default
+    assert.equal(merged["matting"], false); // default
 });

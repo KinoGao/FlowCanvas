@@ -1915,12 +1915,11 @@ function getNodeLeaferFill(
 
 function getNodeLeaferText(node: CanvasNodeData) {
     if (node.metadata?.status === "loading" || node.metadata?.status === "error") return "";
-    if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Annotation) return node.metadata?.content?.trim() || "";
+    if (node.type === CanvasNodeType.Text) return node.metadata?.content?.trim() || "";
     // ComfyUI / Config / Audio / Clip 缩小时只显示节点标题，不显示提示词（提示词只存在于 Composer，避免遮挡画布）。
     if (node.type === CanvasNodeType.Audio || node.type === CanvasNodeType.Config || node.type === CanvasNodeType.ComfyUI || node.type === CanvasNodeType.Clip) {
         return node.title.trim();
     }
-    if (node.type === CanvasNodeType.Whiteboard || node.type === CanvasNodeType.WebPreview || node.type === CanvasNodeType.Collage) return node.title.trim();
     return "";
 }
 

@@ -146,7 +146,6 @@ export function CanvasNodeHoverToolbar({
     const hasVideo = isVideo && hasStoredMedia;
     const hasAudio = isAudio && hasStoredMedia;
     const isText = currentNode.type === CanvasNodeType.Text;
-    const isAnnotation = currentNode.type === CanvasNodeType.Annotation;
     const isConfig = currentNode.type === CanvasNodeType.Config;
     const isScriptTool = isCanvasScriptNode(currentNode);
     const isComfyUi = currentNode.type === CanvasNodeType.ComfyUI;
@@ -187,7 +186,7 @@ export function CanvasNodeHoverToolbar({
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
         ...(hasAudio ? [{ id: "editAudio", title: "裁剪 / 变速音频", label: "音频编辑", icon: <Scissors className="size-4" />, onClick: () => onEditAudio(node) }] : []),
         ...(canOpenDialog && !isScriptTool ? [{ id: "edit", title: "编辑", label: "编辑", icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
-        ...((isText || isAnnotation) && !isScriptTool ? [{ id: "editText", title: "编辑内容", label: "编辑", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
+        ...(isText && !isScriptTool ? [{ id: "editText", title: "编辑内容", label: "编辑", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText || isScriptTool ? [{ id: "quickStoryboard", title: "快捷分镜", label: "快捷分镜", icon: <LayoutGrid className="size-4" />, onClick: () => { onKeep(currentNode.id); setStoryboardMenuOpen((value) => !value); } }] : []),
         ...(isConfig ? [{ id: "config", title: "打开生成配置", label: "配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isComfyUi ? [{ id: "comfyui", title: "打开 ComfyUI", label: "ComfyUI", icon: <Workflow className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
@@ -379,7 +378,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                     {view === "info" ? (
                         <div className="thin-scrollbar h-full space-y-3 overflow-auto pr-1">
                             <InfoRow label="ID" value={node.id} />
-                            <InfoRow label="类型" value={node.type === CanvasNodeType.Text ? "文本" : node.type === CanvasNodeType.Annotation ? "注释" : node.type === CanvasNodeType.Whiteboard ? "白板" : node.type === CanvasNodeType.WebPreview ? "网页预览" : node.type === CanvasNodeType.Collage ? "拼图" : node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : node.type === CanvasNodeType.Config ? "生成配置" : node.type === CanvasNodeType.ComfyUI ? "ComfyUI" : "节点"} />
+                            <InfoRow label="类型" value={node.type === CanvasNodeType.Text ? "文本" : node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : node.type === CanvasNodeType.Config ? "生成配置" : node.type === CanvasNodeType.ComfyUI ? "ComfyUI" : "节点"} />
                             <InfoRow label="尺寸" value={`${Math.round(node.width)} x ${Math.round(node.height)}`} />
                             <InfoRow label="位置" value={`${Math.round(node.position.x)}, ${Math.round(node.position.y)}`} />
                             <InfoRow label="状态" value={node.metadata?.status || "idle"} />
