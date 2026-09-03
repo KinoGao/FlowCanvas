@@ -13,7 +13,7 @@ public class PlatformConfigEntity {
     @Id
     private Long id = 1L;
 
-    @Column(columnDefinition = "TEXT", nullable = false)
+    @Column(columnDefinition = "LONGTEXT", nullable = false)
     private String data = "{}";
 
     @Column(name = "updated_at", nullable = false)

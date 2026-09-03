@@ -17,10 +17,10 @@ public class CanvasTemplate {
     @Column(nullable = false)
     private String name;
 
-    @Column(name = "nodes_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "nodes_json", columnDefinition = "LONGTEXT", nullable = false)
     private String nodesJson;
 
-    @Column(name = "connections_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "connections_json", columnDefinition = "LONGTEXT", nullable = false)
     private String connectionsJson;
 
     @Column(name = "created_at", nullable = false)

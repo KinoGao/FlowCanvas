@@ -21,13 +21,13 @@ public class AgentRun {
     @Column(nullable = false)
     private String title;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "LONGTEXT")
     private String requirement;
 
-    @Column(name = "plan_json", columnDefinition = "TEXT")
+    @Column(name = "plan_json", columnDefinition = "LONGTEXT")
     private String planJson;
 
-    @Column(name = "tasks_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "tasks_json", columnDefinition = "LONGTEXT", nullable = false)
     private String tasksJson;
 
     /** RUNNING / PAUSED / COMPLETED / FAILED / CANCELLED */

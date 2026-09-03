@@ -14,7 +14,7 @@ public class UserAsset {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "asset_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "asset_json", columnDefinition = "LONGTEXT", nullable = false)
     private String assetJson;
 
     @Column(name = "updated_at", nullable = false)

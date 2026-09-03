@@ -53,7 +53,7 @@ public class ModelRequestLog {
     private int statusCode;
 
     /** 失败 / 超时的简要原因（来自异常根因，不包含密钥与内网地址）。 */
-    @Column(name = "error_message", columnDefinition = "TEXT")
+    @Column(name = "error_message", columnDefinition = "LONGTEXT")
     private String errorMessage;
 
     /** 本次请求对应的画布任务 key（jobKey，可为空）。 */

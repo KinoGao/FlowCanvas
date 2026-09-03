@@ -1,11 +1,11 @@
 ---
 title: 后端数据库结构
-description: 后端配置同步服务的 SQLite 数据库表结构说明
+description: 后端配置同步服务的 MySQL 数据库表结构说明
 ---
 
 # 后端数据库结构
 
-后端使用 SQLite 作为存储引擎，由 Spring Data JPA + Hibernate 自动迁移（`ddl-auto: update`）。数据库文件路径由环境变量 `DB_PATH` 指定，默认为 `./data/app.db`。
+后端使用 MySQL 作为存储引擎，由 Spring Data JPA + Hibernate 自动迁移（`ddl-auto: update`）。默认连接 `127.0.0.1:3306` 的 `flowcanvas` 库，可用环境变量 `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` 覆盖；连接串带 `createDatabaseIfNotExist=true`，库不存在时自动创建。
 
 ## 表结构概述
 

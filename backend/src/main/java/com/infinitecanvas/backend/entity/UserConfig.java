@@ -14,7 +14,7 @@ public class UserConfig {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "LONGTEXT")
     private String data;
 
     @Column(name = "updated_at", nullable = false)

@@ -26,7 +26,7 @@ public class UserGenerationLog {
     @Column(nullable = false, length = 16)
     private String kind;
 
-    @Column(name = "log_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "log_json", columnDefinition = "LONGTEXT", nullable = false)
     private String logJson;
 
     @Column(name = "created_at", nullable = false)

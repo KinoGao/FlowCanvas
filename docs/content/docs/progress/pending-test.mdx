@@ -3,6 +3,12 @@ title: 待测试
 description: 当前版本已实现但仍需人工验证的变更项
 ---
 
+## 后端存储迁移 MySQL
+
+- 后端数据库从 SQLite 切换为本地 MySQL：新增 `mysql-connector-j` 驱动、`MySQLDialect`，`ddl-auto: update` 自动建表；默认连接 `127.0.0.1:3306/flowcanvas`，`DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` 可覆盖，连接串自动建库。画布项目 JSON、生成响应体、模板与 Agent Run 等 14 处大字段由 `TEXT` / `BLOB` 升级为 `LONGTEXT` / `LONGBLOB`，规避 MySQL 单列 64KB 上限。
+- 已验证（Windows 本地 MySQL 8.0.13 独立实例）：启动自动建库建表（12 张表）、注册 / 登录会话正常落库、200KB 画布项目 JSON 写入并完整回读；前端 vite 经 `/api` 代理访问后端正常。
+- 需要确认：按正常使用路径跑通登录 → 画布新建 / 保存 / 刷新 → 素材上传 → 生成任务记录均落 MySQL；重启后端数据保留；Docker / Render 等部署环境需另行提供 MySQL 实例（原 SQLite 文件模式不再可用）。
+
 ## 画布连接线样式
 
 - 画布外观面板新增「连接线样式」：曲线（保持原贝塞尔效果）、直角（横纵分段折线）、直线（两点直线），当前选择按画布项目保存到后端账号工作区，刷新或切换画布后保留；节点拖拽、临时拉线与正式连线同步使用所选样式。

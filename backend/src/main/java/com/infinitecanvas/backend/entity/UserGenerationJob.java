@@ -32,16 +32,15 @@ public class UserGenerationJob {
     @Column(name = "response_status")
     private Integer responseStatus;
 
-    @Column(name = "response_headers_json", columnDefinition = "TEXT")
+    @Column(name = "response_headers_json", columnDefinition = "LONGTEXT")
     private String responseHeadersJson;
 
-    // SQLite's JDBC driver does not implement ResultSet#getBlob. Keep the
-    // payload binary, but force Hibernate to use the byte[] VARBINARY path.
+    // 二进制响应体：固定走 byte[] VARBINARY 路径，避免方言差异导致的 BLOB 流读取问题。
     @JdbcTypeCode(SqlTypes.VARBINARY)
-    @Column(name = "response_body", columnDefinition = "BLOB")
+    @Column(name = "response_body", columnDefinition = "LONGBLOB")
     private byte[] responseBody;
 
-    @Column(name = "error_message", columnDefinition = "TEXT")
+    @Column(name = "error_message", columnDefinition = "LONGTEXT")
     private String errorMessage;
 
     @Column(name = "created_at", nullable = false)

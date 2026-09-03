@@ -84,15 +84,16 @@
 | 框架 | Spring Boot | 3.4.3 |
 | Web | `spring-boot-starter-web` + `spring-boot-starter-webflux` | — |
 | 数据 | `spring-boot-starter-data-jpa` + Hibernate 6 | — |
-| 方言 | `hibernate-community-dialects` | — |
-| 数据库 | SQLite（`org.xerial:sqlite-jdbc`） | 3.47 |
+| 数据库 | MySQL（`com.mysql:mysql-connector-j`） | 8.0+ |
 | 运行时 | Java | 21 |
 | 构建 | Maven（`spring-boot-maven-plugin`） | — |
 | 包结构 | `controller / service / repository / entity / dto / config / middleware` | — |
 
-数据库文件位置：`${DB_PATH:./data/app.db}`；端口：`${PORT:9801}`；鉴权码：`${AUTH_CODE}`。
+数据库连接默认 `127.0.0.1:3306/flowcanvas`，可用 `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` 环境变量覆盖（自动建库）；端口：`${PORT:9801}`；鉴权码：`${AUTH_CODE}`。
 
-> **WSL 开发注意**：SQLite WAL 模式依赖共享内存映射，`/mnt/*`（DrvFs/9P）上不可靠且易被 Windows 进程锁死，开发环境务必将 `DB_PATH` 指向 WSL 原生路径（如 `/home/gn/flowcanvas-data/app.db`），`scripts/dev.sh` 已内置该默认值。同时系统 `java` 仅为 JRE，后端编译/运行需完整 JDK（`JAVA_HOME=/home/gn/jdk21-full`，脚本已内置）。
+> **数据库大字段**：JSON / 二进制大列必须用 `LONGTEXT` / `LONGBLOB`（实体 `columnDefinition`），不要写 `TEXT` / `BLOB`——MySQL 单列 64KB 上限会截断画布项目 JSON 与生成响应体。
+>
+> **WSL 开发注意**：系统 `java` 仅为 JRE，后端编译/运行需完整 JDK（`JAVA_HOME=/home/gn/jdk21-full`，`scripts/dev.sh` 已内置）；WSL 侧启动后端时需让 `DB_HOST` 指向可达的 MySQL 实例。
 
 ### 2.3 本地代理（`canvas-agent/`，独立 npm 包 `@basketikun/canvas-agent`）
 

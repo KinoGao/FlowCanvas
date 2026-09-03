@@ -17,7 +17,7 @@ public class CanvasProjectEntity {
     @Column(nullable = false)
     private String title;
 
-    @Column(name = "project_json", columnDefinition = "TEXT", nullable = false)
+    @Column(name = "project_json", columnDefinition = "LONGTEXT", nullable = false)
     private String projectJson;
 
     @Column(name = "created_at", nullable = false)

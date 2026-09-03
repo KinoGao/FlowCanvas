@@ -5,10 +5,12 @@ spring:
       - optional:file:./backend/backend-config.yml
       - optional:file:./data/backend-config.yml
   datasource:
-    url: jdbc:sqlite:${DB_PATH:./data/app.db}?busy_timeout=5000&journal_mode=WAL
-    driver-class-name: org.sqlite.JDBC
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:flowcanvas}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
-    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
       ddl-auto: update
     show-sql: false
