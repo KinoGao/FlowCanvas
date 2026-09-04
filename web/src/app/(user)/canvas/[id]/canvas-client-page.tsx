@@ -6355,9 +6355,14 @@ function LeaferCanvasPage() {
             }
             if (node.metadata?.canvasTool === "panorama360") {
                 setDialogNodeId(null);
-                setPanoramaStudioNodeId(node.id);
                 setEditingNodeId(null);
-                usePanoramaStore.getState().openForNode(node.id);
+                // 已生成全景图才进工作室预览；空节点走正常生图 Composer（提示词 / 尺寸已预置）
+                if (node.metadata?.storageKey || node.metadata?.content) {
+                    setPanoramaStudioNodeId(node.id);
+                    usePanoramaStore.getState().openForNode(node.id);
+                } else {
+                    setDialogNodeId(node.id);
+                }
                 return;
             }
             if (isCanvasScriptNode(node)) {
@@ -6395,7 +6400,7 @@ function LeaferCanvasPage() {
                 previous.lastAt = now;
                 if (count === 2) {
                     resetImageTapGesture();
-                    // 双击进入全景工作室（openNodeComposer 对此 tool-mode 路由到 PanoramaStudio）
+                    // 双击：已生成全景图进入全景工作室，空节点打开生图 Composer
                     const targetNode = nodeByIdRef.current.get(nodeId);
                     if (targetNode) openNodeComposer(targetNode);
                     return;
