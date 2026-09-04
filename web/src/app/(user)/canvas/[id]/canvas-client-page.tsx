@@ -321,29 +321,14 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
 
     let changed = false;
     const next = nodes.map((node) => {
-        if (node.type === CanvasNodeType.Group) {
-            const currentChildIds = node.metadata?.groupChildIds || [];
-            const nextChildIds = childIdsByGroupId.get(node.id) || [];
-            if (currentChildIds.length === nextChildIds.length && currentChildIds.every((id, index) => id === nextChildIds[index])) return node;
-            changed = true;
-            return { ...node, metadata: { ...node.metadata, groupChildIds: nextChildIds } };
-        }
-        // pad 吸附（对齐上游 snapNodesIntoGroup）：归组后位置越出组内边距的节点修正到 pad 区内；组自身被移动/缩放时子节点跟随，不受影响
-        const ownerId = (Array.from(childIdsByGroupId.entries()).find(([, ids]) => ids.includes(node.id)) || [])[0] as string | undefined;
-        if (!ownerId) return node;
-        const group = nodes.find((item) => item.id === ownerId);
-        if (!group) return node;
-        const pad = 24;
-        const left = group.position.x + pad;
-        const top = group.position.y + pad;
-        const right = group.position.x + group.width - pad;
-        const bottom = group.position.y + group.height - pad;
-        const dx = node.position.x < left ? left - node.position.x : node.position.x + node.width > right ? right - node.position.x - node.width : 0;
-        const dy = node.position.y < top ? top - node.position.y : node.position.y + node.height > bottom ? bottom - node.position.y - node.height : 0;
-        if (!dx && !dy) return node;
+        if (node.type !== CanvasNodeType.Group) return node;
+        const currentChildIds = node.metadata?.groupChildIds || [];
+        const nextChildIds = childIdsByGroupId.get(node.id) || [];
+        if (currentChildIds.length === nextChildIds.length && currentChildIds.every((id, index) => id === nextChildIds[index])) return node;
         changed = true;
-        return { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } };
+        return { ...node, metadata: { ...node.metadata, groupChildIds: nextChildIds } };
     });
+    // 成员关系纯几何判定：拉伸组包裹节点即加入、收缩使节点中心越界即移除；节点位置始终不变，不做任何吸附或挤压。
     return changed ? next : nodes;
 }
 
