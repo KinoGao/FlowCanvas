@@ -162,7 +162,13 @@ export function LeaferCanvas({
     const readyFrameRef = useRef<number | null>(null);
     const readyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyReportedRef = useRef(false);
-    const [hoveredConnectionId, setHoveredConnectionId] = useState<string | null>(null);
+    /** 连线剪刀：connectionHover 跟踪悬停连线与指针位置，悬停 0.5s 后在指针处显示剪刀按钮 */
+    const [connectionHover, setConnectionHover] = useState<{ id: string; x: number; y: number } | null>(null);
+    const [connectionScissors, setConnectionScissors] = useState<{ id: string; x: number; y: number } | null>(null);
+    const connectionHoverRef = useRef<{ id: string; x: number; y: number } | null>(null);
+    const connectionScissorsIdRef = useRef<string | null>(null);
+    const connectionPointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const connectionShowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hoveredConnectionHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onReadyRef = useRef(onReady);
     onReadyRef.current = onReady;
@@ -381,15 +387,49 @@ export function LeaferCanvas({
             clearTimeout(hoveredConnectionHideTimerRef.current);
             hoveredConnectionHideTimerRef.current = null;
         }
-        setHoveredConnectionId(connectionId);
+        connectionHoverRef.current = { id: connectionId, ...connectionPointerRef.current };
+        setConnectionHover(connectionHoverRef.current);
+        // 剪刀已在本连线上显示时跟随指针；否则悬停满 0.5s 才出现
+        if (connectionScissorsIdRef.current === connectionId) {
+            setConnectionScissors({ id: connectionId, ...connectionPointerRef.current });
+            return;
+        }
+        if (connectionShowTimerRef.current) clearTimeout(connectionShowTimerRef.current);
+        connectionShowTimerRef.current = setTimeout(() => {
+            connectionShowTimerRef.current = null;
+            const hover = connectionHoverRef.current;
+            if (!hover || hover.id !== connectionId) return;
+            connectionScissorsIdRef.current = connectionId;
+            setConnectionScissors({ id: connectionId, x: hover.x, y: hover.y });
+        }, 500);
     }, []);
 
     const scheduleHideConnectionDelete = useCallback((connectionId: string) => {
-        if (hoveredConnectionHideTimerRef.current) clearTimeout(hoveredConnectionHideTimerRef.current);
         hoveredConnectionHideTimerRef.current = setTimeout(() => {
             hoveredConnectionHideTimerRef.current = null;
-            setHoveredConnectionId((current) => (current === connectionId ? null : current));
+            setConnectionHover((current) => {
+                const next = current?.id === connectionId ? null : current;
+                connectionHoverRef.current = next;
+                return next;
+            });
+            if (connectionScissorsIdRef.current === connectionId) {
+                connectionScissorsIdRef.current = null;
+                setConnectionScissors(null);
+            }
         }, 160);
+    }, []);
+
+    /** 悬停连线期间持续跟踪指针（容器级 capture），剪刀未出现时只刷新位置不打断 0.5s 计时 */
+    const trackConnectionPointer = useCallback((event: React.PointerEvent) => {
+        const bounds = containerRef.current?.getBoundingClientRect();
+        if (!bounds) return;
+        connectionPointerRef.current = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+        const hover = connectionHoverRef.current;
+        if (!hover) return;
+        const next = { id: hover.id, ...connectionPointerRef.current };
+        connectionHoverRef.current = next;
+        setConnectionHover(next);
+        if (connectionScissorsIdRef.current === hover.id) setConnectionScissors(next);
     }, []);
 
     const getNodeElement = useCallback((nodeId: string) => {
@@ -1243,6 +1283,7 @@ export function LeaferCanvas({
 
     useEffect(() => () => {
         if (hoveredConnectionHideTimerRef.current) clearTimeout(hoveredConnectionHideTimerRef.current);
+        if (connectionShowTimerRef.current) clearTimeout(connectionShowTimerRef.current);
     }, []);
 
     useEffect(() => {
@@ -1709,20 +1750,6 @@ export function LeaferCanvas({
     }) as React.CSSProperties, [viewport.x, viewport.y, viewport.k]);
 
     const cursor = isSpacePressed ? "grab" : "default";
-    const hoveredConnectionDeletePosition = useMemo(() => {
-        if (!hoveredConnectionId) return null;
-        const connection = connections.find((item) => item.id === hoveredConnectionId);
-        if (!connection) return null;
-        const points = getConnectionPoints(connection, new Map(nodes.map((node) => [node.id, node])));
-        if (!points) return null;
-        const from = canvasToScreen(points.from.x, points.from.y, viewport);
-        const to = canvasToScreen(points.to.x, points.to.y, viewport);
-        return {
-            x: (from.x + to.x) / 2,
-            // 按钮稍微偏离连线，避免渲染到鼠标正下方后触发连线 LEAVE，导致悬停按钮闪烁。
-            y: Math.max(18, (from.y + to.y) / 2 - 18),
-        };
-    }, [connections, hoveredConnectionId, nodes, viewport]);
 
     return (
         <div
@@ -1731,6 +1758,7 @@ export function LeaferCanvas({
             style={{ backgroundColor: theme.canvas.background, cursor, touchAction: "none" }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
+            onPointerMoveCapture={trackConnectionPointer}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerCancel}
             onContextMenu={handleContextMenu}
@@ -1747,15 +1775,16 @@ export function LeaferCanvas({
             <div data-leafer-editor-layer className="absolute inset-0">
                 <div ref={leaferContainerRef} className="h-full w-full" />
             </div>
-            {hoveredConnectionDeletePosition ? (
+            {connectionScissors ? (
                 <button
                     type="button"
                     data-canvas-no-zoom
                     aria-label="删除连线"
                     className="pointer-events-auto absolute z-[60] grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md border text-sm leading-none shadow-md backdrop-blur"
                     style={{
-                        left: hoveredConnectionDeletePosition.x,
-                        top: hoveredConnectionDeletePosition.y,
+                        left: connectionScissors.x,
+                        // 略高于悬停点：避免按钮渲染到指针正下方吞掉指针事件导致连线 LEAVE 闪烁
+                        top: Math.max(14, connectionScissors.y - 16),
                         background: theme.ui.materialElevated,
                         borderColor: theme.ui.hairline,
                         color: theme.ui.danger,
@@ -1768,14 +1797,23 @@ export function LeaferCanvas({
                             hoveredConnectionHideTimerRef.current = null;
                         }
                     }}
-                    onPointerLeave={() => hoveredConnectionId && scheduleHideConnectionDelete(hoveredConnectionId)}
+                    onPointerLeave={() => connectionScissors && scheduleHideConnectionDelete(connectionScissors.id)}
                     onClick={(event) => {
                         event.stopPropagation();
-                        const connectionId = hoveredConnectionId;
-                        if (connectionId) {
-                            callbacksRef.current.onEdgeDelete?.(connectionId);
-                            setHoveredConnectionId(null);
+                        const connectionId = connectionScissors.id;
+                        if (connectionShowTimerRef.current) {
+                            clearTimeout(connectionShowTimerRef.current);
+                            connectionShowTimerRef.current = null;
                         }
+                        if (hoveredConnectionHideTimerRef.current) {
+                            clearTimeout(hoveredConnectionHideTimerRef.current);
+                            hoveredConnectionHideTimerRef.current = null;
+                        }
+                        callbacksRef.current.onEdgeDelete?.(connectionId);
+                        connectionScissorsIdRef.current = null;
+                        connectionHoverRef.current = null;
+                        setConnectionScissors(null);
+                        setConnectionHover(null);
                     }}
                 >
                     ✂
