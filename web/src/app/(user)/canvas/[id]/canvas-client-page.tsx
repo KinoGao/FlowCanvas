@@ -321,18 +321,15 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
 
     let changed = false;
     const next = nodes.map((node) => {
-        if (node.type !== CanvasNodeType.Group) return node;
-        const currentChildIds = node.metadata?.groupChildIds || [];
-        const nextChildIds = childIdsByGroupId.get(node.id) || [];
-        if (currentChildIds.length === nextChildIds.length && currentChildIds.every((id, index) => id === nextChildIds[index])) return node;
-        changed = true;
-        return { ...node, metadata: { ...node.metadata, groupChildIds: nextChildIds } };
-    });
-    // pad 吸附（对齐上游 snapNodesIntoGroup）：归组后位置越出组内边距的节点修正到 pad 区内；组自身被移动/缩放时子节点跟随，不受影响
-    const snapPass = nodes.map((node) => {
-        if (node.type === CanvasNodeType.Group) return node;
-        const children = childIdsByGroupId;
-        const ownerId = (Array.from(children.entries()).find(([, ids]) => ids.includes(node.id)) || [])[0] as string | undefined;
+        if (node.type === CanvasNodeType.Group) {
+            const currentChildIds = node.metadata?.groupChildIds || [];
+            const nextChildIds = childIdsByGroupId.get(node.id) || [];
+            if (currentChildIds.length === nextChildIds.length && currentChildIds.every((id, index) => id === nextChildIds[index])) return node;
+            changed = true;
+            return { ...node, metadata: { ...node.metadata, groupChildIds: nextChildIds } };
+        }
+        // pad 吸附（对齐上游 snapNodesIntoGroup）：归组后位置越出组内边距的节点修正到 pad 区内；组自身被移动/缩放时子节点跟随，不受影响
+        const ownerId = (Array.from(childIdsByGroupId.entries()).find(([, ids]) => ids.includes(node.id)) || [])[0] as string | undefined;
         if (!ownerId) return node;
         const group = nodes.find((item) => item.id === ownerId);
         if (!group) return node;
@@ -347,7 +344,7 @@ function reconcileGroupMembership(nodes: CanvasNodeData[]): CanvasNodeData[] {
         changed = true;
         return { ...node, position: { x: node.position.x + dx, y: node.position.y + dy } };
     });
-    return changed ? snapPass : nodes;
+    return changed ? next : nodes;
 }
 
 const VIDEO_NODE_MAX_WIDTH = VIDEO_NODE_SIZE_RANGE.maxWidth;
